@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
 from app.models.schemas import CourseRequest, CourseResponse
-from app.services.claude_service import generate_course
+from app.services.ai_service import generate_course
 from app.services.supabase_service import list_recent_courses, save_course
 from app.services.tour_api import tour_api_client
 

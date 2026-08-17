@@ -1,18 +1,27 @@
 """
-Claude API를 이용한 자연어 질의 파싱 및 무장애 여행 코스 생성
+Google Gemini API를 이용한 자연어 질의 파싱 및 무장애 여행 코스 생성
 
 - 사용자 질의(query_text) + 무장애 필터링된 관광지 목록 + 혼잡도 예측 데이터를
-  하나의 프롬프트로 구성해 Claude에게 코스 구성(JSON)을 요청합니다.
-- ANTHROPIC_API_KEY가 없으면 규칙 기반 목업 생성기로 대체되어,
+  하나의 프롬프트로 구성해 Gemini에게 코스 구성(JSON)을 요청합니다.
+- Gemini API는 Google AI Studio(https://aistudio.google.com/apikey)에서
+  신용카드 등록 없이 무료로 키를 발급받을 수 있고, 무료 사용량 한도 안에서는
+  과금되지 않습니다.
+- GEMINI_API_KEY가 없으면 규칙 기반 목업 생성기로 대체되어,
   키 발급 전에도 프론트엔드 개발이 막히지 않습니다.
 """
 import json
 import uuid
 
+import httpx
+
 from app.config import get_settings
 from app.models.schemas import Attraction, CourseRequest, CourseResponse, CourseStop
 
 settings = get_settings()
+
+GEMINI_ENDPOINT = (
+    "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+)
 
 SYSTEM_PROMPT = """당신은 관광약자(휠체어 이용자, 유모차 동반 가족, 고령자, 임산부)를 위한
 경기도 무장애 여행 코스를 설계하는 여행 플래너 AI입니다.
@@ -63,7 +72,7 @@ def _build_user_prompt(request: CourseRequest, candidates: list[Attraction]) -> 
 
 
 def _mock_generate(request: CourseRequest, candidates: list[Attraction]) -> dict:
-    """ANTHROPIC_API_KEY 미설정 시 사용하는 규칙 기반 대체 로직"""
+    """GEMINI_API_KEY 미설정 시 사용하는 규칙 기반 대체 로직"""
     stops = []
     for i, a in enumerate(candidates[: request.max_stops], start=1):
         low_hours = [c.hour for c in a.congestion_forecast if c.congestion_level == "low"]
@@ -83,17 +92,24 @@ def _mock_generate(request: CourseRequest, candidates: list[Attraction]) -> dict
     }
 
 
-async def _claude_generate(request: CourseRequest, candidates: list[Attraction]) -> dict:
-    from anthropic import AsyncAnthropic
+async def _gemini_generate(request: CourseRequest, candidates: list[Attraction]) -> dict:
+    url = GEMINI_ENDPOINT.format(model=settings.gemini_model)
+    payload = {
+        "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "contents": [
+            {"role": "user", "parts": [{"text": _build_user_prompt(request, candidates)}]}
+        ],
+        # JSON 형식으로만 응답하도록 강제 (Gemini의 구조화된 출력 기능)
+        "generationConfig": {"responseMimeType": "application/json"},
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            url, params={"key": settings.gemini_api_key}, json=payload
+        )
+        resp.raise_for_status()
+        data = resp.json()
 
-    client = AsyncAnthropic(api_key=settings.anthropic_api_key)
-    message = await client.messages.create(
-        model=settings.claude_model,
-        max_tokens=1500,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": _build_user_prompt(request, candidates)}],
-    )
-    text = "".join(block.text for block in message.content if block.type == "text")
+    text = data["candidates"][0]["content"]["parts"][0]["text"]
     return json.loads(text)
 
 
@@ -101,8 +117,8 @@ async def generate_course(request: CourseRequest, candidates: list[Attraction]) 
     if not candidates:
         raise ValueError("추천할 수 있는 무장애 관광지 후보가 없습니다.")
 
-    if settings.anthropic_api_key:
-        raw = await _claude_generate(request, candidates)
+    if settings.gemini_api_key:
+        raw = await _gemini_generate(request, candidates)
     else:
         raw = _mock_generate(request, candidates)
 

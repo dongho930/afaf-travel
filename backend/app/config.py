@@ -14,12 +14,14 @@ class Settings(BaseSettings):
     tour_api_key: str = os.getenv("TOUR_API_KEY", "")
     tour_api_base_url: str = "http://apis.data.go.kr/B551011"
 
-    # Claude API (AI 코스 생성)
-    anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
-    claude_model: str = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
+    # Gemini API (AI 코스 생성) — Google AI Studio에서 무료로 발급 가능 (신용카드 불필요)
+    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
     # 카카오맵 (모바일 앱에서 직접 사용하지만, 서버측 길찾기 API 호출 시 사용)
     kakao_rest_api_key: str = os.getenv("KAKAO_REST_API_KEY", "")
+    # 카카오맵 JavaScript 키 — 서버가 지도 페이지(/map-view)를 직접 내려줄 때도 필요합니다.
+    kakao_js_key: str = os.getenv("KAKAO_JS_KEY", "")
 
     # Supabase (PostgreSQL)
     supabase_url: str = os.getenv("SUPABASE_URL", "")
