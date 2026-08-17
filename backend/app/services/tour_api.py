@@ -103,6 +103,90 @@ class TourApiClient:
     def __init__(self) -> None:
         self.use_mock = settings.use_mock_data or not settings.tour_api_key
 
+    def _common_params(self, extra: dict) -> dict:
+        return {
+            "serviceKey": settings.tour_api_key,
+            "MobileOS": "ETC",
+            "MobileApp": "AccessibleTravelPlanner",
+            "_type": "json",
+            **extra,
+        }
+
+    @staticmethod
+    def _extract_items(payload: dict) -> list[dict]:
+        """TourAPI 표준 응답(response.header/body) 구조에서 item 목록만 뽑아냅니다."""
+        try:
+            body = payload["response"]["body"]
+        except (KeyError, TypeError):
+            return []
+        result_code = payload["response"].get("header", {}).get("resultCode")
+        if result_code not in (None, "0000", "00"):
+            msg = payload["response"].get("header", {}).get("resultMsg")
+            raise RuntimeError(f"TourAPI 오류 응답 (code={result_code}): {msg}")
+        items = body.get("items")
+        if not items:
+            return []
+        item = items.get("item", [])
+        # 결과가 1건이면 dict로, 여러 건이면 list로 오는 TourAPI 특성 보정
+        return item if isinstance(item, list) else [item]
+
+    @staticmethod
+    def _map_item_to_attraction(item: dict) -> Attraction:
+        """areaBasedList2 응답 필드(contentid, title, addr1, mapx/mapy 등)를 Attraction으로 매핑"""
+        # lclsSystm1/2 코드(예: AC, AC01)를 사람이 읽을 수 있는 카테고리로 간단 매핑
+        category_labels = {
+            "AC": "숙박", "AB": "인문(문화/예술/역사)", "AA": "자연",
+            "AD": "쇼핑", "AE": "음식", "AF": "레포츠",
+        }
+        category = category_labels.get(item.get("lclsSystm1", ""), item.get("lclsSystm1", ""))
+
+        return Attraction(
+            content_id=str(item.get("contentid", "")),
+            name=item.get("title", ""),
+            address=" ".join(filter(None, [item.get("addr1", ""), item.get("addr2", "")])).strip(),
+            # TourAPI는 mapx=경도(longitude), mapy=위도(latitude) 순서이므로 주의
+            longitude=float(item.get("mapx") or 0),
+            latitude=float(item.get("mapy") or 0),
+            category=category,
+            image_url=item.get("firstimage") or item.get("firstimage2") or None,
+            # 무장애(편의시설) 세부 정보는 별도 엔드포인트에서 채워집니다. 아래 _fetch_accessibility 참고.
+            accessibility=AccessibilityFeatures(),
+        )
+
+    async def _fetch_accessibility(self, client: httpx.AsyncClient, content_id: str) -> AccessibilityFeatures:
+        """
+        'detailWithTour2'(무장애정보조회) 오퍼레이션으로 편의시설 상세를 조회합니다.
+        실제 확인된 응답 필드: route(이동로/경사로 설명), wheelchair(휠체어 대여/접근),
+        elevator, restroom, stroller(유모차), lactationroom/babysparechair(가족 편의) 등
+        모두 boolean이 아닌 '설명 텍스트' 필드라, 텍스트가 비어있지 않으면 해당 편의시설이
+        있는 것으로 간주합니다.
+        """
+        try:
+            resp = await client.get(
+                f"{settings.tour_api_base_url}/KorWithService2/detailWithTour2",
+                params=self._common_params({"contentId": content_id}),
+            )
+            resp.raise_for_status()
+            items = self._extract_items(resp.json())
+            if not items:
+                return AccessibilityFeatures()
+            d = items[0]
+
+            def has_text(key: str) -> bool:
+                return bool((d.get(key) or "").strip())
+
+            return AccessibilityFeatures(
+                has_ramp=has_text("route"),
+                has_elevator=has_text("elevator"),
+                has_accessible_restroom=has_text("restroom"),
+                has_wheelchair_rental=has_text("wheelchair"),
+                has_stroller_accessible_path=has_text("stroller"),
+                has_rest_area=has_text("lactationroom") or has_text("babysparechair"),
+            )
+        except Exception:
+            # API 오류가 나도 전체 요청이 죽지 않게 안전하게 빈 값 처리
+            return AccessibilityFeatures()
+
     async def search_accessible_attractions(
         self, region: str, user_type: str, limit: int = 20
     ) -> list[Attraction]:
@@ -117,22 +201,43 @@ class TourApiClient:
                 results = [a for a in results if a.accessibility.has_rest_area]
             return results[:limit]
 
-        # 실제 API 연동 (서비스키 발급 후 사용)
-        async with httpx.AsyncClient(timeout=10) as client:
+        # 실제 API 연동 (법정동 시도 코드 기준 — 경기도=41, 서울=11)
+        ldong_regn_map = {"경기도": "41", "서울": "11"}
+        async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
-                f"{settings.tour_api_base_url}/KorWithService1/areaBasedList1",
-                params={
-                    "serviceKey": settings.tour_api_key,
-                    "MobileOS": "ETC",
-                    "MobileApp": "AccessibleTravelPlanner",
-                    "areaCode": "31",  # 경기도
-                    "_type": "json",
-                    "numOfRows": limit,
-                },
+                f"{settings.tour_api_base_url}/KorWithService2/areaBasedList2",
+                params=self._common_params(
+                    {
+                        "lDongRegnCd": ldong_regn_map.get(region, "41"),
+                        # lclsSystm1은 필수 파라미터입니다. 정확한 값을 몰라도 "Y"를 넣으면
+                        # 필터 없이 전체 목록이 반환되는 것을 확인했습니다 (2026-08-17 실측).
+                        "lclsSystm1": "Y",
+                        "numOfRows": limit,
+                        "pageNo": 1,
+                    }
+                ),
             )
             resp.raise_for_status()
-            # TODO: 실제 응답 스키마에 맞춰 Attraction으로 매핑
-            return list(_MOCK_ATTRACTIONS)[:limit]
+            raw_items = self._extract_items(resp.json())
+            attractions = [self._map_item_to_attraction(item) for item in raw_items]
+
+            # 각 관광지의 편의시설 상세 정보를 채웁니다 (동시에 여러 건 조회).
+            import asyncio
+
+            accessibility_list = await asyncio.gather(
+                *(self._fetch_accessibility(client, a.content_id) for a in attractions)
+            )
+            for attraction, accessibility in zip(attractions, accessibility_list):
+                attraction.accessibility = accessibility
+
+        results = attractions
+        if user_type == "wheelchair":
+            results = [a for a in results if a.accessibility.has_ramp] or attractions
+        elif user_type == "stroller":
+            results = [a for a in results if a.accessibility.has_stroller_accessible_path] or attractions
+        elif user_type in ("senior", "pregnant"):
+            results = [a for a in results if a.accessibility.has_rest_area] or attractions
+        return results[:limit]
 
     async def get_related_attractions(self, content_id: str) -> list[Attraction]:
         if self.use_mock:
