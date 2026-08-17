@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # Gemini API (AI 코스 생성) — Google AI Studio에서 무료로 발급 가능 (신용카드 불필요)
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
-    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
     # 카카오맵 (모바일 앱에서 직접 사용하지만, 서버측 길찾기 API 호출 시 사용)
     kakao_rest_api_key: str = os.getenv("KAKAO_REST_API_KEY", "")
