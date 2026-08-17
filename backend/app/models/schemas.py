@@ -1,0 +1,66 @@
+from enum import Enum
+from typing import Optional
+
+from pydantic import BaseModel, Field
+
+
+class UserType(str, Enum):
+    WHEELCHAIR = "wheelchair"          # 휠체어 이용자
+    STROLLER = "stroller"              # 유모차 동반 가족
+    SENIOR = "senior"                  # 고령자
+    PREGNANT = "pregnant"              # 임산부
+    GENERAL = "general"                # 일반 (참고용 기본값)
+
+
+class AccessibilityFeatures(BaseModel):
+    """무장애 여행 정보 API 응답을 매핑한 편의시설 정보"""
+    has_ramp: bool = False                  # 경사로
+    has_elevator: bool = False              # 엘리베이터
+    has_accessible_restroom: bool = False   # 장애인 화장실
+    has_wheelchair_rental: bool = False     # 휠체어 대여
+    has_stroller_accessible_path: bool = False  # 유모차 이동 가능 동선
+    has_rest_area: bool = False             # 임산부/고령자용 휴게 공간
+
+
+class CongestionForecast(BaseModel):
+    """관광지 집중률 방문자 추이 예측 정보"""
+    date: str
+    hour: int
+    congestion_level: str  # low / medium / high
+
+
+class Attraction(BaseModel):
+    content_id: str
+    name: str
+    address: str
+    latitude: float
+    longitude: float
+    category: str
+    image_url: Optional[str] = None
+    accessibility: AccessibilityFeatures = AccessibilityFeatures()
+    congestion_forecast: list[CongestionForecast] = Field(default_factory=list)
+    related_attraction_ids: list[str] = Field(default_factory=list)
+    nearby_medical_info: Optional[str] = None
+
+
+class CourseRequest(BaseModel):
+    query_text: str = Field(..., description="사용자의 자연어 질의 (STT 변환 결과 또는 직접 입력)")
+    user_type: UserType = UserType.GENERAL
+    region: str = "경기도"
+    preferred_date: Optional[str] = None
+    max_stops: int = Field(default=5, ge=1, le=10)
+
+
+class CourseStop(BaseModel):
+    order: int
+    attraction: Attraction
+    recommended_arrival_time: str
+    reason: str  # AI가 이 장소/시간을 추천한 이유 (혼잡도 회피, 접근성 등)
+
+
+class CourseResponse(BaseModel):
+    course_id: str
+    title: str
+    summary: str
+    stops: list[CourseStop]
+    generated_for: UserType

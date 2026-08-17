@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "name": "무장애 여행 플래너",
+    "slug": "afaf-travel-planner",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "afaftravel",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "kr.afaftravel.app",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "음성으로 여행 코스를 요청하기 위해 마이크 접근 권한이 필요합니다.",
+        "NSSpeechRecognitionUsageDescription": "음성 질의를 텍스트로 변환하기 위해 음성 인식 권한이 필요합니다.",
+        "NSLocationWhenInUseUsageDescription": "근처 무장애 관광지를 추천하기 위해 위치 권한이 필요합니다."
+      }
+    },
+    "android": {
+      "package": "kr.afaftravel.app",
+      "permissions": [
+        "RECORD_AUDIO",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-location",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "음성으로 여행 코스를 요청하기 위해 마이크 접근 권한이 필요합니다.",
+          "speechRecognitionPermission": "음성 질의를 텍스트로 변환하기 위해 음성 인식 권한이 필요합니다.",
+          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#2E7D5B"
+        }
+      ]
+    ],
+    "extra": {
+      "apiBaseUrl": "http://192.168.0.3:8000",
+      "kakaoJsKey": "85a79aa42ca8b4e79b45ec7135625d0c"
+    }
+  }
+}
