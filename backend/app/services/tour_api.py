@@ -209,9 +209,10 @@ class TourApiClient:
                 params=self._common_params(
                     {
                         "lDongRegnCd": ldong_regn_map.get(region, "41"),
-                        # lclsSystm1은 필수 파라미터입니다. 정확한 값을 몰라도 "Y"를 넣으면
-                        # 필터 없이 전체 목록이 반환되는 것을 확인했습니다 (2026-08-17 실측).
-                        "lclsSystm1": "Y",
+                        # lclsSystm1은 필수 파라미터입니다. 실측 결과 "AC"(숙박)만 데이터가
+                        # 있고, 다른 대분류(자연/인문 등)는 아직 이 데이터셋에 없는 것으로
+                        # 확인되었습니다 (2026-08-17 기준). 데이터가 채워지면 바꿔주세요.
+                        "lclsSystm1": "AC",
                         "numOfRows": limit,
                         "pageNo": 1,
                     }
