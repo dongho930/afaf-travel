@@ -25,7 +25,7 @@ import httpx
 
 from app.config import get_settings
 from app.models.schemas import AccessibilityFeatures, Attraction, CongestionForecast
-from app.services.sigungu_codes import find_area_signgu
+from app.services.sigungu_codes import find_area_signgu, signgu_name
 
 settings = get_settings()
 
@@ -277,7 +277,6 @@ class TourApiClient:
         ldong_regn_cd: str,
         content_type_id: int,
         num_of_rows: int,
-        ldong_signgu_cd: int | None = None,
     ) -> list[Attraction]:
         try:
             params = {
@@ -286,9 +285,6 @@ class TourApiClient:
                 "numOfRows": num_of_rows,
                 "pageNo": 1,
             }
-            if ldong_signgu_cd is not None:
-                # 법정동 시군구코드 — 있으면 시/도 전체가 아니라 특정 시/군/구로 좁혀서 조회합니다.
-                params["lDongSignguCd"] = ldong_signgu_cd
             resp = await client.get(
                 f"{settings.tour_api_base_url}/KorWithService2/areaBasedList2",
                 params=self._common_params(params),
@@ -305,8 +301,13 @@ class TourApiClient:
     ) -> list[Attraction]:
         """
         무장애 여행 정보 기준으로 1차 필터링된 관광지 목록 조회.
-        sigungu_cd(법정동 시군구코드)를 지정하면 해당 시/군/구로 좁혀서 조회합니다
-        (예: 수원시 팔달구 = 41115). 지정하지 않으면 시/도 전체를 조회합니다.
+
+        sigungu_cd(법정동 시군구코드)를 지정하면 해당 시/군/구로 좁혀서 반환합니다
+        (예: 수원시 팔달구 = 41115). 지정하지 않으면 시/도 전체를 대상으로 합니다.
+
+        참고: 이 무장애 서비스(KorWithService2)는 lDongSignguCd(시군구) 파라미터를
+        API 단에서 지원하지 않아(테스트 결과 항상 0건) 시/도 전체로 넉넉하게 조회한
+        뒤, 각 관광지의 address 문자열에 해당 시/군/구명이 포함되는지로 직접 걸러냅니다.
         """
         if self.use_mock:
             results = list(_MOCK_ATTRACTIONS)
@@ -322,15 +323,18 @@ class TourApiClient:
         ldong_regn_map = {"경기도": "41", "서울": "11"}
         ldong_regn_cd = ldong_regn_map.get(region, "41")
 
+        target_signgu_nm = signgu_name(sigungu_cd) if sigungu_cd is not None else None
+        # 시/군/구로 걸러낼 예정이면, 걸러지고 남는 양이 부족하지 않도록 시/도 전체를
+        # 훨씬 넉넉하게(약 6배) 받아옵니다.
+        fetch_limit = limit * 6 if target_signgu_nm else limit
+
         # 카테고리(lclsSystm1)가 아니라 contentTypeId 기준으로 여러 카테고리를 동시에 조회해서
         # 숙박에만 치우치지 않고 관광지/음식점/문화시설/레포츠가 골고루 섞이도록 합니다.
-        per_type_rows = max(6, limit // len(_DEFAULT_CONTENT_TYPE_IDS))
+        per_type_rows = max(6, fetch_limit // len(_DEFAULT_CONTENT_TYPE_IDS))
         async with httpx.AsyncClient(timeout=15) as client:
             results_per_type = await asyncio.gather(
                 *(
-                    self._fetch_by_content_type(
-                        client, ldong_regn_cd, content_type_id, per_type_rows, sigungu_cd
-                    )
+                    self._fetch_by_content_type(client, ldong_regn_cd, content_type_id, per_type_rows)
                     for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
                 )
             )
@@ -346,6 +350,14 @@ class TourApiClient:
                         if a.content_id and a.content_id not in seen_ids:
                             seen_ids.add(a.content_id)
                             attractions.append(a)
+
+            if target_signgu_nm:
+                # 주소 문자열에 시군구명(예: '수원시 팔달구')의 각 단어가 모두 포함되는 것만 남깁니다.
+                tokens = target_signgu_nm.split()
+                filtered = [a for a in attractions if all(t in a.address for t in tokens)]
+                # 필터링 결과가 너무 적으면(예: 데이터 자체가 희소한 소도시) 빈 결과보다는
+                # 원래 후보라도 보여주는 게 낫습니다.
+                attractions = filtered if filtered else attractions
 
             # 각 관광지의 편의시설 상세 정보를 채웁니다 (동시에 여러 건 조회).
             accessibility_list = await asyncio.gather(

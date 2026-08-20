@@ -294,3 +294,11 @@ def list_signgu_by_area(area_nm: str) -> list[tuple[int, str]]:
         if nm == area_nm
     ]
     return sorted(rows, key=lambda r: r[1])
+
+
+def signgu_name(code: int) -> str | None:
+    """법정동 시군구코드로 이름을 찾습니다 (예: 41115 -> '수원시 팔달구')."""
+    for _, _, signgu_cd, signgu_nm in SIGUNGU_TABLE:
+        if signgu_cd == code:
+            return signgu_nm
+    return None
