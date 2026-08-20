@@ -12,6 +12,8 @@
 키가 없는 개발 초기 단계에서도 프론트/백엔드 개발을 막지 않도록,
 USE_MOCK_DATA=true (기본값) 일 때는 경기도 지역 목업 데이터를 반환합니다.
 """
+import asyncio
+
 import httpx
 
 from app.config import get_settings
@@ -96,7 +98,42 @@ _MOCK_ATTRACTIONS: list[Attraction] = [
         related_attraction_ids=[],
         nearby_medical_info=None,
     ),
+    Attraction(
+        content_id="GG-005",
+        name="행리단길 맛집거리",
+        address="경기도 수원시 팔달구 행궁동 일대",
+        latitude=37.2820,
+        longitude=127.0135,
+        category="음식점",
+        image_url="https://picsum.photos/seed/haengri/400/300",
+        accessibility=AccessibilityFeatures(
+            has_ramp=True, has_elevator=False, has_accessible_restroom=False,
+            has_wheelchair_rental=False, has_stroller_accessible_path=True, has_rest_area=False,
+        ),
+        congestion_forecast=[
+            CongestionForecast(date="2026-08-22", hour=12, congestion_level="high"),
+            CongestionForecast(date="2026-08-22", hour=15, congestion_level="low"),
+        ],
+        related_attraction_ids=["GG-001"],
+        nearby_medical_info=None,
+    ),
 ]
+
+# TourAPI의 contentTypeId 기준 카테고리 (분류체계코드보다 안정적으로 데이터가 채워져 있음)
+# 12=관광지, 14=문화시설, 15=축제/공연/행사, 25=여행코스, 28=레포츠, 32=숙박, 38=쇼핑, 39=음식점
+_CONTENT_TYPE_LABELS: dict[int, str] = {
+    12: "관광지",
+    14: "문화시설",
+    15: "축제/공연/행사",
+    25: "여행코스",
+    28: "레포츠",
+    32: "숙박",
+    38: "쇼핑",
+    39: "음식점",
+}
+
+# 코스에 기본으로 섞어서 조회할 카테고리 (관광지 + 맛집 위주, 숙박은 제외)
+_DEFAULT_CONTENT_TYPE_IDS: list[int] = [12, 39, 14, 28]
 
 
 class TourApiClient:
@@ -131,14 +168,9 @@ class TourApiClient:
         return item if isinstance(item, list) else [item]
 
     @staticmethod
-    def _map_item_to_attraction(item: dict) -> Attraction:
+    def _map_item_to_attraction(item: dict, content_type_id: int) -> Attraction:
         """areaBasedList2 응답 필드(contentid, title, addr1, mapx/mapy 등)를 Attraction으로 매핑"""
-        # lclsSystm1/2 코드(예: AC, AC01)를 사람이 읽을 수 있는 카테고리로 간단 매핑
-        category_labels = {
-            "AC": "숙박", "AB": "인문(문화/예술/역사)", "AA": "자연",
-            "AD": "쇼핑", "AE": "음식", "AF": "레포츠",
-        }
-        category = category_labels.get(item.get("lclsSystm1", ""), item.get("lclsSystm1", ""))
+        category = _CONTENT_TYPE_LABELS.get(content_type_id, str(content_type_id))
 
         return Attraction(
             content_id=str(item.get("contentid", "")),
@@ -187,6 +219,28 @@ class TourApiClient:
             # API 오류가 나도 전체 요청이 죽지 않게 안전하게 빈 값 처리
             return AccessibilityFeatures()
 
+    async def _fetch_by_content_type(
+        self, client: httpx.AsyncClient, ldong_regn_cd: str, content_type_id: int, num_of_rows: int
+    ) -> list[Attraction]:
+        try:
+            resp = await client.get(
+                f"{settings.tour_api_base_url}/KorWithService2/areaBasedList2",
+                params=self._common_params(
+                    {
+                        "lDongRegnCd": ldong_regn_cd,
+                        "contentTypeId": content_type_id,
+                        "numOfRows": num_of_rows,
+                        "pageNo": 1,
+                    }
+                ),
+            )
+            resp.raise_for_status()
+            raw_items = self._extract_items(resp.json())
+            return [self._map_item_to_attraction(item, content_type_id) for item in raw_items]
+        except Exception:
+            # 특정 카테고리 조회가 실패해도 다른 카테고리 결과는 살립니다.
+            return []
+
     async def search_accessible_attractions(
         self, region: str, user_type: str, limit: int = 20
     ) -> list[Attraction]:
@@ -203,28 +257,27 @@ class TourApiClient:
 
         # 실제 API 연동 (법정동 시도 코드 기준 — 경기도=41, 서울=11)
         ldong_regn_map = {"경기도": "41", "서울": "11"}
+        ldong_regn_cd = ldong_regn_map.get(region, "41")
+
+        # 카테고리(lclsSystm1)가 아니라 contentTypeId 기준으로 여러 카테고리를 동시에 조회해서
+        # 숙박에만 치우치지 않고 관광지/음식점/문화시설/레포츠가 골고루 섞이도록 합니다.
+        per_type_rows = max(5, limit // len(_DEFAULT_CONTENT_TYPE_IDS))
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(
-                f"{settings.tour_api_base_url}/KorWithService2/areaBasedList2",
-                params=self._common_params(
-                    {
-                        "lDongRegnCd": ldong_regn_map.get(region, "41"),
-                        # lclsSystm1은 필수 파라미터입니다. 실측 결과 "AC"(숙박)만 데이터가
-                        # 있고, 다른 대분류(자연/인문 등)는 아직 이 데이터셋에 없는 것으로
-                        # 확인되었습니다 (2026-08-17 기준). 데이터가 채워지면 바꿔주세요.
-                        "lclsSystm1": "AC",
-                        "numOfRows": limit,
-                        "pageNo": 1,
-                    }
-                ),
+            results_per_type = await asyncio.gather(
+                *(
+                    self._fetch_by_content_type(client, ldong_regn_cd, content_type_id, per_type_rows)
+                    for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
+                )
             )
-            resp.raise_for_status()
-            raw_items = self._extract_items(resp.json())
-            attractions = [self._map_item_to_attraction(item) for item in raw_items]
+            attractions: list[Attraction] = []
+            seen_ids: set[str] = set()
+            for group in results_per_type:
+                for a in group:
+                    if a.content_id and a.content_id not in seen_ids:
+                        seen_ids.add(a.content_id)
+                        attractions.append(a)
 
             # 각 관광지의 편의시설 상세 정보를 채웁니다 (동시에 여러 건 조회).
-            import asyncio
-
             accessibility_list = await asyncio.gather(
                 *(self._fetch_accessibility(client, a.content_id) for a in attractions)
             )
