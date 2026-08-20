@@ -132,8 +132,8 @@ _CONTENT_TYPE_LABELS: dict[int, str] = {
     39: "음식점",
 }
 
-# 코스에 기본으로 섞어서 조회할 카테고리 (관광지 + 맛집 위주, 숙박은 제외)
-_DEFAULT_CONTENT_TYPE_IDS: list[int] = [12, 39, 14, 28]
+# 코스에 기본으로 섞어서 조회할 카테고리 (관광지 + 맛집 + 문화시설 + 레포츠 + 숙박)
+_DEFAULT_CONTENT_TYPE_IDS: list[int] = [12, 39, 14, 28, 32]
 
 
 class TourApiClient:
