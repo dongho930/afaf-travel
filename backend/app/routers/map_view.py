@@ -29,6 +29,17 @@ _TEMPLATE = """<!DOCTYPE html>
     if (!"{kakao_key}") {{
       showDebug('KAKAO_JS_KEY가 서버에 설정되어 있지 않습니다 (빈 값)');
     }}
+
+    // React Native WebView와 웹(iframe) 양쪽에서 부모(앱)로 메시지를 보내기 위한 헬퍼
+    function postToHost(payload) {{
+      var json = JSON.stringify(payload);
+      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {{
+        window.ReactNativeWebView.postMessage(json);
+      }}
+      if (window.parent && window.parent !== window) {{
+        window.parent.postMessage(json, '*');
+      }}
+    }}
   </script>
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey={kakao_key}&autoload=false"
     onerror="showDebug('카카오맵 SDK 스크립트 로드 실패 (네트워크 문제)')"></script>
@@ -92,7 +103,11 @@ _TEMPLATE = """<!DOCTYPE html>
               var pos = new kakao.maps.LatLng(m.lat, m.lng);
               var marker = new kakao.maps.Marker({{ position: pos, map: map }});
               var infowindow = new kakao.maps.InfoWindow({{ content: '<div style="padding:6px;font-size:12px;">' + m.name + '</div>' }});
-              kakao.maps.event.addListener(marker, 'click', function () {{ infowindow.open(map, marker); }});
+              kakao.maps.event.addListener(marker, 'click', function () {{
+                infowindow.open(map, marker);
+                // 마커 클릭 시 앱(부모)에게 알려서, 앱 쪽에서 해당 지점의 상세 정보를 표시하게 합니다.
+                postToHost({{ type: 'marker_click', id: m.id }});
+              }});
             }});
 
             // 초기에는 직선으로 먼저 그리고, 실제 경로가 도착하면 drawRoute가 교체합니다.
@@ -111,7 +126,7 @@ _TEMPLATE = """<!DOCTYPE html>
 
 
 @router.get("/map-view", response_class=HTMLResponse)
-async def map_view(markers: str = Query(..., description="JSON 배열: [{lat, lng, name}]")):
+async def map_view(markers: str = Query(..., description="JSON 배열: [{lat, lng, name, id}]")):
     """
     카카오맵 JS SDK는 등록된 도메인에서 로드된 페이지인지 확인합니다.
     모바일 앱의 WebView가 순수 HTML 문자열만 불러오면 '출처(origin)'가 없어서
@@ -122,7 +137,10 @@ async def map_view(markers: str = Query(..., description="JSON 배열: [{lat, ln
     실제 도로 경로 좌표는 URL 파라미터로 받지 않습니다 (좌표가 많으면 URL이
     너무 길어져 연결이 끊길 수 있음). 대신 페이지 로드가 끝난 뒤 postMessage로
     '{"path": [[lat, lng], ...]}' 형식의 메시지를 보내주면 그걸로 경로를 그립니다.
-    메시지가 오기 전까지는 마커를 직선으로 연결한 경로가 임시로 표시됩니다.
+
+    마커를 클릭하면 이 페이지가 앱(부모)에게
+    '{"type": "marker_click", "id": <marker.id>}' 형식으로 postMessage를 보냅니다.
+    각 마커 객체에 고유한 id를 넣어서 markers 파라미터를 구성해주세요.
     """
     try:
         marker_list = json.loads(markers)
