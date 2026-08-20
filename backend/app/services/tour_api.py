@@ -261,7 +261,7 @@ class TourApiClient:
 
         # 카테고리(lclsSystm1)가 아니라 contentTypeId 기준으로 여러 카테고리를 동시에 조회해서
         # 숙박에만 치우치지 않고 관광지/음식점/문화시설/레포츠가 골고루 섞이도록 합니다.
-        per_type_rows = max(5, limit // len(_DEFAULT_CONTENT_TYPE_IDS))
+        per_type_rows = max(6, limit // len(_DEFAULT_CONTENT_TYPE_IDS))
         async with httpx.AsyncClient(timeout=15) as client:
             results_per_type = await asyncio.gather(
                 *(
@@ -269,13 +269,18 @@ class TourApiClient:
                     for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
                 )
             )
+            # 카테고리별로 순차로 이어붙이면 뒤쪽 카테고리가 마지막 limit 자르기에서
+            # 통째로 잘려나갈 수 있어, 라운드로빈으로 각 카테고리를 골고루 섞습니다.
             attractions: list[Attraction] = []
             seen_ids: set[str] = set()
-            for group in results_per_type:
-                for a in group:
-                    if a.content_id and a.content_id not in seen_ids:
-                        seen_ids.add(a.content_id)
-                        attractions.append(a)
+            max_group_len = max((len(g) for g in results_per_type), default=0)
+            for i in range(max_group_len):
+                for group in results_per_type:
+                    if i < len(group):
+                        a = group[i]
+                        if a.content_id and a.content_id not in seen_ids:
+                            seen_ids.add(a.content_id)
+                            attractions.append(a)
 
             # 각 관광지의 편의시설 상세 정보를 채웁니다 (동시에 여러 건 조회).
             accessibility_list = await asyncio.gather(

@@ -16,8 +16,10 @@ async def create_course(request: CourseRequest):
     2) 후보 + 질의 + 혼잡도 예측을 Claude API에 전달해 코스(JSON) 생성
     3) (Supabase 설정 시) 생성된 코스를 이력으로 저장
     """
+    # 관광지/음식점/문화시설/레포츠/숙박 카테고리가 골고루 섞이도록 후보 풀을
+    # 넉넉하게(25) 가져옵니다 — 너무 적으면 카테고리당 조회량이 줄어 다양성이 떨어집니다.
     candidates = await tour_api_client.search_accessible_attractions(
-        region=request.region, user_type=request.user_type.value, limit=15
+        region=request.region, user_type=request.user_type.value, limit=25
     )
     try:
         course = await generate_course(request, candidates)
@@ -32,4 +34,3 @@ async def create_course(request: CourseRequest):
 async def get_course_history(limit: int = 20):
     """Supabase에 저장된 최근 코스 이력 조회 (Supabase 미설정 시 빈 목록)"""
     return await list_recent_courses(limit=limit)
-
