@@ -47,8 +47,10 @@ _TEMPLATE = """<!DOCTYPE html>
     var map = null;
     var markers = {markers_json};
     var currentPolyline = null;
+    var routeDrawn = false;         // 경로(직선이든 실제든)를 이미 한 번이라도 그렸는지
+    var fallbackTimer = null;
 
-    // 마커 좌표를 직선으로 이은 기본 경로 (실제 도로 경로가 아직 도착 전이거나 실패했을 때 폴백)
+    // 마커 좌표를 직선으로 이은 기본 경로 (실제 도로 경로를 끝내 못 받았을 때의 최후 폴백)
     function straightPath() {{
       return markers.map(function (m) {{ return [m.lat, m.lng]; }});
     }}
@@ -59,16 +61,26 @@ _TEMPLATE = """<!DOCTYPE html>
         currentPolyline.setMap(null);
         currentPolyline = null;
       }}
-      var usePoints = (pathPoints && pathPoints.length > 1) ? pathPoints : straightPath();
+      var isReal = !!(pathPoints && pathPoints.length > 1);
+      var usePoints = isReal ? pathPoints : straightPath();
       if (usePoints.length < 2) return;
+
       var linePath = usePoints.map(function (p) {{ return new kakao.maps.LatLng(p[0], p[1]); }});
       currentPolyline = new kakao.maps.Polyline({{
         path: linePath, map: map, strokeWeight: 4, strokeColor: '#2E7D5B',
         strokeOpacity: 0.8, strokeStyle: 'solid'
       }});
-      showDebug('경로 갱신 (' + usePoints.length + '개 점' +
-        (pathPoints && pathPoints.length > 1 ? ', 실제 도로 경로' : ', 직선 폴백') + ')');
+
+      routeDrawn = true;
+      if (fallbackTimer) {{ clearTimeout(fallbackTimer); fallbackTimer = null; }}
+
+      showDebug('경로 갱신 (' + usePoints.length + '개 점' + (isReal ? ', 실제 도로 경로' : ', 직선 폴백') + ')');
       setTimeout(function () {{ document.getElementById('debug').style.display = 'none'; }}, 3000);
+
+      // 앱(부모)에게 "경로를 그렸다"고 알려줍니다. 앱은 이 신호를 받은 뒤에야
+      // 로딩 오버레이를 걷어내고 지도를 보여줘서, 사용자가 직선이 잠깐이라도
+      // 보이는 순간 없이 곧장 실제 경로만 보게 됩니다.
+      postToHost({{ type: 'route_drawn', isReal: isReal, pointCount: usePoints.length }});
     }}
 
     // 모바일 앱(WebView) 또는 웹(iframe)에서 지도 로드 완료 후 실제 경로 좌표를
@@ -105,13 +117,17 @@ _TEMPLATE = """<!DOCTYPE html>
               var infowindow = new kakao.maps.InfoWindow({{ content: '<div style="padding:6px;font-size:12px;">' + m.name + '</div>' }});
               kakao.maps.event.addListener(marker, 'click', function () {{
                 infowindow.open(map, marker);
-                // 마커 클릭 시 앱(부모)에게 알려서, 앱 쪽에서 해당 지점의 상세 정보를 표시하게 합니다.
                 postToHost({{ type: 'marker_click', id: m.id }});
               }});
             }});
 
-            // 초기에는 직선으로 먼저 그리고, 실제 경로가 도착하면 drawRoute가 교체합니다.
-            drawRoute(null);
+            // 여기서 바로 직선을 그리지 않습니다. 실제 경로(postMessage)가 도착하면
+            // drawRoute가 그때 처음으로 경로를 그립니다. 다만 /route 조회 자체가
+            // 실패하는 경우를 대비해, 일정 시간(10초) 안에 메시지가 안 오면
+            // 마지막 안전장치로 직선을 그립니다.
+            fallbackTimer = setTimeout(function () {{
+              if (!routeDrawn) drawRoute(null);
+            }}, 10000);
           }} catch (e) {{
             showDebug('지도 생성 중 에러: ' + e.message);
           }}
@@ -137,6 +153,12 @@ async def map_view(markers: str = Query(..., description="JSON 배열: [{lat, ln
     실제 도로 경로 좌표는 URL 파라미터로 받지 않습니다 (좌표가 많으면 URL이
     너무 길어져 연결이 끊길 수 있음). 대신 페이지 로드가 끝난 뒤 postMessage로
     '{"path": [[lat, lng], ...]}' 형식의 메시지를 보내주면 그걸로 경로를 그립니다.
+
+    페이지는 로드 직후 곧바로 직선을 그리지 않습니다 — 앱이 실제 경로를 보내줄
+    때까지 기다렸다가 그립니다 (다만 10초 안에 아무 메시지도 안 오면 최후
+    안전장치로 직선을 그립니다). 경로를 그릴 때마다
+    '{"type": "route_drawn", "isReal": true|false, "pointCount": N}' 메시지를
+    앱에 보내니, 앱은 이 신호를 받은 뒤에 지도를 화면에 보여주면 됩니다.
 
     마커를 클릭하면 이 페이지가 앱(부모)에게
     '{"type": "marker_click", "id": <marker.id>}' 형식으로 postMessage를 보냅니다.
