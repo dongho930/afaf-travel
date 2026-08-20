@@ -51,6 +51,32 @@ class CourseRequest(BaseModel):
     max_stops: int = Field(default=5, ge=1, le=10)
 
 
+class PlaceRecommendationRequest(BaseModel):
+    """1단계: 질의에 맞는 장소 후보를 추천받기 위한 요청 (아직 코스를 확정 짓지 않음)"""
+    query_text: str = Field(..., description="사용자의 자연어 질의 (STT 변환 결과 또는 직접 입력)")
+    user_type: UserType = UserType.GENERAL
+    region: str = "경기도"
+
+
+class PlaceCandidate(BaseModel):
+    """추천 후보 장소 1건 + 왜 이 질의에 맞는지에 대한 짧은 이유"""
+    attraction: Attraction
+    reason: str
+
+
+class PlaceRecommendationResponse(BaseModel):
+    query_text: str
+    candidates: list[PlaceCandidate]
+
+
+class GenerateFromSelectionRequest(BaseModel):
+    """2단계: 사용자가 후보 중에서 직접 고른 장소들로 최종 코스(순서/시간대) 생성"""
+    query_text: str = Field(..., description="1단계에서 사용한 원래 질의 (맥락 유지용)")
+    user_type: UserType = UserType.GENERAL
+    region: str = "경기도"
+    selected_content_ids: list[str] = Field(..., min_length=1, description="사용자가 선택한 관광지 content_id 목록")
+
+
 class CourseStop(BaseModel):
     order: int
     attraction: Attraction
