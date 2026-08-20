@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import courses, map_view, route, tourism
+from app.routers import account, courses, map_view, route, tourism
 
 app = FastAPI(
     title="무장애 여행 플래너 API",
@@ -21,6 +21,7 @@ app.include_router(tourism.router)
 app.include_router(courses.router)
 app.include_router(map_view.router)
 app.include_router(route.router)
+app.include_router(account.router)
 
 
 @app.get("/health")
