@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # Supabase (PostgreSQL)
     supabase_url: str = os.getenv("SUPABASE_URL", "")
     supabase_service_key: str = os.getenv("SUPABASE_SERVICE_KEY", "")
+    # Supabase Auth가 발급하는 로그인 토큰(JWT)을 검증할 때 씁니다.
+    # Supabase 대시보드 → Project Settings → API → JWT Settings → "JWT Secret"
+    supabase_jwt_secret: str = os.getenv("SUPABASE_JWT_SECRET", "")
 
     # 개발 편의를 위한 모드 플래그: 실제 키가 없을 때는 목업 데이터로 동작
     use_mock_data: bool = os.getenv("USE_MOCK_DATA", "true").lower() == "true"

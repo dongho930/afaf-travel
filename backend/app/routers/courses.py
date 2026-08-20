@@ -1,4 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.models.schemas import (
     CourseRequest,
@@ -8,6 +10,7 @@ from app.models.schemas import (
     PlaceRecommendationResponse,
 )
 from app.services.ai_service import generate_course, generate_course_from_selection, recommend_places
+from app.services.auth import get_optional_user_id
 from app.services.supabase_service import list_recent_courses, save_course
 from app.services.tour_api import tour_api_client
 
@@ -32,9 +35,14 @@ async def recommend_course_places(request: PlaceRecommendationRequest):
 
 
 @router.post("/generate-from-selection", response_model=CourseResponse)
-async def create_course_from_selection(request: GenerateFromSelectionRequest):
+async def create_course_from_selection(
+    request: GenerateFromSelectionRequest,
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
     """
     2단계: 1단계 추천 목록에서 사용자가 직접 고른 장소들로 최종 코스(순서/시간대)를 생성합니다.
+    로그인한 사용자(Authorization 헤더로 토큰 전달)면 그 사용자 소유로 저장되어
+    /history에서 다시 볼 수 있습니다. 비로그인이어도 코스 생성 자체는 그대로 됩니다.
     """
     # 사용자가 고른 장소들의 최신 정보(편의시설, 혼잡도 등)를 다시 가져옵니다.
     candidates = await tour_api_client.search_accessible_attractions(
@@ -53,12 +61,15 @@ async def create_course_from_selection(request: GenerateFromSelectionRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    await save_course(course, query_text=request.query_text, region=request.region)
+    await save_course(course, query_text=request.query_text, region=request.region, user_id=user_id)
     return course
 
 
 @router.post("/generate", response_model=CourseResponse)
-async def create_course(request: CourseRequest):
+async def create_course(
+    request: CourseRequest,
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
     """
     (레거시) 질의 하나로 후보 선택 없이 바로 코스를 생성합니다.
     새 플로우는 /recommend → /generate-from-selection 두 단계를 씁니다.
@@ -71,11 +82,17 @@ async def create_course(request: CourseRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    await save_course(course, query_text=request.query_text, region=request.region)
+    await save_course(course, query_text=request.query_text, region=request.region, user_id=user_id)
     return course
 
 
 @router.get("/history")
-async def get_course_history(limit: int = 20):
-    """Supabase에 저장된 최근 코스 이력 조회 (Supabase 미설정 시 빈 목록)"""
-    return await list_recent_courses(limit=limit)
+async def get_course_history(
+    limit: int = 20,
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """
+    로그인한 사용자의 최근 코스 이력을 조회합니다.
+    비로그인 상태면 빈 목록을 반환합니다 (로그인해야 이력이 보입니다).
+    """
+    return await list_recent_courses(limit=limit, user_id=user_id)
