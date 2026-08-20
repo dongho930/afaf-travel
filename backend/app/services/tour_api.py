@@ -237,8 +237,7 @@ class TourApiClient:
             return self._map_item_to_attraction(item, content_type_id)
         except Exception:
             return None
-
-
+    async def _fetch_accessibility(self, client: httpx.AsyncClient, content_id: str) -> AccessibilityFeatures:
         """
         'detailWithTour2'(무장애정보조회) 오퍼레이션으로 편의시설 상세를 조회합니다.
         실제 확인된 응답 필드: route(이동로/경사로 설명), wheelchair(휠체어 대여/접근),
