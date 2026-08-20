@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     # 카카오맵 JavaScript 키 — 서버가 지도 페이지(/map-view)를 직접 내려줄 때도 필요합니다.
     kakao_js_key: str = os.getenv("KAKAO_JS_KEY", "")
 
+    # Tmap (SK Open API) — 보행자(도보) 실제 경로 안내
+    tmap_app_key: str = os.getenv("TMAP_APP_KEY", "")
+
+    # ODsay — 대중교통 실제 경로 안내 (Server 키 사용)
+    odsay_api_key: str = os.getenv("ODSAY_API_KEY", "")
+
     # Supabase (PostgreSQL)
     supabase_url: str = os.getenv("SUPABASE_URL", "")
     supabase_service_key: str = os.getenv("SUPABASE_SERVICE_KEY", "")
