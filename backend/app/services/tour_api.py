@@ -272,19 +272,26 @@ class TourApiClient:
             return AccessibilityFeatures()
 
     async def _fetch_by_content_type(
-        self, client: httpx.AsyncClient, ldong_regn_cd: str, content_type_id: int, num_of_rows: int
+        self,
+        client: httpx.AsyncClient,
+        ldong_regn_cd: str,
+        content_type_id: int,
+        num_of_rows: int,
+        ldong_signgu_cd: int | None = None,
     ) -> list[Attraction]:
         try:
+            params = {
+                "lDongRegnCd": ldong_regn_cd,
+                "contentTypeId": content_type_id,
+                "numOfRows": num_of_rows,
+                "pageNo": 1,
+            }
+            if ldong_signgu_cd is not None:
+                # 법정동 시군구코드 — 있으면 시/도 전체가 아니라 특정 시/군/구로 좁혀서 조회합니다.
+                params["lDongSignguCd"] = ldong_signgu_cd
             resp = await client.get(
                 f"{settings.tour_api_base_url}/KorWithService2/areaBasedList2",
-                params=self._common_params(
-                    {
-                        "lDongRegnCd": ldong_regn_cd,
-                        "contentTypeId": content_type_id,
-                        "numOfRows": num_of_rows,
-                        "pageNo": 1,
-                    }
-                ),
+                params=self._common_params(params),
             )
             resp.raise_for_status()
             raw_items = self._extract_items(resp.json())
@@ -294,9 +301,13 @@ class TourApiClient:
             return []
 
     async def search_accessible_attractions(
-        self, region: str, user_type: str, limit: int = 20
+        self, region: str, user_type: str, limit: int = 20, sigungu_cd: int | None = None
     ) -> list[Attraction]:
-        """무장애 여행 정보 기준으로 1차 필터링된 관광지 목록 조회"""
+        """
+        무장애 여행 정보 기준으로 1차 필터링된 관광지 목록 조회.
+        sigungu_cd(법정동 시군구코드)를 지정하면 해당 시/군/구로 좁혀서 조회합니다
+        (예: 수원시 팔달구 = 41115). 지정하지 않으면 시/도 전체를 조회합니다.
+        """
         if self.use_mock:
             results = list(_MOCK_ATTRACTIONS)
             if user_type == "wheelchair":
@@ -317,7 +328,9 @@ class TourApiClient:
         async with httpx.AsyncClient(timeout=15) as client:
             results_per_type = await asyncio.gather(
                 *(
-                    self._fetch_by_content_type(client, ldong_regn_cd, content_type_id, per_type_rows)
+                    self._fetch_by_content_type(
+                        client, ldong_regn_cd, content_type_id, per_type_rows, sigungu_cd
+                    )
                     for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
                 )
             )

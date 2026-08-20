@@ -281,3 +281,16 @@ def find_area_signgu(address: str) -> tuple[int, int] | None:
         ):
             return area_cd, signgu_cd
     return None
+
+
+def list_signgu_by_area(area_nm: str) -> list[tuple[int, str]]:
+    """
+    '경기도' 같은 시/도 이름으로 그 안에 속한 시/군/구 목록을 [(signguCd, signguNm), ...]
+    형태로 반환합니다 (지역 선택 UI에 사용). 가나다순으로 정렬됩니다.
+    """
+    rows = [
+        (signgu_cd, signgu_nm)
+        for area_cd, nm, signgu_cd, signgu_nm in SIGUNGU_TABLE
+        if nm == area_nm
+    ]
+    return sorted(rows, key=lambda r: r[1])

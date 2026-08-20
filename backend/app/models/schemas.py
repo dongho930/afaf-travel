@@ -43,6 +43,12 @@ class Attraction(BaseModel):
     nearby_medical_info: Optional[str] = None
 
 
+class RegionOption(BaseModel):
+    """지역 선택 UI용 시/군/구 옵션"""
+    code: int   # 법정동 시군구코드 (예: 41115 = 수원시 팔달구)
+    name: str   # 예: "수원시 팔달구"
+
+
 class CourseRequest(BaseModel):
     query_text: str = Field(..., description="사용자의 자연어 질의 (STT 변환 결과 또는 직접 입력)")
     user_type: UserType = UserType.GENERAL
@@ -56,6 +62,7 @@ class PlaceRecommendationRequest(BaseModel):
     query_text: str = Field(..., description="사용자의 자연어 질의 (STT 변환 결과 또는 직접 입력)")
     user_type: UserType = UserType.GENERAL
     region: str = "경기도"
+    sigungu_cd: Optional[int] = Field(default=None, description="특정 시/군/구로 좁혀서 추천 (선택, /api/tourism/regions 참고)")
 
 
 class PlaceCandidate(BaseModel):
@@ -74,6 +81,7 @@ class GenerateFromSelectionRequest(BaseModel):
     query_text: str = Field(..., description="1단계에서 사용한 원래 질의 (맥락 유지용)")
     user_type: UserType = UserType.GENERAL
     region: str = "경기도"
+    sigungu_cd: Optional[int] = Field(default=None, description="1단계에서 사용한 시/군/구와 동일하게 넘겨주세요")
     selected_content_ids: list[str] = Field(..., min_length=1, description="사용자가 선택한 관광지 content_id 목록")
 
 

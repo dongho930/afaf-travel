@@ -21,7 +21,7 @@ async def recommend_course_places(request: PlaceRecommendationRequest):
     아직 코스(순서/시간)를 확정하지 않고, 사용자가 이 중에서 직접 고를 수 있게 목록만 보여줍니다.
     """
     candidates = await tour_api_client.search_accessible_attractions(
-        region=request.region, user_type=request.user_type.value, limit=25
+        region=request.region, user_type=request.user_type.value, limit=25, sigungu_cd=request.sigungu_cd
     )
     try:
         selected = await recommend_places(request, candidates)
@@ -38,7 +38,7 @@ async def create_course_from_selection(request: GenerateFromSelectionRequest):
     """
     # 사용자가 고른 장소들의 최신 정보(편의시설, 혼잡도 등)를 다시 가져옵니다.
     candidates = await tour_api_client.search_accessible_attractions(
-        region=request.region, user_type=request.user_type.value, limit=25
+        region=request.region, user_type=request.user_type.value, limit=25, sigungu_cd=request.sigungu_cd
     )
     by_id = {a.content_id: a for a in candidates}
     selected_attractions = [
