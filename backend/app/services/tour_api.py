@@ -3,21 +3,29 @@
 
 실제 서비스키가 발급되면 .env 의 TOUR_API_KEY 를 채우고 USE_MOCK_DATA=false 로 설정하세요.
 공공데이터포털의 다음 API들을 사용합니다:
-  - 국문 관광 정보 서비스 (지역기반 관광정보조회)
-  - 무장애 여행 정보 서비스
-  - 관광지별 연관 관광지 정보
-  - 관광지 집중률 방문자 추이 예측 정보
+  - 국문 관광 정보 서비스 (지역기반 관광정보조회) — KorWithService2
+  - 무장애 여행 정보 서비스 — KorWithService2
+  - 관광지별 연관 관광지 정보 — TarRlteTarService1 (관광지명 + 지역/시군구코드 기반 조회)
+  - 관광지 집중률 방문자 추이 예측 정보 — TatsCnctrRateService (관광지명 + 지역/시군구코드 기반 조회)
   - 의료관광정보
+
+관광지별 연관 관광지 정보 / 관광지 집중률 API는 contentId가 아니라 '관광지명 +
+시도코드(areaCd) + 시군구코드(signguCd)' 조합으로 조회하는 구조입니다. 이 백엔드의
+Attraction은 contentId를 기본 키로 쓰기 때문에, 먼저 detailCommon2로 관광지명/주소를
+얻고 app.services.sigungu_codes.find_area_signgu()로 주소를 시군구코드로 변환한 뒤
+호출합니다.
 
 키가 없는 개발 초기 단계에서도 프론트/백엔드 개발을 막지 않도록,
 USE_MOCK_DATA=true (기본값) 일 때는 경기도 지역 목업 데이터를 반환합니다.
 """
 import asyncio
+import datetime
 
 import httpx
 
 from app.config import get_settings
 from app.models.schemas import AccessibilityFeatures, Attraction, CongestionForecast
+from app.services.sigungu_codes import find_area_signgu
 
 settings = get_settings()
 
@@ -135,6 +143,11 @@ _CONTENT_TYPE_LABELS: dict[int, str] = {
 # 코스에 기본으로 섞어서 조회할 카테고리 (관광지 + 맛집 + 문화시설 + 레포츠 + 숙박)
 _DEFAULT_CONTENT_TYPE_IDS: list[int] = [12, 39, 14, 28, 32]
 
+# 관광지별 연관 관광지 정보 / 관광지 집중률 예측 정보는 국문관광정보서비스(B551011)
+# 산하의 별도 서비스 ID를 씁니다 (Base URL은 settings.tour_api_base_url과 동일 도메인).
+_TAR_RLTE_TAR_BASE = "http://apis.data.go.kr/B551011/TarRlteTarService1"
+_TATS_CNCTR_RATE_BASE = "http://apis.data.go.kr/B551011/TatsCnctrRateService"
+
 
 class TourApiClient:
     def __init__(self) -> None:
@@ -185,7 +198,47 @@ class TourApiClient:
             accessibility=AccessibilityFeatures(),
         )
 
-    async def _fetch_accessibility(self, client: httpx.AsyncClient, content_id: str) -> AccessibilityFeatures:
+    async def _get_basic_info(self, client: httpx.AsyncClient, content_id: str) -> dict | None:
+        """
+        contentId만으로는 관광지명/주소를 모르기 때문에, 연관관광지·집중률 API 호출 전에
+        detailCommon2(공통정보조회)로 title/addr1/addr2를 먼저 가져옵니다.
+        """
+        try:
+            resp = await client.get(
+                f"{settings.tour_api_base_url}/KorWithService2/detailCommon2",
+                params=self._common_params(
+                    {"contentId": content_id, "defaultYN": "Y", "addrinfoYN": "Y"}
+                ),
+            )
+            resp.raise_for_status()
+            items = self._extract_items(resp.json())
+            return items[0] if items else None
+        except Exception:
+            return None
+
+    async def _resolve_attraction_by_name(
+        self, client: httpx.AsyncClient, name: str
+    ) -> Attraction | None:
+        """
+        연관관광지 API는 이름만 알려주고 좌표/이미지가 없으므로, 이름으로 다시
+        키워드검색(searchKeyword2)을 해서 지도에 표시 가능한 완전한 Attraction으로 보강합니다.
+        """
+        try:
+            resp = await client.get(
+                f"{settings.tour_api_base_url}/KorWithService2/searchKeyword2",
+                params=self._common_params({"keyword": name, "numOfRows": 1, "pageNo": 1}),
+            )
+            resp.raise_for_status()
+            items = self._extract_items(resp.json())
+            if not items:
+                return None
+            item = items[0]
+            content_type_id = int(item.get("contenttypeid") or 12)
+            return self._map_item_to_attraction(item, content_type_id)
+        except Exception:
+            return None
+
+
         """
         'detailWithTour2'(무장애정보조회) 오퍼레이션으로 편의시설 상세를 조회합니다.
         실제 확인된 응답 필드: route(이동로/경사로 설명), wheelchair(휠체어 대여/접근),
@@ -299,20 +352,124 @@ class TourApiClient:
         return results[:limit]
 
     async def get_related_attractions(self, content_id: str) -> list[Attraction]:
+        """
+        한국관광공사_관광지별 연관 관광지 정보 (TarRlteTarService1 / searchKeyword1)
+
+        이 API는 contentId가 아니라 '관광지명 + areaCd + signguCd'로 조회합니다.
+        1) detailCommon2로 이 관광지의 이름/주소를 가져오고
+        2) 주소로 areaCd/signguCd를 역으로 찾은 뒤
+        3) 관광지명으로 연관관광지 목록(이름 + 카테고리 + 순위)을 조회하고
+        4) 상위 몇 개만 다시 이름으로 검색해서 좌표가 있는 완전한 Attraction으로 만듭니다.
+        """
         if self.use_mock:
             base = next((a for a in _MOCK_ATTRACTIONS if a.content_id == content_id), None)
             if not base:
                 return []
             return [a for a in _MOCK_ATTRACTIONS if a.content_id in base.related_attraction_ids]
-        # TODO: 실제 "관광지별 연관 관광지 정보" API 연동
-        return []
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            basic = await self._get_basic_info(client, content_id)
+            if not basic:
+                return []
+            name = basic.get("title", "")
+            address = " ".join(filter(None, [basic.get("addr1", ""), basic.get("addr2", "")]))
+            area_signgu = find_area_signgu(address)
+            if not name or not area_signgu:
+                return []
+            area_cd, signgu_cd = area_signgu
+
+            try:
+                resp = await client.get(
+                    f"{_TAR_RLTE_TAR_BASE}/searchKeyword1",
+                    params=self._common_params(
+                        {
+                            "baseYm": datetime.date.today().strftime("%Y%m"),
+                            "areaCd": area_cd,
+                            "signguCd": signgu_cd,
+                            "keyword": name,
+                            "numOfRows": 10,
+                            "pageNo": 1,
+                        }
+                    ),
+                )
+                resp.raise_for_status()
+                related_items = self._extract_items(resp.json())
+            except Exception:
+                return []
+
+            # rlteRank(연관순위) 기준 상위 5개만 좌표 보강 (매 건마다 추가 API 호출이 발생하므로 제한)
+            related_items = sorted(
+                related_items, key=lambda i: int(i.get("rlteRank") or 999)
+            )[:5]
+
+            resolved = await asyncio.gather(
+                *(
+                    self._resolve_attraction_by_name(client, item.get("rlteTatsNm", ""))
+                    for item in related_items
+                    if item.get("rlteTatsNm")
+                )
+            )
+            return [a for a in resolved if a is not None]
 
     async def get_congestion_forecast(self, content_id: str) -> list[CongestionForecast]:
+        """
+        한국관광공사_관광지 집중률 방문자 추이 예측 정보 (TatsCnctrRateService / tatsCnctrRatedList)
+
+        관광지별 향후 최대 30일치 '집중률(cnctrRate, 0~100 %)'을 일 단위로 제공합니다.
+        시간(hour) 단위 데이터는 없어서, 기존 스키마(CongestionForecast.hour)를 맞추기
+        위해 정오(12시)로 고정하고 집중률 % 구간을 low/medium/high로 변환합니다.
+        """
         if self.use_mock:
             base = next((a for a in _MOCK_ATTRACTIONS if a.content_id == content_id), None)
             return base.congestion_forecast if base else []
-        # TODO: 실제 "관광지 집중률 방문자 추이 예측 정보" API 연동
-        return []
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            basic = await self._get_basic_info(client, content_id)
+            if not basic:
+                return []
+            name = basic.get("title", "")
+            address = " ".join(filter(None, [basic.get("addr1", ""), basic.get("addr2", "")]))
+            area_signgu = find_area_signgu(address)
+            if not name or not area_signgu:
+                return []
+            area_cd, signgu_cd = area_signgu
+
+            try:
+                resp = await client.get(
+                    f"{_TATS_CNCTR_RATE_BASE}/tatsCnctrRatedList",
+                    params=self._common_params(
+                        {
+                            "areaCd": area_cd,
+                            "signguCd": signgu_cd,
+                            "tAtsNm": name,
+                            "numOfRows": 30,
+                            "pageNo": 1,
+                        }
+                    ),
+                )
+                resp.raise_for_status()
+                items = self._extract_items(resp.json())
+            except Exception:
+                return []
+
+            forecasts: list[CongestionForecast] = []
+            for item in items:
+                base_ymd = str(item.get("baseYmd") or "")
+                if len(base_ymd) != 8:
+                    continue
+                date_str = f"{base_ymd[:4]}-{base_ymd[4:6]}-{base_ymd[6:8]}"
+                try:
+                    rate = float(item.get("cnctrRate") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if rate >= 66:
+                    level = "high"
+                elif rate >= 34:
+                    level = "medium"
+                else:
+                    level = "low"
+                forecasts.append(CongestionForecast(date=date_str, hour=12, congestion_level=level))
+            return forecasts
 
 
 tour_api_client = TourApiClient()
