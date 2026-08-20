@@ -12,33 +12,62 @@ _TEMPLATE = """<!DOCTYPE html>
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <style>html, body, #map {{ width: 100%; height: 100%; margin: 0; padding: 0; }}</style>
+  <style>
+    html, body, #map {{ width: 100%; height: 100%; margin: 0; padding: 0; }}
+    #debug {{ position: fixed; top: 0; left: 0; right: 0; background: #fff3cd; color: #664d03;
+      font-family: monospace; font-size: 12px; padding: 8px; z-index: 999; white-space: pre-wrap; }}
+  </style>
 </head>
 <body>
+  <div id="debug"></div>
   <div id="map"></div>
-  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey={kakao_key}&autoload=false"></script>
   <script>
-    kakao.maps.load(function () {{
-      var map = new kakao.maps.Map(document.getElementById('map'), {{
-        center: new kakao.maps.LatLng({center_lat}, {center_lng}),
-        level: 8
-      }});
-      var linePath = [];
-      var markers = {markers_json};
-      markers.forEach(function (m) {{
-        var pos = new kakao.maps.LatLng(m.lat, m.lng);
-        linePath.push(pos);
-        var marker = new kakao.maps.Marker({{ position: pos, map: map }});
-        var infowindow = new kakao.maps.InfoWindow({{ content: '<div style="padding:6px;font-size:12px;">' + m.name + '</div>' }});
-        kakao.maps.event.addListener(marker, 'click', function () {{ infowindow.open(map, marker); }});
-      }});
-      if (linePath.length > 1) {{
-        new kakao.maps.Polyline({{
-          path: linePath, map: map, strokeWeight: 4, strokeColor: '#2E7D5B',
-          strokeOpacity: 0.8, strokeStyle: 'solid'
+    function showDebug(msg) {{ document.getElementById('debug').textContent = msg; }}
+    window.onerror = function (message, source, lineno) {{
+      showDebug('JS 에러: ' + message + ' (line ' + lineno + ')');
+    }};
+    if (!"{kakao_key}") {{
+      showDebug('KAKAO_JS_KEY가 서버에 설정되어 있지 않습니다 (빈 값)');
+    }}
+  </script>
+  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey={kakao_key}&autoload=false"
+    onerror="showDebug('카카오맵 SDK 스크립트 로드 실패 (네트워크 문제)')"></script>
+  <script>
+    try {{
+      if (typeof kakao === 'undefined') {{
+        showDebug('kakao 객체가 정의되지 않음 — 도메인 미등록 또는 잘못된 키일 가능성이 높습니다. (key 앞 6자: {kakao_key_prefix})');
+      }} else {{
+        kakao.maps.load(function () {{
+          try {{
+            var map = new kakao.maps.Map(document.getElementById('map'), {{
+              center: new kakao.maps.LatLng({center_lat}, {center_lng}),
+              level: 8
+            }});
+            var linePath = [];
+            var markers = {markers_json};
+            markers.forEach(function (m) {{
+              var pos = new kakao.maps.LatLng(m.lat, m.lng);
+              linePath.push(pos);
+              var marker = new kakao.maps.Marker({{ position: pos, map: map }});
+              var infowindow = new kakao.maps.InfoWindow({{ content: '<div style="padding:6px;font-size:12px;">' + m.name + '</div>' }});
+              kakao.maps.event.addListener(marker, 'click', function () {{ infowindow.open(map, marker); }});
+            }});
+            if (linePath.length > 1) {{
+              new kakao.maps.Polyline({{
+                path: linePath, map: map, strokeWeight: 4, strokeColor: '#2E7D5B',
+                strokeOpacity: 0.8, strokeStyle: 'solid'
+              }});
+            }}
+            showDebug('지도 로드 성공 (마커 ' + markers.length + '개)');
+            setTimeout(function () {{ document.getElementById('debug').style.display = 'none'; }}, 3000);
+          }} catch (e) {{
+            showDebug('지도 생성 중 에러: ' + e.message);
+          }}
         }});
       }}
-    }});
+    }} catch (e) {{
+      showDebug('kakao.maps.load 호출 전 에러: ' + e.message);
+    }}
   </script>
 </body>
 </html>"""
@@ -59,9 +88,11 @@ async def map_view(markers: str = Query(..., description="JSON 배열: [{lat, ln
         marker_list = []
 
     center = marker_list[0] if marker_list else {"lat": 37.2836, "lng": 127.017}
+    kakao_key = settings.kakao_js_key
 
     html = _TEMPLATE.format(
-        kakao_key=settings.kakao_js_key,
+        kakao_key=kakao_key,
+        kakao_key_prefix=(kakao_key[:6] if kakao_key else "(없음)"),
         center_lat=center["lat"],
         center_lng=center["lng"],
         markers_json=json.dumps(marker_list, ensure_ascii=False),
