@@ -82,14 +82,28 @@ async def list_recent_courses(limit: int = 20, user_id: Optional[str] = None) ->
         return []
 
 
-async def create_trip(user_id: str, name: str, category: str) -> Optional[str]:
+async def create_trip(
+    user_id: str,
+    name: str,
+    category: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Optional[str]:
     """새 여행(그룹)을 만들고 그 id를 반환합니다."""
     if _client is None:
         return None
     try:
         result = (
             _client.table("trips")
-            .insert({"user_id": user_id, "name": name, "category": category})
+            .insert(
+                {
+                    "user_id": user_id,
+                    "name": name,
+                    "category": category,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                }
+            )
             .execute()
         )
         rows = result.data or []
@@ -134,6 +148,43 @@ async def list_trips(user_id: str) -> list[dict]:
     except Exception as e:
         print(f"[supabase] 여행 목록 조회 실패: {e}")
         return []
+
+
+async def update_trip(
+    trip_id: str,
+    user_id: str,
+    name: Optional[str] = None,
+    category: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> tuple[bool, Optional[str]]:
+    """마이페이지에서 여행 이름/분류/날짜를 수정합니다. 넘겨준 값만 반영됩니다."""
+    if _client is None:
+        return False, "서버 설정 오류로 수정할 수 없어요."
+    try:
+        existing = _client.table("trips").select("user_id").eq("id", trip_id).limit(1).execute()
+        rows = existing.data or []
+        if not rows or rows[0].get("user_id") != user_id:
+            return False, "해당 여행을 찾을 수 없거나 접근 권한이 없어요."
+
+        update_fields = {}
+        if name is not None:
+            update_fields["name"] = name
+        if category is not None:
+            update_fields["category"] = category
+        if start_date is not None:
+            update_fields["start_date"] = start_date
+        if end_date is not None:
+            update_fields["end_date"] = end_date
+
+        if not update_fields:
+            return True, None
+
+        _client.table("trips").update(update_fields).eq("id", trip_id).execute()
+        return True, None
+    except Exception as e:
+        print(f"[supabase] 여행 수정 실패: {e}")
+        return False, "수정 중 오류가 발생했어요."
 
 
 async def delete_trip(trip_id: str, user_id: str) -> tuple[bool, Optional[str]]:

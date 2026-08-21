@@ -105,9 +105,19 @@ CourseCategory = Literal["가족", "커플", "친구", "혼자", "기타"]
 
 
 class TripCreateRequest(BaseModel):
-    """새 여행(그룹) 만들기 — 이름과 분류를 한 번 지정하면, 그 아래에 코스를 여러 개 저장할 수 있음"""
+    """새 여행(그룹) 만들기 — 이름/분류/날짜를 한 번 지정하면, 그 아래에 코스를 여러 개 저장할 수 있음"""
     name: str = Field(..., min_length=1, max_length=50, description="여행 이름 (예: '제주도 가족여행')")
     category: CourseCategory = "기타"
+    start_date: Optional[str] = Field(default=None, description="여행 시작일 (YYYY-MM-DD)")
+    end_date: Optional[str] = Field(default=None, description="여행 종료일 (YYYY-MM-DD)")
+
+
+class TripUpdateRequest(BaseModel):
+    """마이페이지에서 여행 이름/분류/날짜를 수정할 때. 보낸 필드만 반영됩니다."""
+    name: Optional[str] = Field(default=None, min_length=1, max_length=50)
+    category: Optional[CourseCategory] = None
+    start_date: Optional[str] = Field(default=None, description="YYYY-MM-DD")
+    end_date: Optional[str] = Field(default=None, description="YYYY-MM-DD")
 
 
 class TripSummary(BaseModel):
@@ -116,17 +126,21 @@ class TripSummary(BaseModel):
     name: str
     category: CourseCategory
     course_count: int
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
     created_at: Optional[str] = None
 
 
 class SaveCourseRequest(BaseModel):
     """
     생성된 코스를 저장할 때, 기존 여행에 추가하거나(trip_id) 새 여행을 만들면서
-    (new_trip_name + category) 저장할 수 있습니다. 둘 중 하나만 채워주세요.
+    (new_trip_name + category + 날짜) 저장할 수 있습니다. 둘 중 하나만 채워주세요.
     """
     trip_id: Optional[str] = Field(default=None, description="기존 여행에 추가하려면 그 여행의 id")
     new_trip_name: Optional[str] = Field(default=None, min_length=1, max_length=50, description="새 여행을 만들며 저장하려면 이름")
     category: Optional[CourseCategory] = Field(default=None, description="새 여행을 만들 때의 분류")
+    start_date: Optional[str] = Field(default=None, description="새 여행을 만들 때의 시작일 (YYYY-MM-DD)")
+    end_date: Optional[str] = Field(default=None, description="새 여행을 만들 때의 종료일 (YYYY-MM-DD)")
 
 
 class SavedCourseSummary(BaseModel):

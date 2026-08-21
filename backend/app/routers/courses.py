@@ -13,6 +13,7 @@ from app.models.schemas import (
     SavedCourseSummary,
     TripCreateRequest,
     TripSummary,
+    TripUpdateRequest,
 )
 from app.services.ai_service import generate_course, generate_course_from_selection, recommend_places
 from app.services.auth import get_optional_user_id
@@ -27,6 +28,7 @@ from app.services.supabase_service import (
     list_trips,
     row_to_course_response,
     save_course,
+    update_trip,
 )
 from app.services.tour_api import tour_api_client
 
@@ -132,7 +134,9 @@ async def save_course_endpoint(
     if not trip_id:
         if not request.new_trip_name:
             raise HTTPException(status_code=422, detail="기존 여행(trip_id)을 고르거나, 새 여행 이름(new_trip_name)을 입력해주세요.")
-        trip_id = await create_trip(user_id, request.new_trip_name, request.category or "기타")
+        trip_id = await create_trip(
+            user_id, request.new_trip_name, request.category or "기타", request.start_date, request.end_date
+        )
         if not trip_id:
             raise HTTPException(status_code=500, detail="새 여행을 만들지 못했어요.")
 
@@ -188,10 +192,17 @@ async def create_trip_endpoint(
     if not user_id:
         raise HTTPException(status_code=401, detail="로그인이 필요해요.")
 
-    trip_id = await create_trip(user_id, request.name, request.category)
+    trip_id = await create_trip(user_id, request.name, request.category, request.start_date, request.end_date)
     if not trip_id:
         raise HTTPException(status_code=500, detail="여행을 만들지 못했어요.")
-    return TripSummary(trip_id=trip_id, name=request.name, category=request.category, course_count=0)
+    return TripSummary(
+        trip_id=trip_id,
+        name=request.name,
+        category=request.category,
+        course_count=0,
+        start_date=request.start_date,
+        end_date=request.end_date,
+    )
 
 
 @trips_router.get("", response_model=list[TripSummary])
@@ -206,10 +217,44 @@ async def list_trips_endpoint(user_id: Optional[str] = Depends(get_optional_user
             name=row["name"],
             category=row.get("category") or "기타",
             course_count=row.get("course_count", 0),
+            start_date=row.get("start_date"),
+            end_date=row.get("end_date"),
             created_at=row.get("created_at"),
         )
         for row in rows
     ]
+
+
+@trips_router.patch("/{trip_id}", response_model=TripSummary)
+async def update_trip_endpoint(
+    trip_id: str,
+    request: TripUpdateRequest,
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """마이페이지에서 여행 이름/분류/날짜를 수정합니다."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="수정하려면 로그인이 필요해요.")
+
+    ok, message = await update_trip(
+        trip_id, user_id, request.name, request.category, request.start_date, request.end_date
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail=message)
+
+    # 수정된 최신 상태를 다시 조회해서 반환
+    rows = await list_trips(user_id)
+    updated = next((r for r in rows if r["id"] == trip_id), None)
+    if not updated:
+        raise HTTPException(status_code=404, detail="수정 후 여행 정보를 다시 불러오지 못했어요.")
+    return TripSummary(
+        trip_id=updated["id"],
+        name=updated["name"],
+        category=updated.get("category") or "기타",
+        course_count=updated.get("course_count", 0),
+        start_date=updated.get("start_date"),
+        end_date=updated.get("end_date"),
+        created_at=updated.get("created_at"),
+    )
 
 
 @trips_router.delete("/{trip_id}")
