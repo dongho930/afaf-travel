@@ -1,13 +1,18 @@
 """
-아이디(username) 기반 회원가입/로그인 지원.
+아이디(username) 기반 회원가입/로그인 + 프로필(아이디/프로필 사진) 관리.
 
 Supabase Auth 자체는 이메일 기반 로그인만 지원하므로, '아이디'는 이 앱에서 만든
-개념입니다. profiles 테이블에 (아이디, 이메일, 사용자 uuid)를 같이 저장해두고:
+개념입니다. profiles 테이블에 (아이디, 이메일, 사용자 uuid, 프로필 사진 URL)를
+같이 저장해두고:
 - 로그인 시 입력값이 아이디 형식이면 여기서 이메일로 변환한 뒤 Supabase Auth에 넘깁니다.
 - 회원가입 시 Supabase Auth 계정 생성 직후, 이 서비스로 profiles 행을 만듭니다.
+- 프로필 화면에서 아이디/프로필 사진을 나중에 바꿀 수도 있습니다.
 
-profiles 테이블에 대한 insert는 서비스 키(관리자 권한)로 하므로, 이메일 인증이
-아직 안 끝나 로그인 세션이 없는 상태(가입 직후)에도 문제없이 동작합니다.
+프로필 사진 파일 자체는 앱이 Supabase Storage(avatars 버킷)에 직접 업로드하고,
+이 서비스는 그 결과 URL 문자열만 저장/조회합니다 (파일 업로드는 백엔드를 거치지 않음).
+
+profiles 테이블에 대한 insert/update는 서비스 키(관리자 권한)로 하므로, 이메일
+인증이 아직 안 끝나 로그인 세션이 없는 상태(가입 직후)에도 문제없이 동작합니다.
 """
 from typing import Optional
 
@@ -75,7 +80,7 @@ async def create_profile(user_id: str, username: str, email: str) -> tuple[bool,
 
 
 async def get_profile_by_user_id(user_id: str) -> Optional[dict]:
-    """로그인한 사용자의 프로필(아이디 등)을 조회합니다. 없으면 None."""
+    """로그인한 사용자의 프로필(아이디, 프로필 사진 URL 등)을 조회합니다. 없으면 None."""
     if _client is None:
         return None
     try:
@@ -85,3 +90,38 @@ async def get_profile_by_user_id(user_id: str) -> Optional[dict]:
     except Exception as e:
         print(f"[profile] 프로필 조회 실패: {e}")
         return None
+
+
+async def update_profile(
+    user_id: str, username: Optional[str] = None, avatar_url: Optional[str] = None
+) -> tuple[bool, Optional[str]]:
+    """
+    프로필 화면에서 아이디/프로필 사진을 수정합니다. 넘겨준 값만 반영됩니다.
+    아이디를 바꿀 때는 다른 사람과 중복되지 않는지 확인합니다.
+    """
+    if _client is None:
+        return False, "서버 설정 오류로 수정할 수 없어요."
+
+    update_fields: dict = {}
+
+    if username is not None:
+        username = username.strip()
+        if not (2 <= len(username) <= 20):
+            return False, "아이디는 2~20자로 입력해주세요."
+        update_fields["username"] = username
+
+    if avatar_url is not None:
+        update_fields["avatar_url"] = avatar_url
+
+    if not update_fields:
+        return True, None
+
+    try:
+        _client.table("profiles").update(update_fields).eq("id", user_id).execute()
+        return True, None
+    except Exception as e:
+        message = str(e)
+        if "duplicate key" in message or "unique" in message.lower():
+            return False, "이미 사용 중인 아이디예요. 다른 아이디를 입력해주세요."
+        print(f"[profile] 프로필 수정 실패: {e}")
+        return False, "수정 중 오류가 발생했어요."

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.services.auth import get_optional_user_id
-from app.services.profile_service import create_profile, get_profile_by_user_id, resolve_login_email
+from app.services.profile_service import create_profile, get_profile_by_user_id, resolve_login_email, update_profile
 
 router = APIRouter(prefix="/api/account", tags=["account"])
 
@@ -21,6 +21,12 @@ class CreateProfileRequest(BaseModel):
     user_id: str
     username: str
     email: str
+
+
+class UpdateProfileRequest(BaseModel):
+    """넘겨준 필드만 반영됩니다."""
+    username: Optional[str] = None
+    avatar_url: Optional[str] = None
 
 
 @router.post("/resolve-login-email", response_model=ResolveLoginEmailResponse)
@@ -51,7 +57,25 @@ async def create_profile_endpoint(request: CreateProfileRequest):
 
 @router.get("/profile/me")
 async def get_my_profile(user_id: Optional[str] = Depends(get_optional_user_id)):
-    """로그인한 사용자의 프로필(아이디 등)을 조회합니다. 비로그인이면 null."""
+    """로그인한 사용자의 프로필(아이디, 프로필 사진 URL 등)을 조회합니다. 비로그인이면 null."""
     if not user_id:
         return None
     return await get_profile_by_user_id(user_id)
+
+
+@router.patch("/profile")
+async def update_my_profile(
+    request: UpdateProfileRequest, user_id: Optional[str] = Depends(get_optional_user_id)
+):
+    """
+    프로필 화면에서 아이디/프로필 사진을 수정합니다. 로그인이 필요합니다.
+    프로필 사진 파일 자체는 앱이 Supabase Storage에 먼저 올린 뒤, 그 결과 URL만
+    avatar_url로 여기에 보내주면 됩니다.
+    """
+    if not user_id:
+        raise HTTPException(status_code=401, detail="수정하려면 로그인이 필요해요.")
+
+    ok, message = await update_profile(user_id, request.username, request.avatar_url)
+    if not ok:
+        raise HTTPException(status_code=409, detail=message)
+    return {"ok": True}
