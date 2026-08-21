@@ -161,3 +161,19 @@ class SavedCourseDetail(BaseModel):
     category: CourseCategory
     region: str
     created_at: Optional[str] = None
+
+
+class AccessibilityPlaceScore(BaseModel):
+    """'접근성' 탭의 '휠체어 주요 여행지' 목록 항목"""
+    name: str
+    score: int
+    address: str
+
+
+class AccessibilitySummary(BaseModel):
+    """'접근성' 탭 요약 정보"""
+    wheelchair_count: int
+    senior_count: int
+    visual_count_mock: int   # 실제 데이터 없음 — 화면 표시용 목업 숫자
+    hearing_count_mock: int  # 실제 데이터 없음 — 화면 표시용 목업 숫자
+    top_wheelchair_places: list[AccessibilityPlaceScore]

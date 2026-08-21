@@ -495,5 +495,49 @@ class TourApiClient:
                 forecasts.append(CongestionForecast(date=date_str, hour=12, congestion_level=level))
             return forecasts
 
+    async def get_accessibility_summary(self, region: str, limit: int = 60) -> dict:
+        """
+        '접근성' 탭용 요약 정보.
+        휠체어/고령자는 실제 편의시설 데이터(AccessibilityFeatures)로 계산하고,
+        시각/청각장애는 관련 데이터를 제공하는 API가 없어 표시용 목업 숫자를 씁니다.
+        관광지별 접근성 점수는 6개 편의시설 항목 중 몇 개를 만족하는지로 계산합니다
+        (예: 6개 중 5개 충족 → 83점).
+        """
+        candidates = await self.search_accessible_attractions(region=region, user_type="general", limit=limit)
+
+        def score(a: Attraction) -> int:
+            feats = a.accessibility
+            checks = [
+                feats.has_ramp,
+                feats.has_elevator,
+                feats.has_accessible_restroom,
+                feats.has_wheelchair_rental,
+                feats.has_stroller_accessible_path,
+                feats.has_rest_area,
+            ]
+            return round(sum(1 for c in checks if c) / len(checks) * 100)
+
+        wheelchair_places = [a for a in candidates if a.accessibility.has_ramp or a.accessibility.has_wheelchair_rental]
+        senior_places = [a for a in candidates if a.accessibility.has_rest_area]
+
+        top_wheelchair = sorted(wheelchair_places, key=score, reverse=True)[:5]
+
+        return {
+            "wheelchair_count": len(wheelchair_places),
+            "senior_count": len(senior_places),
+            # 시각/청각장애 관련 편의시설 데이터를 제공하는 API가 없어 실제 계산이 불가능합니다.
+            # 화면 구성을 위한 표시용 숫자입니다 (실제 데이터 아님).
+            "visual_count_mock": 613,
+            "hearing_count_mock": 594,
+            "top_wheelchair_places": [
+                {
+                    "name": a.name,
+                    "score": score(a),
+                    "address": a.address,
+                }
+                for a in top_wheelchair
+            ],
+        }
+
 
 tour_api_client = TourApiClient()

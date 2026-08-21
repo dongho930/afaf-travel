@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query
 
-from app.models.schemas import Attraction, RegionOption, UserType
+from app.models.schemas import AccessibilitySummary, Attraction, RegionOption, UserType
 from app.services.sigungu_codes import list_signgu_by_area
 from app.services.tour_api import tour_api_client
 
@@ -44,3 +44,13 @@ async def congestion_forecast(content_id: str):
     if forecast is None:
         raise HTTPException(status_code=404, detail="관광지를 찾을 수 없습니다.")
     return forecast
+
+
+@router.get("/accessibility-summary", response_model=AccessibilitySummary)
+async def accessibility_summary(region: str = Query(default="경기도")):
+    """
+    '접근성' 탭용 요약 정보. 휠체어/고령자 개수는 실제 편의시설 데이터로 계산하고,
+    시각/청각장애는 관련 API 데이터가 없어 목업 숫자를 씁니다 (필드명에 _mock 표시).
+    """
+    data = await tour_api_client.get_accessibility_summary(region)
+    return AccessibilitySummary(**data)
