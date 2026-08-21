@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -98,3 +98,34 @@ class CourseResponse(BaseModel):
     summary: str
     stops: list[CourseStop]
     generated_for: UserType
+
+
+# 사용자가 저장할 때 고를 수 있는 여행 분류
+CourseCategory = Literal["가족", "커플", "친구", "혼자", "기타"]
+
+
+class SaveCourseRequest(BaseModel):
+    """생성된 코스를 프로필에 저장할 때, 여행 이름과 분류를 함께 지정"""
+    name: str = Field(..., min_length=1, max_length=50, description="사용자가 지정하는 여행 이름")
+    category: CourseCategory = "기타"
+
+
+class SavedCourseSummary(BaseModel):
+    """마이페이지 목록에 표시할 저장된 코스 요약 정보"""
+    course_id: str
+    name: str
+    category: CourseCategory
+    title: str
+    summary: str
+    region: str
+    stop_count: int
+    created_at: Optional[str] = None
+
+
+class SavedCourseDetail(BaseModel):
+    """저장된 코스 하나를 다시 불러올 때(지도/결과 화면 재진입용) 반환하는 전체 정보"""
+    course: CourseResponse
+    name: str
+    category: CourseCategory
+    region: str
+    created_at: Optional[str] = None
