@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # Groq API (AI 코스 생성) — https://console.groq.com 에서 무료로 발급 가능
     groq_api_key: str = os.getenv("GROQ_API_KEY", "")
-    groq_model: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    groq_model: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
     # 카카오맵 (모바일 앱에서 직접 사용하지만, 서버측 길찾기 API 호출 시 사용)
     kakao_rest_api_key: str = os.getenv("KAKAO_REST_API_KEY", "")
