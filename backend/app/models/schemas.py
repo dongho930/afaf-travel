@@ -100,21 +100,38 @@ class CourseResponse(BaseModel):
     generated_for: UserType
 
 
-# 사용자가 저장할 때 고를 수 있는 여행 분류
+# 사용자가 여행을 만들 때 고를 수 있는 분류
 CourseCategory = Literal["가족", "커플", "친구", "혼자", "기타"]
 
 
-class SaveCourseRequest(BaseModel):
-    """생성된 코스를 프로필에 저장할 때, 여행 이름과 분류를 함께 지정"""
-    name: str = Field(..., min_length=1, max_length=50, description="사용자가 지정하는 여행 이름")
+class TripCreateRequest(BaseModel):
+    """새 여행(그룹) 만들기 — 이름과 분류를 한 번 지정하면, 그 아래에 코스를 여러 개 저장할 수 있음"""
+    name: str = Field(..., min_length=1, max_length=50, description="여행 이름 (예: '제주도 가족여행')")
     category: CourseCategory = "기타"
 
 
-class SavedCourseSummary(BaseModel):
-    """마이페이지 목록에 표시할 저장된 코스 요약 정보"""
-    course_id: str
+class TripSummary(BaseModel):
+    """마이페이지 목록에 표시할 여행 요약 정보"""
+    trip_id: str
     name: str
     category: CourseCategory
+    course_count: int
+    created_at: Optional[str] = None
+
+
+class SaveCourseRequest(BaseModel):
+    """
+    생성된 코스를 저장할 때, 기존 여행에 추가하거나(trip_id) 새 여행을 만들면서
+    (new_trip_name + category) 저장할 수 있습니다. 둘 중 하나만 채워주세요.
+    """
+    trip_id: Optional[str] = Field(default=None, description="기존 여행에 추가하려면 그 여행의 id")
+    new_trip_name: Optional[str] = Field(default=None, min_length=1, max_length=50, description="새 여행을 만들며 저장하려면 이름")
+    category: Optional[CourseCategory] = Field(default=None, description="새 여행을 만들 때의 분류")
+
+
+class SavedCourseSummary(BaseModel):
+    """여행 상세 화면 목록에 표시할 저장된 코스 요약 정보"""
+    course_id: str
     title: str
     summary: str
     region: str
@@ -125,7 +142,8 @@ class SavedCourseSummary(BaseModel):
 class SavedCourseDetail(BaseModel):
     """저장된 코스 하나를 다시 불러올 때(지도/결과 화면 재진입용) 반환하는 전체 정보"""
     course: CourseResponse
-    name: str
+    trip_id: str
+    trip_name: str
     category: CourseCategory
     region: str
     created_at: Optional[str] = None

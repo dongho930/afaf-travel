@@ -11,24 +11,32 @@ from app.models.schemas import (
     SaveCourseRequest,
     SavedCourseDetail,
     SavedCourseSummary,
+    TripCreateRequest,
+    TripSummary,
 )
 from app.services.ai_service import generate_course, generate_course_from_selection, recommend_places
 from app.services.auth import get_optional_user_id
 from app.services.supabase_service import (
-    row_to_course_response,
+    attach_course_to_trip,
+    create_trip,
     delete_course,
+    delete_trip,
     get_saved_course_detail,
     list_recent_courses,
-    list_saved_courses,
-    mark_course_saved,
+    list_trip_courses,
+    list_trips,
+    row_to_course_response,
     save_course,
 )
 from app.services.tour_api import tour_api_client
 
-router = APIRouter(prefix="/api/courses", tags=["courses"])
+router = APIRouter(tags=["courses"])
+
+courses_router = APIRouter(prefix="/api/courses", tags=["courses"])
+trips_router = APIRouter(prefix="/api/trips", tags=["trips"])
 
 
-@router.post("/recommend", response_model=PlaceRecommendationResponse)
+@courses_router.post("/recommend", response_model=PlaceRecommendationResponse)
 async def recommend_course_places(request: PlaceRecommendationRequest):
     """
     1단계: 사용자의 자연어 질의에 맞는 장소 후보를 넓게 추천합니다.
@@ -45,17 +53,16 @@ async def recommend_course_places(request: PlaceRecommendationRequest):
     return PlaceRecommendationResponse(query_text=request.query_text, candidates=selected)
 
 
-@router.post("/generate-from-selection", response_model=CourseResponse)
+@courses_router.post("/generate-from-selection", response_model=CourseResponse)
 async def create_course_from_selection(
     request: GenerateFromSelectionRequest,
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
     """
     2단계: 1단계 추천 목록에서 사용자가 직접 고른 장소들로 최종 코스(순서/시간대)를 생성합니다.
-    로그인한 사용자면 자동으로 기록되지만(is_saved=False), 결과 화면에서 이름/분류를
-    지정해 명시적으로 '저장'해야 마이페이지 목록에 나타납니다.
+    로그인한 사용자면 자동으로 기록되지만, 결과 화면에서 여행에 저장해야
+    마이페이지 목록에 나타납니다.
     """
-    # 사용자가 고른 장소들의 최신 정보(편의시설, 혼잡도 등)를 다시 가져옵니다.
     candidates = await tour_api_client.search_accessible_attractions(
         region=request.region, user_type=request.user_type.value, limit=25, sigungu_cd=request.sigungu_cd
     )
@@ -76,7 +83,7 @@ async def create_course_from_selection(
     return course
 
 
-@router.post("/generate", response_model=CourseResponse)
+@courses_router.post("/generate", response_model=CourseResponse)
 async def create_course(
     request: CourseRequest,
     user_id: Optional[str] = Depends(get_optional_user_id),
@@ -97,43 +104,50 @@ async def create_course(
     return course
 
 
-@router.get("/history")
+@courses_router.get("/history")
 async def get_course_history(
     limit: int = 20,
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
-    """
-    로그인한 사용자의 최근 코스 이력을 조회합니다 (저장 여부와 상관없이 생성된 것 전부).
-    비로그인 상태면 빈 목록을 반환합니다.
-    """
+    """로그인한 사용자의 최근 코스 이력을 조회합니다 (여행 저장 여부와 상관없이 생성된 것 전부)."""
     return await list_recent_courses(limit=limit, user_id=user_id)
 
 
-@router.post("/{course_id}/save")
+@courses_router.post("/{course_id}/save")
 async def save_course_endpoint(
     course_id: str,
     request: SaveCourseRequest,
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
     """
-    결과 화면에서 '저장하기'를 눌렀을 때 호출합니다. 여행 이름과 분류를 지정해서
-    이 코스를 마이페이지 '저장된 코스' 목록에 남깁니다. 로그인이 필요합니다.
+    결과 화면에서 '저장하기'를 눌렀을 때 호출합니다.
+    - trip_id를 주면 기존 여행에 이 코스를 추가합니다.
+    - new_trip_name(+category)을 주면 새 여행을 만들면서 그 여행에 이 코스를 추가합니다.
+    로그인이 필요합니다.
     """
     if not user_id:
         raise HTTPException(status_code=401, detail="저장하려면 로그인이 필요해요.")
 
-    ok, message = await mark_course_saved(course_id, user_id, request.name, request.category)
+    trip_id = request.trip_id
+    if not trip_id:
+        if not request.new_trip_name:
+            raise HTTPException(status_code=422, detail="기존 여행(trip_id)을 고르거나, 새 여행 이름(new_trip_name)을 입력해주세요.")
+        trip_id = await create_trip(user_id, request.new_trip_name, request.category or "기타")
+        if not trip_id:
+            raise HTTPException(status_code=500, detail="새 여행을 만들지 못했어요.")
+
+    ok, message = await attach_course_to_trip(course_id, user_id, trip_id)
     if not ok:
         raise HTTPException(status_code=404, detail=message)
-    return {"ok": True}
+    return {"ok": True, "trip_id": trip_id}
 
 
-@router.delete("/{course_id}")
+@courses_router.delete("/{course_id}")
 async def delete_course_endpoint(
     course_id: str,
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
-    """저장된 코스를 삭제합니다. 본인이 저장한 코스만 지울 수 있습니다."""
+    """저장된 코스 하나를 여행에서 삭제합니다 (여행 자체는 남아있어요)."""
     if not user_id:
         raise HTTPException(status_code=401, detail="삭제하려면 로그인이 필요해요.")
 
@@ -143,29 +157,7 @@ async def delete_course_endpoint(
     return {"ok": True}
 
 
-@router.get("/saved", response_model=list[SavedCourseSummary])
-async def list_saved_courses_endpoint(user_id: Optional[str] = Depends(get_optional_user_id)):
-    """마이페이지에 표시할, 사용자가 이름/분류를 지정해 저장한 코스 목록입니다."""
-    if not user_id:
-        return []
-
-    rows = await list_saved_courses(user_id)
-    return [
-        SavedCourseSummary(
-            course_id=row["id"],
-            name=row.get("name") or "",
-            category=row.get("category") or "기타",
-            title=row["title"],
-            summary=row["summary"],
-            region=row.get("region") or "",
-            stop_count=len(row.get("stops") or []),
-            created_at=row.get("created_at"),
-        )
-        for row in rows
-    ]
-
-
-@router.get("/saved/{course_id}", response_model=SavedCourseDetail)
+@courses_router.get("/saved/{course_id}", response_model=SavedCourseDetail)
 async def get_saved_course_endpoint(
     course_id: str, user_id: Optional[str] = Depends(get_optional_user_id)
 ):
@@ -177,10 +169,81 @@ async def get_saved_course_endpoint(
     if not row:
         raise HTTPException(status_code=404, detail="저장된 코스를 찾을 수 없어요.")
 
+    trip = row.get("_trip") or {}
     return SavedCourseDetail(
         course=row_to_course_response(row),
-        name=row.get("name") or "",
-        category=row.get("category") or "기타",
+        trip_id=row.get("trip_id") or "",
+        trip_name=trip.get("name") or "",
+        category=trip.get("category") or "기타",
         region=row.get("region") or "",
         created_at=row.get("created_at"),
     )
+
+
+@trips_router.post("", response_model=TripSummary)
+async def create_trip_endpoint(
+    request: TripCreateRequest, user_id: Optional[str] = Depends(get_optional_user_id)
+):
+    """새 여행을 미리 만들어둡니다 (보통은 코스 저장 시 한 번에 만들지만, 필요하면 따로도 가능)."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="로그인이 필요해요.")
+
+    trip_id = await create_trip(user_id, request.name, request.category)
+    if not trip_id:
+        raise HTTPException(status_code=500, detail="여행을 만들지 못했어요.")
+    return TripSummary(trip_id=trip_id, name=request.name, category=request.category, course_count=0)
+
+
+@trips_router.get("", response_model=list[TripSummary])
+async def list_trips_endpoint(user_id: Optional[str] = Depends(get_optional_user_id)):
+    """마이페이지에 표시할 내 여행 목록 (여행별 저장된 코스 개수 포함)."""
+    if not user_id:
+        return []
+    rows = await list_trips(user_id)
+    return [
+        TripSummary(
+            trip_id=row["id"],
+            name=row["name"],
+            category=row.get("category") or "기타",
+            course_count=row.get("course_count", 0),
+            created_at=row.get("created_at"),
+        )
+        for row in rows
+    ]
+
+
+@trips_router.delete("/{trip_id}")
+async def delete_trip_endpoint(trip_id: str, user_id: Optional[str] = Depends(get_optional_user_id)):
+    """여행과 그 안에 저장된 코스들을 함께 삭제합니다."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="삭제하려면 로그인이 필요해요.")
+
+    ok, message = await delete_trip(trip_id, user_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail=message)
+    return {"ok": True}
+
+
+@trips_router.get("/{trip_id}/courses", response_model=list[SavedCourseSummary])
+async def list_trip_courses_endpoint(
+    trip_id: str, user_id: Optional[str] = Depends(get_optional_user_id)
+):
+    """특정 여행에 저장된 코스 목록."""
+    if not user_id:
+        return []
+    rows = await list_trip_courses(trip_id, user_id)
+    return [
+        SavedCourseSummary(
+            course_id=row["id"],
+            title=row["title"],
+            summary=row["summary"],
+            region=row.get("region") or "",
+            stop_count=len(row.get("stops") or []),
+            created_at=row.get("created_at"),
+        )
+        for row in rows
+    ]
+
+
+router.include_router(courses_router)
+router.include_router(trips_router)
