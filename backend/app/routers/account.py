@@ -4,7 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.services.auth import get_optional_user_id
-from app.services.profile_service import create_profile, get_profile_by_user_id, resolve_login_email, update_profile
+from app.services.profile_service import (
+    create_profile,
+    get_profile_by_user_id,
+    resolve_login_email,
+    update_profile,
+    upload_avatar,
+)
 
 router = APIRouter(prefix="/api/account", tags=["account"])
 
@@ -27,6 +33,11 @@ class UpdateProfileRequest(BaseModel):
     """넘겨준 필드만 반영됩니다."""
     username: Optional[str] = None
     avatar_url: Optional[str] = None
+
+
+class UploadAvatarRequest(BaseModel):
+    image_base64: str
+    file_ext: str = "jpg"  # jpg 또는 png
 
 
 @router.post("/resolve-login-email", response_model=ResolveLoginEmailResponse)
@@ -68,9 +79,8 @@ async def update_my_profile(
     request: UpdateProfileRequest, user_id: Optional[str] = Depends(get_optional_user_id)
 ):
     """
-    프로필 화면에서 아이디/프로필 사진을 수정합니다. 로그인이 필요합니다.
-    프로필 사진 파일 자체는 앱이 Supabase Storage에 먼저 올린 뒤, 그 결과 URL만
-    avatar_url로 여기에 보내주면 됩니다.
+    프로필 화면에서 아이디를 수정합니다 (프로필 사진은 /account/avatar 엔드포인트를 쓰세요).
+    로그인이 필요합니다.
     """
     if not user_id:
         raise HTTPException(status_code=401, detail="수정하려면 로그인이 필요해요.")
@@ -79,3 +89,22 @@ async def update_my_profile(
     if not ok:
         raise HTTPException(status_code=409, detail=message)
     return {"ok": True}
+
+
+@router.post("/avatar")
+async def upload_avatar_endpoint(
+    request: UploadAvatarRequest, user_id: Optional[str] = Depends(get_optional_user_id)
+):
+    """
+    프로필 사진을 업로드합니다. 앱이 이미지를 base64로 인코딩해서 보내면,
+    이 백엔드가 서비스 키(관리자 권한)로 Supabase Storage에 대신 업로드하고
+    profiles.avatar_url까지 갱신합니다 (클라이언트가 직접 올리지 않으므로
+    Storage RLS 정책 설정과 무관하게 항상 동작합니다). 로그인이 필요합니다.
+    """
+    if not user_id:
+        raise HTTPException(status_code=401, detail="업로드하려면 로그인이 필요해요.")
+
+    avatar_url, message = await upload_avatar(user_id, request.image_base64, request.file_ext)
+    if not avatar_url:
+        raise HTTPException(status_code=500, detail=message)
+    return {"avatar_url": avatar_url}
