@@ -14,9 +14,9 @@ class Settings(BaseSettings):
     tour_api_key: str = os.getenv("TOUR_API_KEY", "")
     tour_api_base_url: str = "http://apis.data.go.kr/B551011"
 
-    # Gemini API (AI 코스 생성) — Google AI Studio에서 무료로 발급 가능 (신용카드 불필요)
-    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
-    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+    # Groq API (AI 코스 생성) — https://console.groq.com 에서 무료로 발급 가능
+    groq_api_key: str = os.getenv("GROQ_API_KEY", "")
+    groq_model: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
     # 카카오맵 (모바일 앱에서 직접 사용하지만, 서버측 길찾기 API 호출 시 사용)
     kakao_rest_api_key: str = os.getenv("KAKAO_REST_API_KEY", "")

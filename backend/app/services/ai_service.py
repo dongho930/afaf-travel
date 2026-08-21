@@ -1,12 +1,11 @@
 """
-Google Gemini API를 이용한 자연어 질의 파싱 및 무장애 여행 코스 생성
+Groq API(OpenAI 호환)를 이용한 자연어 질의 파싱 및 무장애 여행 코스 생성
 
 - 사용자 질의(query_text) + 무장애 필터링된 관광지 목록 + 혼잡도 예측 데이터를
-  하나의 프롬프트로 구성해 Gemini에게 코스 구성(JSON)을 요청합니다.
-- Gemini API는 Google AI Studio(https://aistudio.google.com/apikey)에서
-  신용카드 등록 없이 무료로 키를 발급받을 수 있고, 무료 사용량 한도 안에서는
-  과금되지 않습니다.
-- GEMINI_API_KEY가 없으면 규칙 기반 목업 생성기로 대체되어,
+  하나의 프롬프트로 구성해 Groq에게 코스 구성(JSON)을 요청합니다.
+- Groq API는 https://console.groq.com 에서 신용카드 등록 없이 무료로 키를
+  발급받을 수 있고, 무료 사용량 한도가 다른 서비스보다 넉넉한 편입니다.
+- GROQ_API_KEY가 없으면 규칙 기반 목업 생성기로 대체되어,
   키 발급 전에도 프론트엔드 개발이 막히지 않습니다.
 """
 import json
@@ -27,9 +26,7 @@ from app.models.schemas import (
 
 settings = get_settings()
 
-GEMINI_ENDPOINT = (
-    "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-)
+GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 
 SYSTEM_PROMPT = """당신은 관광약자(휠체어 이용자, 유모차 동반 가족, 고령자, 임산부)를 위한
 경기도 무장애 여행 코스를 설계하는 여행 플래너 AI입니다.
@@ -152,25 +149,29 @@ def _mock_generate(request: CourseRequest, candidates: list[Attraction]) -> dict
     }
 
 
-async def _gemini_call(system_prompt: str, user_prompt: str) -> dict:
-    url = GEMINI_ENDPOINT.format(model=settings.gemini_model)
+async def _groq_call(system_prompt: str, user_prompt: str) -> dict:
     payload = {
-        "system_instruction": {"parts": [{"text": system_prompt}]},
-        "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
-        # JSON 형식으로만 응답하도록 강제 (Gemini의 구조화된 출력 기능)
-        "generationConfig": {"responseMimeType": "application/json"},
+        "model": settings.groq_model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        # JSON 형식으로만 응답하도록 강제 (Groq의 OpenAI 호환 구조화된 출력 기능)
+        "response_format": {"type": "json_object"},
+        "temperature": 0.3,
     }
+    headers = {"Authorization": f"Bearer {settings.groq_api_key}"}
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(url, params={"key": settings.gemini_api_key}, json=payload)
+        resp = await client.post(GROQ_ENDPOINT, headers=headers, json=payload)
         resp.raise_for_status()
         data = resp.json()
 
-    text = data["candidates"][0]["content"]["parts"][0]["text"]
+    text = data["choices"][0]["message"]["content"]
     return json.loads(text)
 
 
-async def _gemini_generate(request: CourseRequest, candidates: list[Attraction]) -> dict:
-    return await _gemini_call(SYSTEM_PROMPT, _build_user_prompt(request, candidates))
+async def _groq_generate(request: CourseRequest, candidates: list[Attraction]) -> dict:
+    return await _groq_call(SYSTEM_PROMPT, _build_user_prompt(request, candidates))
 
 
 def _stops_from_raw(raw: dict, candidates: list[Attraction]) -> list[CourseStop]:
@@ -195,8 +196,8 @@ async def generate_course(request: CourseRequest, candidates: list[Attraction]) 
     if not candidates:
         raise ValueError("추천할 수 있는 무장애 관광지 후보가 없습니다.")
 
-    if settings.gemini_api_key:
-        raw = await _gemini_generate(request, candidates)
+    if settings.groq_api_key:
+        raw = await _groq_generate(request, candidates)
     else:
         raw = _mock_generate(request, candidates)
 
@@ -225,7 +226,7 @@ def _mock_recommend(request: PlaceRecommendationRequest, candidates: list[Attrac
     ]
 
 
-async def _gemini_recommend(request: PlaceRecommendationRequest, candidates: list[Attraction]) -> list[dict]:
+async def _groq_recommend(request: PlaceRecommendationRequest, candidates: list[Attraction]) -> list[dict]:
     user_prompt = json.dumps(
         {
             "query_text": request.query_text,
@@ -243,7 +244,7 @@ async def _gemini_recommend(request: PlaceRecommendationRequest, candidates: lis
         },
         ensure_ascii=False,
     )
-    raw = await _gemini_call(RECOMMEND_SYSTEM_PROMPT, user_prompt)
+    raw = await _groq_call(RECOMMEND_SYSTEM_PROMPT, user_prompt)
     return raw["selected"]
 
 
@@ -257,8 +258,8 @@ async def recommend_places(
     if not candidates:
         raise ValueError("추천할 수 있는 무장애 관광지 후보가 없습니다.")
 
-    if settings.gemini_api_key:
-        selected = await _gemini_recommend(request, candidates)
+    if settings.groq_api_key:
+        selected = await _groq_recommend(request, candidates)
     else:
         selected = _mock_recommend(request, candidates)
 
@@ -289,8 +290,8 @@ async def generate_course_from_selection(
         max_stops=len(selected_attractions),
     )
 
-    if settings.gemini_api_key:
-        raw = await _gemini_call(
+    if settings.groq_api_key:
+        raw = await _groq_call(
             ORDER_SYSTEM_PROMPT, _build_user_prompt(course_request, selected_attractions)
         )
     else:
