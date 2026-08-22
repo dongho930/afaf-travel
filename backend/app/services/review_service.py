@@ -115,3 +115,38 @@ async def count_reviews_by_user(user_id: str) -> int:
     except Exception as e:
         print(f"[review] 내 리뷰 개수 조회 실패: {e}")
         return 0
+
+
+async def get_average_ratings(content_ids: list[str]) -> dict[str, dict]:
+    """
+    주어진 content_id 목록에 대해 {content_id: {"avg_rating": float, "review_count": int}}를
+    반환합니다. 리뷰가 하나도 없는 content_id는 결과에 아예 안 나타납니다(그게 곧
+    '평점 없음' 신호입니다). 평균은 파이썬에서 직접 계산합니다 — Supabase 기본
+    쿼리로는 group-by 평균을 바로 못 구해서, 해당 장소들의 리뷰를 전부 가져와
+    묶습니다(리뷰 수 자체가 아직 많지 않아 부담 없는 방식입니다).
+    """
+    if _client is None or not content_ids:
+        return {}
+    try:
+        result = (
+            _client.table(_REVIEWS_TABLE)
+            .select("content_id, rating")
+            .in_("content_id", content_ids)
+            .execute()
+        )
+        rows = result.data or []
+    except Exception as e:
+        print(f"[review] 평균 평점 조회 실패: {e}")
+        return {}
+
+    sums: dict[str, int] = {}
+    counts: dict[str, int] = {}
+    for r in rows:
+        cid = r["content_id"]
+        sums[cid] = sums.get(cid, 0) + r["rating"]
+        counts[cid] = counts.get(cid, 0) + 1
+
+    return {
+        cid: {"avg_rating": sums[cid] / counts[cid], "review_count": counts[cid]}
+        for cid in sums
+    }

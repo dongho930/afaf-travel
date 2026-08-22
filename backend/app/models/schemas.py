@@ -56,6 +56,9 @@ class Attraction(BaseModel):
     overview: Optional[str] = None
     # AccessibilityFeatures를 사람이 읽는 한글 라벨로 풀어낸 목록 (예: ["경사로", "휠체어 대여"])
     accessibility_benefits: list[str] = Field(default_factory=list)
+    # 방문자 리뷰 평균 별점(1~5)과 리뷰 수. 리뷰가 없으면 avg_rating은 None.
+    avg_rating: Optional[float] = None
+    review_count: int = 0
 
 
 class RegionOption(BaseModel):
