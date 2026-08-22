@@ -1601,7 +1601,10 @@ class TourApiClient:
         top_pregnant = sorted(pregnant_places, key=pregnant_score, reverse=True)[:5]
 
         def to_place_scores(places: list[Attraction], score_fn) -> list[dict]:
-            return [{"name": a.name, "score": score_fn(a), "address": a.address} for a in places]
+            return [
+                {"content_id": a.content_id, "name": a.name, "score": score_fn(a), "address": a.address}
+                for a in places
+            ]
 
         return {
             "wheelchair_count": len(wheelchair_places),

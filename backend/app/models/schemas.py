@@ -196,6 +196,7 @@ class SavedCourseDetail(BaseModel):
 
 class AccessibilityPlaceScore(BaseModel):
     """'접근성' 탭의 '휠체어 주요 여행지' 목록 항목"""
+    content_id: str
     name: str
     score: int
     address: str
