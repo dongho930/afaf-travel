@@ -536,10 +536,24 @@ class TourApiClient:
                     "videoguide",   # 자막 비디오가이드 및 영상 자막안내
                     "hearingroom",  # 객실
                 )
+                family_fields = (
+                    "stroller",       # 유모차
+                    "lactationroom",  # 수유실
+                    "babysparechair",  # 유아용 보조의자
+                )
+                pregnant_fields = (
+                    "lactationroom",   # 수유실
+                    "babysparechair",  # 유아용 보조의자
+                    "route",           # 접근로(경사로)
+                    "elevator",        # 엘리베이터
+                    "restroom",        # 화장실
+                )
 
                 wheelchair_count = sum(1 for f in wheelchair_fields if has_text(f))
                 visual_count = sum(1 for f in visual_fields if has_text(f))
                 hearing_count = sum(1 for f in hearing_fields if has_text(f))
+                family_count = sum(1 for f in family_fields if has_text(f))
+                pregnant_count = sum(1 for f in pregnant_fields if has_text(f))
 
                 features = AccessibilityFeatures(
                     has_ramp=has_text("route"),
@@ -553,6 +567,8 @@ class TourApiClient:
                     wheelchair_accessibility_count=wheelchair_count,
                     visual_accessibility_count=visual_count,
                     hearing_accessibility_count=hearing_count,
+                    family_accessibility_count=family_count,
+                    pregnant_accessibility_count=pregnant_count,
                 )
                 if diag is not None:
                     diag["has_record"] = diag.get("has_record", 0) + 1
@@ -709,6 +725,8 @@ class TourApiClient:
                             "wheelchair_accessibility_count": features.wheelchair_accessibility_count,
                             "visual_accessibility_count": features.visual_accessibility_count,
                             "hearing_accessibility_count": features.hearing_accessibility_count,
+                            "family_accessibility_count": features.family_accessibility_count,
+                            "pregnant_accessibility_count": features.pregnant_accessibility_count,
                             "record_found": True,
                             "fetched_at": datetime.datetime.utcnow().isoformat(),
                         }
@@ -750,6 +768,8 @@ class TourApiClient:
                     wheelchair_accessibility_count=int(row.get("wheelchair_accessibility_count") or 0),
                     visual_accessibility_count=int(row.get("visual_accessibility_count") or 0),
                     hearing_accessibility_count=int(row.get("hearing_accessibility_count") or 0),
+                    family_accessibility_count=int(row.get("family_accessibility_count") or 0),
+                    pregnant_accessibility_count=int(row.get("pregnant_accessibility_count") or 0),
                 )
         _ = stopped_early  # 로그/필요 시 확장을 위해 남겨둠 (현재는 diag로 충분히 노출됨)
 
@@ -1064,6 +1084,8 @@ class TourApiClient:
                     wheelchair_accessibility_count=int(row.get("wheelchair_accessibility_count") or 0),
                     visual_accessibility_count=int(row.get("visual_accessibility_count") or 0),
                     hearing_accessibility_count=int(row.get("hearing_accessibility_count") or 0),
+                    family_accessibility_count=int(row.get("family_accessibility_count") or 0),
+                    pregnant_accessibility_count=int(row.get("pregnant_accessibility_count") or 0),
                 )
             else:
                 features, ok = await self._fetch_accessibility(client, content_id)
@@ -1084,6 +1106,8 @@ class TourApiClient:
                                 "wheelchair_accessibility_count": features.wheelchair_accessibility_count,
                                 "visual_accessibility_count": features.visual_accessibility_count,
                                 "hearing_accessibility_count": features.hearing_accessibility_count,
+                                "family_accessibility_count": features.family_accessibility_count,
+                                "pregnant_accessibility_count": features.pregnant_accessibility_count,
                                 "record_found": True,
                                 "fetched_at": datetime.datetime.utcnow().isoformat(),
                             }
@@ -1548,11 +1572,21 @@ class TourApiClient:
             # 수화안내/자막비디오가이드/객실 중 몇 개나 있는지(최대 3개) 기준.
             return round(min(a.accessibility.hearing_accessibility_count, 3) / 3 * 100)
 
+        def family_score(a: Attraction) -> int:
+            # 유모차/수유실/유아용보조의자 중 몇 개나 있는지(최대 3개) 기준.
+            return round(min(a.accessibility.family_accessibility_count, 3) / 3 * 100)
+
+        def pregnant_score(a: Attraction) -> int:
+            # 수유실/유아용보조의자/접근로/엘리베이터/화장실 중 몇 개나 있는지(최대 5개) 기준.
+            return round(min(a.accessibility.pregnant_accessibility_count, 5) / 5 * 100)
+
         wheelchair_places = [a for a in candidates if a.accessibility.wheelchair_accessibility_count > 0]
         senior_places = [a for a in candidates if a.accessibility.has_rest_area]
         stroller_places = [a for a in candidates if a.accessibility.has_stroller_accessible_path]
         visual_places = [a for a in candidates if a.accessibility.has_visual_accessibility]
         hearing_places = [a for a in candidates if a.accessibility.has_hearing_accessibility]
+        family_places = [a for a in candidates if a.accessibility.family_accessibility_count > 0]
+        pregnant_places = [a for a in candidates if a.accessibility.pregnant_accessibility_count > 0]
         # '무장애 여행지' 총 개수는 휠체어/유모차/고령자·임산부(휴게공간) 중
         # 하나라도 해당하는 장소를 중복 없이 합친 값입니다.
         any_accessible_ids = {
@@ -1563,6 +1597,8 @@ class TourApiClient:
         top_senior = sorted(senior_places, key=senior_score, reverse=True)[:5]
         top_visual = sorted(visual_places, key=visual_score, reverse=True)[:5]
         top_hearing = sorted(hearing_places, key=hearing_score, reverse=True)[:5]
+        top_family = sorted(family_places, key=family_score, reverse=True)[:5]
+        top_pregnant = sorted(pregnant_places, key=pregnant_score, reverse=True)[:5]
 
         def to_place_scores(places: list[Attraction], score_fn) -> list[dict]:
             return [{"name": a.name, "score": score_fn(a), "address": a.address} for a in places]
@@ -1575,10 +1611,14 @@ class TourApiClient:
             # 자막비디오가이드 등)로 계산한 값입니다 — 더 이상 목업이 아닙니다.
             "visual_count": len(visual_places),
             "hearing_count": len(hearing_places),
+            "family_count": len(family_places),
+            "pregnant_count": len(pregnant_places),
             "top_wheelchair_places": to_place_scores(top_wheelchair, wheelchair_score),
             "top_senior_places": to_place_scores(top_senior, senior_score),
             "top_visual_places": to_place_scores(top_visual, visual_score),
             "top_hearing_places": to_place_scores(top_hearing, hearing_score),
+            "top_family_places": to_place_scores(top_family, family_score),
+            "top_pregnant_places": to_place_scores(top_pregnant, pregnant_score),
             # 진단용 필드: 43 같은 숫자가 왜 그렇게 나왔는지 원인을 구분하기 위한 정보.
             # candidates_per_category: 카테고리별(관광지/음식점/문화시설/레포츠/숙박) 수집 건수
             # total_candidates_before_accessibility_fetch: 중복 제거 후 전체 후보 수

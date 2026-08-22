@@ -28,15 +28,19 @@ class AccessibilityFeatures(BaseModel):
     # 청각장애: signguide(수화안내)/videoguide(자막비디오가이드)/hearingroom(객실)
     #   중 하나라도 있으면 True (기타상세 제외)
     has_hearing_accessibility: bool = False
-    # 지체장애/시각장애/청각장애 세부 편의시설이 몇 개나 있는지(개수).
+    # 지체장애/시각장애/청각장애/영유아가족 세부 편의시설이 몇 개나 있는지(개수).
     # 지체장애는 주차/접근로/휠체어대여/출입통로/엘리베이터/화장실 중 몇 개
     # (0~6), 시각장애는 점자블록/보조견동반/안내요원/오디오가이드/큰활자홍보물/
     # 점자홍보물/유도안내설비 중 몇 개(0~7), 청각장애는 수화안내/자막비디오가이드/
-    # 객실 중 몇 개(0~3)인지를 세서, 단순 있음/없음보다 세분화된 점수를 매길 때
-    # 씁니다. '기타상세'(자유서술 텍스트)는 정형화된 유무 정보가 아니라서 제외합니다.
+    # 객실 중 몇 개(0~3), 영유아가족은 유모차/수유실/유아용보조의자 중 몇 개
+    # (0~3), 임산부는 수유실/유아용보조의자/접근로/엘리베이터/화장실 중 몇 개
+    # (0~5)인지를 세서, 단순 있음/없음보다 세분화된 점수를 매길 때 씁니다.
+    # '기타상세'(자유서술 텍스트)는 정형화된 유무 정보가 아니라서 제외합니다.
     wheelchair_accessibility_count: int = 0
     visual_accessibility_count: int = 0
     hearing_accessibility_count: int = 0
+    family_accessibility_count: int = 0
+    pregnant_accessibility_count: int = 0
 
 
 class CongestionForecast(BaseModel):
@@ -204,10 +208,14 @@ class AccessibilitySummary(BaseModel):
     total_accessible_count: int  # 휠체어/유모차/고령자·임산부 중 하나라도 해당하는 장소를 합친(중복 제거) 개수
     visual_count: int   # 시각장애 편의시설(점자블록/오디오가이드 등) 보유 장소 수 — 실제 데이터
     hearing_count: int  # 청각장애 편의시설(수화안내/자막비디오가이드 등) 보유 장소 수 — 실제 데이터
+    family_count: int = 0  # 영유아가족 편의시설(유모차/수유실/유아용보조의자 등) 보유 장소 수
+    pregnant_count: int = 0  # 임산부 편의시설(수유실/유아용의자/경사로/엘리베이터/화장실) 보유 장소 수
     top_wheelchair_places: list[AccessibilityPlaceScore]
     top_senior_places: list[AccessibilityPlaceScore] = Field(default_factory=list)
     top_visual_places: list[AccessibilityPlaceScore] = Field(default_factory=list)
     top_hearing_places: list[AccessibilityPlaceScore] = Field(default_factory=list)
+    top_family_places: list[AccessibilityPlaceScore] = Field(default_factory=list)
+    top_pregnant_places: list[AccessibilityPlaceScore] = Field(default_factory=list)
     # 진단용(선택): wheelchair_count 등이 왜 그렇게 나왔는지 원인 확인용 정보.
     # 카테고리별 후보 수, 무장애 정보 등록 여부(no_record/has_record), API 실패 건수 등.
     # 화면에는 표시하지 않아도 되고, 디버깅 때 응답 JSON에서 바로 확인하기 위한 용도입니다.
