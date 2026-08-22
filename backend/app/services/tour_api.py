@@ -373,9 +373,16 @@ class TourApiClient:
     ) -> None:
         """
         attractions 각각의 overview 필드를 채웁니다. 캐시(attraction_overview_cache)에
-        있으면 그대로 쓰고, 없는 것만 새로 조회한 뒤 캐시에 저장합니다. 소개문은
-        거의 안 바뀌는 정보라 place_accessibility_cache와 달리 예산/조기중단 없이
-        간단하게 처리합니다 — 홈 화면 목록(20개 이하) 규모라 부담이 적습니다.
+        있으면 그대로 쓰고, 없는 것만 새로 조회한 뒤 캐시에 저장합니다.
+
+        호출한 쪽(search_accessible_attractions)이 이 함수 전체를 asyncio.wait_for로
+        시간제한을 걸어 부르는데, 예전엔 전체를 다 조회한 뒤 마지막에 한 번에
+        캐시 저장을 했습니다. 그러면 시간 초과로 중간에 취소될 때 이미 성공한
+        조회 결과까지 통째로 날아가서 캐시에 하나도 안 남는 문제가 있었습니다
+        (그래서 홈 화면은 계속 못 뜨고, 상세 페이지에서 개별로 조회한 것만 남았음).
+        그래서 여기서는 몇 개씩 묶어(청크) 순차 처리하면서 청크가 끝날 때마다
+        바로 캐시에 저장합니다 — 중간에 시간 초과로 잘려도 그때까지 처리한
+        청크들은 이미 저장돼 있어서 안전합니다.
         """
         content_ids = [a.content_id for a in attractions if a.content_id]
         cached = await get_cached_overviews(content_ids)
@@ -387,28 +394,27 @@ class TourApiClient:
         if not to_fetch:
             return
 
-        semaphore = asyncio.Semaphore(max_concurrency)
-
         async def bounded_fetch(a: Attraction) -> tuple[Attraction, str | None, bool]:
-            async with semaphore:
-                overview, api_ok = await self._fetch_overview(client, a.content_id, diag=diag)
-                return a, overview, api_ok
+            overview, api_ok = await self._fetch_overview(client, a.content_id, diag=diag)
+            return a, overview, api_ok
 
-        results = await asyncio.gather(*(bounded_fetch(a) for a in to_fetch))
+        for chunk_start in range(0, len(to_fetch), max_concurrency):
+            chunk = to_fetch[chunk_start : chunk_start + max_concurrency]
+            chunk_results = await asyncio.gather(*(bounded_fetch(a) for a in chunk))
 
-        new_rows: list[dict] = []
-        for a, overview, api_ok in results:
-            if api_ok:
-                a.overview = self._shorten_overview(overview)
-                new_rows.append(
-                    {
-                        "content_id": a.content_id,
-                        "overview": overview or "",
-                        "fetched_at": datetime.datetime.utcnow().isoformat(),
-                    }
-                )
-        if new_rows:
-            await save_overviews_batch(new_rows)
+            new_rows: list[dict] = []
+            for a, overview, api_ok in chunk_results:
+                if api_ok:
+                    a.overview = self._shorten_overview(overview)
+                    new_rows.append(
+                        {
+                            "content_id": a.content_id,
+                            "overview": overview or "",
+                            "fetched_at": datetime.datetime.utcnow().isoformat(),
+                        }
+                    )
+            if new_rows:
+                await save_overviews_batch(new_rows)
 
     async def _resolve_attraction_by_name(
         self, client: httpx.AsyncClient, name: str
