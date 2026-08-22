@@ -7,6 +7,7 @@ import {
   CourseResponse,
   PlaceCandidate,
   RegionOption,
+  Review,
   SavedCourseDetail,
   SavedCourseSummary,
   TripSummary,
@@ -38,9 +39,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  listAttractions: (region: string, userType: UserType, sigunguCd?: number | null) =>
+  listAttractions: (region: string, userType: UserType, sigunguCd?: number | null, limit: number = 20) =>
     request<Attraction[]>(
-      `/api/tourism/attractions?region=${encodeURIComponent(region)}&user_type=${userType}` +
+      `/api/tourism/attractions?region=${encodeURIComponent(region)}&user_type=${userType}&limit=${limit}` +
         (sigunguCd ? `&sigungu_cd=${sigunguCd}` : "")
     ),
 
@@ -199,4 +200,22 @@ export const api = {
   // '접근성' 탭용 요약 정보
   getAccessibilitySummary: (region: string = "경기도") =>
     request<AccessibilitySummary>(`/api/tourism/accessibility-summary?region=${encodeURIComponent(region)}`),
+
+  // 관광지 상세 (주소/혼잡도/이점 태그/소개문 포함)
+  getAttractionDetail: (contentId: string) =>
+    request<Attraction>(`/api/tourism/attractions/${encodeURIComponent(contentId)}`),
+
+  // 특정 관광지의 방문자 리뷰 목록 (최신순, 로그인 불필요)
+  getReviews: (contentId: string) =>
+    request<Review[]>(`/api/reviews/${encodeURIComponent(contentId)}`),
+
+  // 리뷰 작성 (로그인 필요, 이미 쓴 적 있으면 수정됨)
+  submitReview: (contentId: string, rating: number, body: string) =>
+    request<Review>(`/api/reviews/${encodeURIComponent(contentId)}`, {
+      method: "POST",
+      body: JSON.stringify({ rating, body }),
+    }),
+
+  // 내가 지금까지 작성한 리뷰 개수 (내 여행 탭 표시용, 비로그인이면 0)
+  getMyReviewCount: () => request<{ count: number }>("/api/reviews/me/count"),
 };

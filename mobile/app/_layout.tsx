@@ -28,6 +28,7 @@ export default function RootLayout() {
           <Stack.Screen name="signup" options={{ title: "회원가입" }} />
           <Stack.Screen name="trip-detail" options={{ title: "여행 상세" }} />
           <Stack.Screen name="profile" options={{ title: "프로필" }} />
+          <Stack.Screen name="attraction-detail" options={{ title: "관광지 상세" }} />
         </Stack>
       </CourseProvider>
     </AuthProvider>

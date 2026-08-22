@@ -29,6 +29,21 @@ export interface Attraction {
   congestion_forecast: CongestionForecast[];
   related_attraction_ids: string[];
   nearby_medical_info?: string | null;
+  congestion_rate?: number | null;
+  overview?: string | null;
+  accessibility_benefits: string[];
+  avg_rating?: number | null;
+  review_count: number;
+}
+
+export interface Review {
+  id: string;
+  content_id: string;
+  user_id: string;
+  username: string;
+  rating: number;
+  body: string;
+  created_at: string;
 }
 
 export interface CourseStop {
@@ -104,6 +119,7 @@ export interface UserProfile {
 }
 
 export interface AccessibilityPlaceScore {
+  content_id: string;
   name: string;
   score: number;
   address: string;
@@ -115,5 +131,12 @@ export interface AccessibilitySummary {
   total_accessible_count: number;
   visual_count: number;
   hearing_count: number;
+  family_count: number;
+  pregnant_count: number;
   top_wheelchair_places: AccessibilityPlaceScore[];
+  top_senior_places: AccessibilityPlaceScore[];
+  top_visual_places: AccessibilityPlaceScore[];
+  top_hearing_places: AccessibilityPlaceScore[];
+  top_family_places: AccessibilityPlaceScore[];
+  top_pregnant_places: AccessibilityPlaceScore[];
 }

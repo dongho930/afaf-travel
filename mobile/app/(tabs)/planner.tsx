@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { api } from "../../services/api";
 import { useCourseContext } from "../../services/CourseContext";
 import { storage } from "../../services/storage";
@@ -113,7 +114,8 @@ export default function PlannerScreen() {
   };
 
   return (
-    <View style={{ flex: 1 }}>
+    // edges=["top"]로 화면 상단만 안전영역 처리합니다 (홈 화면과 동일한 방식).
+    <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
       <FlatList
         data={[1]}
         keyExtractor={() => "content"}
@@ -243,7 +245,7 @@ export default function PlannerScreen() {
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 

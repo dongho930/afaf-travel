@@ -33,6 +33,8 @@ export default function HomeScreen() {
   const [regionOptions, setRegionOptions] = useState<RegionOption[]>([]);
   const [popularPlaces, setPopularPlaces] = useState<Attraction[]>([]);
   const [loadingPlaces, setLoadingPlaces] = useState(true);
+  const PLACES_PAGE_SIZE = 6;
+  const [visiblePlacesCount, setVisiblePlacesCount] = useState(PLACES_PAGE_SIZE);
 
   // 프로필 사진은 다른 화면(프로필 화면)에서 바뀔 수 있어서, 이 탭에 다시
   // 들어올 때마다 최신 상태로 불러옵니다.
@@ -74,9 +76,10 @@ export default function HomeScreen() {
       selectedRegion !== "전체" ? regionOptions.find((r) => r.name.includes(selectedRegion)) : null;
 
     setLoadingPlaces(true);
+    setVisiblePlacesCount(PLACES_PAGE_SIZE);
     api
-      .listAttractions("경기도", wheelchairOnly ? "wheelchair" : "general", matchedRegion?.code ?? null)
-      .then((places) => setPopularPlaces(places.slice(0, 6)))
+      .listAttractions("경기도", wheelchairOnly ? "wheelchair" : "general", matchedRegion?.code ?? null, 50)
+      .then((places) => setPopularPlaces(places))
       .catch(() => setPopularPlaces([]))
       .finally(() => setLoadingPlaces(false));
   }, [wheelchairOnly, selectedRegion, regionOptions]);
@@ -185,11 +188,16 @@ export default function HomeScreen() {
         ) : popularPlaces.length === 0 ? (
           <Text style={styles.emptyText}>표시할 여행지를 찾지 못했어요.</Text>
         ) : (
-          popularPlaces.map((place) => (
+          popularPlaces.slice(0, visiblePlacesCount).map((place) => (
             <TouchableOpacity
               key={place.content_id}
               style={styles.placeCard}
-              onPress={() => router.push("/(tabs)/planner")}
+              onPress={() =>
+                router.push({
+                  pathname: "/attraction-detail",
+                  params: { contentId: place.content_id, name: place.name },
+                })
+              }
             >
               {place.image_url ? (
                 <Image source={{ uri: place.image_url }} style={styles.placeImage} />
@@ -199,11 +207,55 @@ export default function HomeScreen() {
                 </View>
               )}
               <View style={styles.placeInfo}>
-                <Text style={styles.placeName}>{place.name}</Text>
+                <View style={styles.placeTitleRow}>
+                  <Text style={styles.placeName}>{place.name}</Text>
+                  <View style={styles.badgeGroup}>
+                    {typeof place.avg_rating === "number" && (
+                      <View style={styles.ratingBadge}>
+                        <Text style={styles.ratingBadgeText}>
+                          ★ {place.avg_rating.toFixed(1)} ({place.review_count})
+                        </Text>
+                      </View>
+                    )}
+                    {typeof place.congestion_rate === "number" && (
+                      <View style={styles.congestionBadge}>
+                        <Text style={styles.congestionBadgeText}>
+                          혼잡도 {Math.round(place.congestion_rate)}%
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
                 <Text style={styles.placeCategory}>{place.category}</Text>
+                <Text style={styles.placeAddress} numberOfLines={1}>
+                  📍 {place.address}
+                </Text>
+                {!!place.overview && (
+                  <Text style={styles.placeOverview} numberOfLines={2}>
+                    {place.overview}
+                  </Text>
+                )}
+                {place.accessibility_benefits?.length > 0 && (
+                  <View style={styles.benefitRow}>
+                    {place.accessibility_benefits.map((benefit) => (
+                      <View key={benefit} style={styles.benefitTag}>
+                        <Text style={styles.benefitTagText}>{benefit}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
               </View>
             </TouchableOpacity>
           ))
+        )}
+
+        {!loadingPlaces && visiblePlacesCount < popularPlaces.length && (
+          <TouchableOpacity
+            style={styles.moreButton}
+            onPress={() => setVisiblePlacesCount((c) => c + PLACES_PAGE_SIZE)}
+          >
+            <Text style={styles.moreButtonText}>더보기</Text>
+          </TouchableOpacity>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -300,6 +352,16 @@ const styles = StyleSheet.create({
   chipTextSelected: { color: "#FFFFFF" },
 
   emptyText: { fontSize: 13, color: "#8A8A8A", textAlign: "center", marginTop: 20 },
+  moreButton: {
+    marginTop: 4,
+    marginBottom: 8,
+    paddingVertical: 13,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8E4",
+    alignItems: "center",
+  },
+  moreButtonText: { fontSize: 14, fontWeight: "700", color: "#2E7D5B" },
 
   placeCard: {
     backgroundColor: "#FFFFFF",
@@ -327,6 +389,32 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   placeInfo: { padding: 14 },
-  placeName: { fontSize: 15, fontWeight: "700", color: "#1A1A1A" },
+  placeTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  placeName: { fontSize: 15, fontWeight: "700", color: "#1A1A1A", flexShrink: 1 },
   placeCategory: { fontSize: 12, color: "#2E7D5B", fontWeight: "600", marginTop: 2 },
+  placeAddress: { fontSize: 11, color: "#8A8A8A", marginTop: 3 },
+  placeOverview: { fontSize: 12, color: "#6B6B6B", marginTop: 6, lineHeight: 17 },
+  badgeGroup: { flexDirection: "row", gap: 6, marginLeft: 8 },
+  ratingBadge: {
+    backgroundColor: "#FFF7E0",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  ratingBadgeText: { fontSize: 11, fontWeight: "700", color: "#B8860B" },
+  congestionBadge: {
+    backgroundColor: "#FFF1E6",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  congestionBadgeText: { fontSize: 11, fontWeight: "700", color: "#C2622A" },
+  benefitRow: { flexDirection: "row", flexWrap: "wrap", marginTop: 8, gap: 6 },
+  benefitTag: {
+    backgroundColor: "#EAF3EE",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  benefitTagText: { fontSize: 11, fontWeight: "600", color: "#2E7D5B" },
 });

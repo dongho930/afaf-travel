@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { DateRangePickerModal } from "../../components/DateRangePickerModal";
 import { api } from "../../services/api";
 import { COURSE_CATEGORIES, CourseCategory, TripSummary } from "../../types";
@@ -30,14 +31,15 @@ function formatDateRange(start?: string | null, end?: string | null): string | n
 }
 
 /**
- * '내 여행' 탭. 상단 통계 카드 4개 중 '저장한 경로'만 실제 값이고, 나머지
- * (방문한 여행지/리뷰 작성/접근성 제보)는 아직 구현 안 된 기능이라 표시용
- * 목업 숫자입니다 — 실제로 방문 기록/리뷰/제보 기능이 생기면 교체해야 합니다.
+ * '내 여행' 탭. 상단 통계 카드 4개 중 '저장한 경로'와 '리뷰 작성'은 실제 값이고,
+ * 나머지(방문한 여행지/접근성 제보)는 아직 구현 안 된 기능이라 표시용
+ * 목업 숫자입니다 — 실제로 방문 기록/제보 기능이 생기면 교체해야 합니다.
  */
 export default function TripsScreen() {
   const router = useRouter();
   const [trips, setTrips] = useState<TripSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [reviewCount, setReviewCount] = useState(0);
 
   const [editingTrip, setEditingTrip] = useState<TripSummary | null>(null);
   const [editName, setEditName] = useState("");
@@ -54,6 +56,10 @@ export default function TripsScreen() {
       .then(setTrips)
       .catch(() => Alert.alert("불러오기 실패", "여행 목록을 불러오지 못했어요."))
       .finally(() => setLoading(false));
+    api
+      .getMyReviewCount()
+      .then((res) => setReviewCount(res.count))
+      .catch(() => setReviewCount(0));
   }, []);
 
   useFocusEffect(
@@ -132,8 +138,7 @@ export default function TripsScreen() {
         </View>
         <View style={styles.statCard}>
           <Text style={styles.statIcon}>💬</Text>
-          {/* 실제 리뷰 기능이 없어 표시용 숫자입니다 */}
-          <Text style={styles.statValue}>18</Text>
+          <Text style={styles.statValue}>{reviewCount}</Text>
           <Text style={styles.statLabel}>리뷰 작성</Text>
         </View>
         <View style={styles.statCard}>
@@ -150,14 +155,17 @@ export default function TripsScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#2E7D5B" />
-      </View>
+      <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color="#2E7D5B" />
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <>
+    // edges=["top"]로 화면 상단만 안전영역 처리합니다 (홈 화면과 동일한 방식).
+    <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
       <FlatList
         data={trips}
         keyExtractor={(item) => item.trip_id}
@@ -266,7 +274,7 @@ export default function TripsScreen() {
           setEditEndDate(e);
         }}
       />
-    </>
+    </SafeAreaView>
   );
 }
 
