@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.models.schemas import AccessibilitySummary, Attraction, RegionOption, UserType
 from app.services.sigungu_codes import list_signgu_by_area
+from app.services.supabase_service import get_cached_accessibility_stats, save_accessibility_stats
 from app.services.tour_api import tour_api_client
 
 router = APIRouter(prefix="/api/tourism", tags=["tourism"])
@@ -49,8 +50,29 @@ async def congestion_forecast(content_id: str):
 @router.get("/accessibility-summary", response_model=AccessibilitySummary)
 async def accessibility_summary(region: str = Query(default="경기도")):
     """
-    '접근성' 탭용 요약 정보. 휠체어/고령자 개수는 실제 편의시설 데이터로 계산하고,
-    시각/청각장애는 관련 API 데이터가 없어 목업 숫자를 씁니다 (필드명에 _mock 표시).
+    '접근성' 탭/홈 화면 통계용 요약 정보.
+    매번 다시 계산하지 않고, 미리 계산해서 저장해둔(캐시된) 고정 값을 읽어서
+    돌려줍니다 — 그래야 요청할 때마다 숫자가 들쭉날쭉하지 않고 일정합니다.
+    아직 한 번도 계산한 적이 없으면(캐시 없음) 그 자리에서 한 번 계산해 저장하고
+    돌려줍니다 (최초 1회만 오래 걸립니다 — 전수조사라 수 분 소요될 수 있어요).
+    """
+    cached = await get_cached_accessibility_stats(region)
+    if cached:
+        return AccessibilitySummary(**cached)
+
+    data = await tour_api_client.get_accessibility_summary(region)
+    await save_accessibility_stats(region, data)
+    return AccessibilitySummary(**data)
+
+
+@router.get("/accessibility-summary/refresh", response_model=AccessibilitySummary)
+async def refresh_accessibility_summary(region: str = Query(default="경기도")):
+    """
+    접근성 통계를 다시 계산해서 캐시를 갱신합니다. 전수조사 방식이라 수천 건을
+    다 조회하느라 몇 분 정도 걸릴 수 있어요 — 응답이 바로 안 와도 정상입니다.
+    필요할 때(예: 하루 한 번)
+    수동으로 호출해주세요 — 자동으로는 갱신되지 않습니다.
     """
     data = await tour_api_client.get_accessibility_summary(region)
+    await save_accessibility_stats(region, data)
     return AccessibilitySummary(**data)

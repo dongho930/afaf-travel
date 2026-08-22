@@ -271,6 +271,69 @@ class TourApiClient:
             # API 오류가 나도 전체 요청이 죽지 않게 안전하게 빈 값 처리
             return AccessibilityFeatures()
 
+    async def _fetch_all_by_content_type(
+        self,
+        client: httpx.AsyncClient,
+        ldong_regn_cd: str,
+        content_type_id: int,
+        page_size: int = 100,
+        max_pages: int = 60,
+    ) -> list[Attraction]:
+        """
+        전수조사용: 한 카테고리(contentTypeId)의 결과를 페이지가 끝날 때까지
+        전부 가져옵니다. TourAPI 응답의 totalCount를 보고 필요한 페이지 수를
+        계산합니다. max_pages는 API 오류/무한루프 방지용 안전장치입니다.
+        """
+        all_items: list[Attraction] = []
+        page_no = 1
+        total_count: int | None = None
+
+        while page_no <= max_pages:
+            try:
+                resp = await client.get(
+                    f"{settings.tour_api_base_url}/KorWithService2/areaBasedList2",
+                    params=self._common_params(
+                        {
+                            "lDongRegnCd": ldong_regn_cd,
+                            "contentTypeId": content_type_id,
+                            "numOfRows": page_size,
+                            "pageNo": page_no,
+                        }
+                    ),
+                )
+                resp.raise_for_status()
+                payload = resp.json()
+                raw_items = self._extract_items(payload)
+
+                if total_count is None:
+                    try:
+                        total_count = int(payload["response"]["body"].get("totalCount", 0))
+                    except Exception:
+                        total_count = None
+
+                if not raw_items:
+                    break
+
+                all_items.extend(self._map_item_to_attraction(item, content_type_id) for item in raw_items)
+
+                # totalCount를 확인했으면 그걸로, 아니면 '이번 페이지가 요청보다 적게 왔으면 마지막 페이지'로 판단
+                if total_count is not None and len(all_items) >= total_count:
+                    break
+                if len(raw_items) < page_size:
+                    break
+                page_no += 1
+            except Exception:
+                break
+
+        return all_items
+
+    async def _fetch_accessibility_bounded(
+        self, client: httpx.AsyncClient, content_id: str, semaphore: asyncio.Semaphore
+    ) -> AccessibilityFeatures:
+        """_fetch_accessibility를 동시 호출 개수 제한(세마포어)과 함께 실행합니다."""
+        async with semaphore:
+            return await self._fetch_accessibility(client, content_id)
+
     async def _fetch_by_content_type(
         self,
         client: httpx.AsyncClient,
@@ -495,15 +558,55 @@ class TourApiClient:
                 forecasts.append(CongestionForecast(date=date_str, hour=12, congestion_level=level))
             return forecasts
 
-    async def get_accessibility_summary(self, region: str, limit: int = 60) -> dict:
+    async def get_accessibility_summary(self, region: str) -> dict:
         """
-        '접근성' 탭용 요약 정보.
-        휠체어/고령자는 실제 편의시설 데이터(AccessibilityFeatures)로 계산하고,
+        '접근성' 탭/홈 화면 통계용 요약 정보 — 전수조사 방식.
+        경기도 전체의 관광지/음식점/문화시설/레포츠/숙박 각 카테고리를 페이지가
+        끝날 때까지 전부 가져온 뒤(표본이 아니라 전체), 하나하나 편의시설 정보를
+        조회해서 계산합니다. 항목 수가 많아서(보통 수천 건) 시간이 꽤 걸립니다 —
+        그래서 이 함수는 매 요청마다 부르지 않고, 캐시(accessibility_stats 테이블)에
+        저장해두고 필요할 때만(수동 새로고침) 다시 계산하는 용도로 씁니다.
+
+        휠체어/고령자/유모차는 실제 편의시설 데이터(AccessibilityFeatures)로 계산하고,
         시각/청각장애는 관련 데이터를 제공하는 API가 없어 표시용 목업 숫자를 씁니다.
         관광지별 접근성 점수는 6개 편의시설 항목 중 몇 개를 만족하는지로 계산합니다
         (예: 6개 중 5개 충족 → 83점).
         """
-        candidates = await self.search_accessible_attractions(region=region, user_type="general", limit=limit)
+        if self.use_mock:
+            candidates = list(_MOCK_ATTRACTIONS)
+        else:
+            ldong_regn_map = {"경기도": "41", "서울": "11"}
+            ldong_regn_cd = ldong_regn_map.get(region, "41")
+
+            async with httpx.AsyncClient(timeout=30) as client:
+                # 1) 카테고리별로 전 페이지를 끝까지 가져옵니다 (전수조사).
+                results_per_type = await asyncio.gather(
+                    *(
+                        self._fetch_all_by_content_type(client, ldong_regn_cd, content_type_id)
+                        for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
+                    )
+                )
+                all_candidates: list[Attraction] = []
+                seen_ids: set[str] = set()
+                for group in results_per_type:
+                    for a in group:
+                        if a.content_id and a.content_id not in seen_ids:
+                            seen_ids.add(a.content_id)
+                            all_candidates.append(a)
+
+                # 2) 전체 항목 각각의 편의시설 상세 정보를 채웁니다.
+                #    동시 요청 개수를 제한해서(세마포어) API에 과부하를 주지 않습니다.
+                semaphore = asyncio.Semaphore(20)
+                accessibility_list = await asyncio.gather(
+                    *(
+                        self._fetch_accessibility_bounded(client, a.content_id, semaphore)
+                        for a in all_candidates
+                    )
+                )
+                for attraction, accessibility in zip(all_candidates, accessibility_list):
+                    attraction.accessibility = accessibility
+
+            candidates = all_candidates
 
         def score(a: Attraction) -> int:
             feats = a.accessibility
