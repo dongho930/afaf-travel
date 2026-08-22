@@ -267,6 +267,11 @@ class TourApiClient:
         """
         contentId만으로는 관광지명/주소를 모르기 때문에, 연관관광지·집중률 API 호출 전에
         detailCommon2(공통정보조회)로 title/addr1/addr2를 먼저 가져옵니다.
+
+        이 '무장애 여행 정보' 상품의 detailCommon2는 매뉴얼상 numOfRows/pageNo/
+        contentId 등 몇 개 파라미터만 지원합니다. 일반 TourAPI 관례로 defaultYN/
+        addrinfoYN 같은 플래그를 넣으면 'INVALID_REQUEST_PARAMETER_ERROR'가 나서
+        빼야 합니다 — 응답 필드(overview 포함)는 플래그 없이도 기본으로 옵니다.
         """
         try:
             resp = await client.get(
@@ -276,8 +281,6 @@ class TourApiClient:
                         "contentId": content_id,
                         "numOfRows": 1,
                         "pageNo": 1,
-                        "defaultYN": "Y",
-                        "addrinfoYN": "Y",
                     }
                 ),
             )
@@ -291,7 +294,8 @@ class TourApiClient:
         self, client: httpx.AsyncClient, content_id: str, diag: dict | None = None
     ) -> tuple[str | None, bool]:
         """
-        detailCommon2(overviewYN=Y)로 소개문(overview)을 가져옵니다.
+        detailCommon2로 소개문(overview)을 가져옵니다. 이 상품은 overviewYN 같은
+        플래그가 없고 기본 응답에 overview가 포함됩니다(매뉴얼 기준).
         이 API는 무장애 정보와 같은 서비스(같은 일일 트래픽 한도)를 쓰므로,
         429는 별도로 감지해서 재시도하고 실패하면 캐시에 안 남도록 신호를 줍니다.
 
@@ -308,8 +312,6 @@ class TourApiClient:
                             "contentId": content_id,
                             "numOfRows": 1,
                             "pageNo": 1,
-                            "defaultYN": "Y",
-                            "overviewYN": "Y",
                         }
                     ),
                 )
@@ -901,9 +903,6 @@ class TourApiClient:
                         "contentId": content_id,
                         "numOfRows": 1,
                         "pageNo": 1,
-                        "defaultYN": "Y",
-                        "addrinfoYN": "Y",
-                        "overviewYN": "Y",
                     }
                 ),
             )
@@ -967,9 +966,6 @@ class TourApiClient:
                                     "contentId": content_id,
                                     "numOfRows": 1,
                                     "pageNo": 1,
-                                    "defaultYN": "Y",
-                                    "addrinfoYN": "Y",
-                                    "overviewYN": "Y",
                                 }
                             ),
                         )
