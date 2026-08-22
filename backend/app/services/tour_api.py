@@ -511,6 +511,17 @@ class TourApiClient:
                     return bool((d.get(key) or "").strip())
 
                 # 활용매뉴얼(v4.3) [무장애여행 조회] 오퍼레이션 명세 기준 필드.
+                # 각 카테고리의 '기타상세'(자유서술 텍스트) 항목은 점수 계산에서
+                # 제외합니다 — 정형화된 편의시설 유무가 아니라 임의의 설명 텍스트라
+                # 있고 없고가 실제 접근성 수준을 나타내지 않기 때문입니다.
+                wheelchair_fields = (
+                    "parking",     # 주차 여부
+                    "route",       # 접근로(경사로)
+                    "wheelchair",  # 휠체어 대여
+                    "exit",        # 출입통로
+                    "elevator",    # 엘리베이터
+                    "restroom",    # 화장실
+                )
                 visual_fields = (
                     "braileblock",       # 점자블록
                     "helpdog",           # 보조견 동반
@@ -519,15 +530,14 @@ class TourApiClient:
                     "bigprint",          # 큰 활자 홍보물
                     "brailepromotion",   # 점자 홍보물 및 점자표지판
                     "guidesystem",       # 유도 안내설비
-                    "blindhandicapetc",  # 시각장애 기타상세
                 )
                 hearing_fields = (
-                    "signguide",          # 수화 안내
-                    "videoguide",         # 자막 비디오가이드 및 영상 자막안내
-                    "hearingroom",        # 객실
-                    "hearinghandicapetc",  # 청각장애 기타상세
+                    "signguide",    # 수화 안내
+                    "videoguide",   # 자막 비디오가이드 및 영상 자막안내
+                    "hearingroom",  # 객실
                 )
 
+                wheelchair_count = sum(1 for f in wheelchair_fields if has_text(f))
                 visual_count = sum(1 for f in visual_fields if has_text(f))
                 hearing_count = sum(1 for f in hearing_fields if has_text(f))
 
@@ -540,6 +550,7 @@ class TourApiClient:
                     has_rest_area=has_text("lactationroom") or has_text("babysparechair"),
                     has_visual_accessibility=visual_count > 0,
                     has_hearing_accessibility=hearing_count > 0,
+                    wheelchair_accessibility_count=wheelchair_count,
                     visual_accessibility_count=visual_count,
                     hearing_accessibility_count=hearing_count,
                 )
@@ -695,6 +706,7 @@ class TourApiClient:
                             "has_rest_area": features.has_rest_area,
                             "has_visual_accessibility": features.has_visual_accessibility,
                             "has_hearing_accessibility": features.has_hearing_accessibility,
+                            "wheelchair_accessibility_count": features.wheelchair_accessibility_count,
                             "visual_accessibility_count": features.visual_accessibility_count,
                             "hearing_accessibility_count": features.hearing_accessibility_count,
                             "record_found": True,
@@ -735,6 +747,7 @@ class TourApiClient:
                     has_rest_area=bool(row.get("has_rest_area")),
                     has_visual_accessibility=bool(row.get("has_visual_accessibility")),
                     has_hearing_accessibility=bool(row.get("has_hearing_accessibility")),
+                    wheelchair_accessibility_count=int(row.get("wheelchair_accessibility_count") or 0),
                     visual_accessibility_count=int(row.get("visual_accessibility_count") or 0),
                     hearing_accessibility_count=int(row.get("hearing_accessibility_count") or 0),
                 )
@@ -1048,6 +1061,7 @@ class TourApiClient:
                     has_rest_area=bool(row.get("has_rest_area")),
                     has_visual_accessibility=bool(row.get("has_visual_accessibility")),
                     has_hearing_accessibility=bool(row.get("has_hearing_accessibility")),
+                    wheelchair_accessibility_count=int(row.get("wheelchair_accessibility_count") or 0),
                     visual_accessibility_count=int(row.get("visual_accessibility_count") or 0),
                     hearing_accessibility_count=int(row.get("hearing_accessibility_count") or 0),
                 )
@@ -1067,6 +1081,7 @@ class TourApiClient:
                                 "has_rest_area": features.has_rest_area,
                                 "has_visual_accessibility": features.has_visual_accessibility,
                                 "has_hearing_accessibility": features.has_hearing_accessibility,
+                                "wheelchair_accessibility_count": features.wheelchair_accessibility_count,
                                 "visual_accessibility_count": features.visual_accessibility_count,
                                 "hearing_accessibility_count": features.hearing_accessibility_count,
                                 "record_found": True,
@@ -1510,17 +1525,14 @@ class TourApiClient:
             candidates = all_candidates
 
         # 탭(휠체어/시각/청각/고령자)마다 실제로 관련 있는 편의시설 항목만 세서
-        # 점수를 매깁니다 — 예전엔 모든 탭이 휠체어용 6개 항목만 공통으로 써서,
+        # 점수를 매깁니다 — 예전엔 모든 탭이 휠체어용 4개 항목만 공통으로 써서,
         # 시각장애 탭인데 경사로/엘리베이터가 없다고 '주의' 등급이 뜨는 등
-        # 실제 그 유형과 무관한 점수가 나오는 문제가 있었습니다.
-        #
-        # 시각/청각장애는 세부 항목(점자블록, 오디오가이드 등)이 아니라 '있음/
-        # 없음' 하나로만 캐시돼 있어서, 점수가 0점 또는 100점 둘 중 하나로만
-        # 나옵니다 — 데이터 자체의 한계이지 계산 버그가 아닙니다.
+        # 실제 그 유형과 무관한 점수가 나오는 문제가 있었습니다. 각 항목 개수는
+        # '기타상세'(자유서술 텍스트)를 제외한 정형화된 편의시설 개수 기준입니다.
         def wheelchair_score(a: Attraction) -> int:
-            feats = a.accessibility
-            checks = [feats.has_ramp, feats.has_elevator, feats.has_accessible_restroom, feats.has_wheelchair_rental]
-            return round(sum(1 for c in checks if c) / len(checks) * 100)
+            # 주차/접근로/휠체어대여/출입통로/엘리베이터/화장실 중 몇 개나
+            # 있는지(최대 6개) 기준.
+            return round(min(a.accessibility.wheelchair_accessibility_count, 6) / 6 * 100)
 
         def senior_score(a: Attraction) -> int:
             feats = a.accessibility
@@ -1533,10 +1545,10 @@ class TourApiClient:
             return round(min(a.accessibility.visual_accessibility_count, 7) / 7 * 100)
 
         def hearing_score(a: Attraction) -> int:
-            # 수화안내/자막비디오가이드/객실/기타상세 중 몇 개나 있는지(최대 4개) 기준.
-            return round(min(a.accessibility.hearing_accessibility_count, 4) / 4 * 100)
+            # 수화안내/자막비디오가이드/객실 중 몇 개나 있는지(최대 3개) 기준.
+            return round(min(a.accessibility.hearing_accessibility_count, 3) / 3 * 100)
 
-        wheelchair_places = [a for a in candidates if a.accessibility.has_ramp or a.accessibility.has_wheelchair_rental]
+        wheelchair_places = [a for a in candidates if a.accessibility.wheelchair_accessibility_count > 0]
         senior_places = [a for a in candidates if a.accessibility.has_rest_area]
         stroller_places = [a for a in candidates if a.accessibility.has_stroller_accessible_path]
         visual_places = [a for a in candidates if a.accessibility.has_visual_accessibility]
