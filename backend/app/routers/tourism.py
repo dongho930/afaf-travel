@@ -57,6 +57,18 @@ async def related_attractions(content_id: str):
     return results
 
 
+@router.get("/attractions/{content_id}", response_model=Attraction)
+async def attraction_detail(content_id: str):
+    """
+    관광지 상세 페이지용 단건 조회. 주소/집중률/이점 태그/소개문을 한 번에
+    채워서 반환합니다 (리뷰는 /api/reviews/{content_id}에서 별도 조회).
+    """
+    result = await tour_api_client.get_attraction_detail(content_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="관광지를 찾을 수 없습니다.")
+    return result
+
+
 @router.get("/attractions/{content_id}/congestion")
 async def congestion_forecast(content_id: str):
     forecast = await tour_api_client.get_congestion_forecast(content_id)

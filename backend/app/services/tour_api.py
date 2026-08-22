@@ -308,6 +308,11 @@ class TourApiClient:
                         continue
                     if diag is not None:
                         diag["rate_limit_exhausted"] = diag.get("rate_limit_exhausted", 0) + 1
+                    logger.warning(
+                        "detailCommon2(overview) 재시도 소진, 429 계속 발생 (contentId=%s) — "
+                        "무장애 정보와 같은 일일 한도를 공유하므로 그쪽이 소진됐으면 여기도 막힙니다.",
+                        content_id,
+                    )
                     return None, False
 
                 resp.raise_for_status()
@@ -865,6 +870,101 @@ class TourApiClient:
                 )
 
         return results
+
+    async def get_attraction_detail(self, content_id: str) -> Attraction | None:
+        """
+        관광지 상세 페이지용 단건 조회. 목록 조회와 달리 딱 하나만 다루므로
+        예산/조기중단 로직 없이 바로 조회합니다 (부담이 훨씬 적음).
+
+        무장애 정보/집중률/소개문을 한 번에 다 채워서 반환합니다 — 캐시에
+        있으면 캐시를 쓰고, 없는 것만 그 자리에서 조회 후 캐시에 저장합니다.
+        찾지 못하면 None.
+        """
+        if self.use_mock:
+            for a in _MOCK_ATTRACTIONS:
+                if a.content_id == content_id:
+                    copy = a.model_copy(deep=True)
+                    copy.accessibility_benefits = _accessibility_benefit_labels(copy.accessibility)
+                    copy.congestion_rate = 42.0
+                    copy.overview = (
+                        f"{copy.name}은(는) {copy.category} 카테고리의 무장애 여행지입니다. "
+                        "실제 상세 소개문은 라이브 API 연동 시 채워집니다."
+                    )
+                    return copy
+            return None
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            try:
+                resp = await client.get(
+                    f"{settings.tour_api_base_url}/KorWithService2/detailCommon2",
+                    params=self._common_params(
+                        {
+                            "contentId": content_id,
+                            "defaultYN": "Y",
+                            "addrinfoYN": "Y",
+                            "overviewYN": "Y",
+                        }
+                    ),
+                )
+                resp.raise_for_status()
+                items = self._extract_items(resp.json())
+            except Exception as exc:
+                logger.warning("관광지 상세 조회 실패 (contentId=%s): %s", content_id, exc)
+                return None
+
+            if not items:
+                return None
+            d = items[0]
+            content_type_id = int(d.get("contenttypeid") or 0)
+            attraction = self._map_item_to_attraction(d, content_type_id)
+            # 상세 페이지는 카드보다 넉넉하게 보여줍니다 (카드용 110자보다 김).
+            attraction.overview = self._shorten_overview(d.get("overview"), max_len=400)
+
+            # 무장애 정보: 캐시 우선, 없으면 이번 하나만 즉시 조회
+            cached = await get_cached_place_accessibility([content_id])
+            if content_id in cached:
+                row = cached[content_id]
+                attraction.accessibility = AccessibilityFeatures(
+                    has_ramp=bool(row.get("has_ramp")),
+                    has_elevator=bool(row.get("has_elevator")),
+                    has_accessible_restroom=bool(row.get("has_accessible_restroom")),
+                    has_wheelchair_rental=bool(row.get("has_wheelchair_rental")),
+                    has_stroller_accessible_path=bool(row.get("has_stroller_accessible_path")),
+                    has_rest_area=bool(row.get("has_rest_area")),
+                    has_visual_accessibility=bool(row.get("has_visual_accessibility")),
+                    has_hearing_accessibility=bool(row.get("has_hearing_accessibility")),
+                )
+            else:
+                features, ok = await self._fetch_accessibility(client, content_id)
+                attraction.accessibility = features
+                if ok:
+                    await save_place_accessibility_batch(
+                        [
+                            {
+                                "content_id": content_id,
+                                "has_ramp": features.has_ramp,
+                                "has_elevator": features.has_elevator,
+                                "has_accessible_restroom": features.has_accessible_restroom,
+                                "has_wheelchair_rental": features.has_wheelchair_rental,
+                                "has_stroller_accessible_path": features.has_stroller_accessible_path,
+                                "has_rest_area": features.has_rest_area,
+                                "has_visual_accessibility": features.has_visual_accessibility,
+                                "has_hearing_accessibility": features.has_hearing_accessibility,
+                                "record_found": True,
+                                "fetched_at": datetime.datetime.utcnow().isoformat(),
+                            }
+                        ]
+                    )
+            attraction.accessibility_benefits = _accessibility_benefit_labels(attraction.accessibility)
+
+            # 집중률: 캐시(congestion_cache)에서 시군구+이름으로 조회 (API 호출 없음)
+            area_signgu = find_area_signgu(attraction.address)
+            if area_signgu:
+                rows = await get_cached_congestion_rates([area_signgu[1]])
+                row = rows.get((area_signgu[1], attraction.name))
+                attraction.congestion_rate = float(row["cnctr_rate"]) if row else None
+
+            return attraction
 
     async def get_related_attractions(self, content_id: str) -> list[Attraction]:
         """
