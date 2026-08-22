@@ -140,10 +140,11 @@ async def refresh_congestion_cache(region: str = Query(default="경기도")):
     return await tour_api_client.refresh_congestion_cache(region)
 
 
-@router.get("/debug/detail-raw/{content_id}")
-async def debug_detail_raw(content_id: str):
+@router.get("/overview-cache/refresh")
+async def refresh_overview_cache(region: str = Query(default="경기도")):
     """
-    [임시 디버그용] detailCommon2 원본 응답을 그대로 보여줍니다. 원인 확인 후 이
-    엔드포인트는 지워도 됩니다.
+    홈 화면 '인기 여행지'용 소개문을 미리 캐시에 채워둡니다. 하루 한 번 정도
+    호출해두면, 실제 사용자가 홈 화면을 열 때는 접속하자마자 바로 소개문이
+    보입니다 (매번 실시간으로 조회하면 시간제한 때문에 일부만 뜰 수 있음).
     """
-    return await tour_api_client.debug_raw_detail_common(content_id)
+    return await tour_api_client.refresh_overview_cache(region)

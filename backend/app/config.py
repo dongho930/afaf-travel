@@ -55,6 +55,13 @@ class Settings(BaseSettings):
         os.getenv("CONGESTION_API_DAILY_FETCH_BUDGET", "200")
     )
 
+    # 홈 화면 소개문 미리 채우기(예열)용 일일 예산. detailCommon2도 무장애 정보와
+    # 같은 일일 한도를 공유하므로, 한 번의 새로고침에서 너무 많이 쓰지 않도록
+    # 안전하게 예산을 둡니다.
+    overview_api_daily_fetch_budget: int = int(
+        os.getenv("OVERVIEW_API_DAILY_FETCH_BUDGET", "300")
+    )
+
     class Config:
         env_file = ".env"
 

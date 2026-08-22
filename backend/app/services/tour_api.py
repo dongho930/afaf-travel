@@ -371,6 +371,7 @@ class TourApiClient:
         attractions: list[Attraction],
         diag: dict | None = None,
         max_concurrency: int = 8,
+        max_new_fetches: int | None = None,
     ) -> None:
         """
         attractions 각각의 overview 필드를 채웁니다. 캐시(attraction_overview_cache)에
@@ -384,6 +385,9 @@ class TourApiClient:
         그래서 여기서는 몇 개씩 묶어(청크) 순차 처리하면서 청크가 끝날 때마다
         바로 캐시에 저장합니다 — 중간에 시간 초과로 잘려도 그때까지 처리한
         청크들은 이미 저장돼 있어서 안전합니다.
+
+        max_new_fetches(선택): 예열(refresh_overview_cache)처럼 예산을 지키며
+        많은 건수를 한 번에 처리할 때, 새로 조회할 최대 건수를 제한합니다.
         """
         content_ids = [a.content_id for a in attractions if a.content_id]
         cached = await get_cached_overviews(content_ids)
@@ -392,6 +396,12 @@ class TourApiClient:
                 a.overview = self._shorten_overview(cached[a.content_id])
 
         to_fetch = [a for a in attractions if a.content_id and a.content_id not in cached]
+        deferred_count = 0
+        if max_new_fetches is not None and len(to_fetch) > max_new_fetches:
+            deferred_count = len(to_fetch) - max_new_fetches
+            to_fetch = to_fetch[:max_new_fetches]
+        if diag is not None:
+            diag["deferred_no_budget"] = diag.get("deferred_no_budget", 0) + deferred_count
         if not to_fetch:
             return
 
@@ -1325,6 +1335,66 @@ class TourApiClient:
             debug_info["already_cached_signgu"],
             fetched_signgu,
             debug_info["deferred_no_budget"],
+        )
+        return debug_info
+
+    async def refresh_overview_cache(self, region: str) -> dict:
+        """
+        홈 화면 '인기 여행지'에 노출될 만한 관광지들의 소개문을 미리
+        attraction_overview_cache에 채워둡니다.
+
+        기존엔 사용자가 홈 화면을 열 때 그 자리에서 실시간으로 소개문을
+        조회했는데, 시간제한(6초) 안에 다 못 끝내면 일부만 뜨는 한계가
+        있었습니다. 이 엔드포인트를 미리(예: 하루 한 번) 돌려두면, 실제
+        사용자가 홈 화면을 열 때는 이미 캐시가 다 있어서 접속하자마자
+        바로 소개문이 보입니다.
+
+        detailCommon2는 무장애 정보와 같은 일일 트래픽 한도를 공유하므로,
+        예산(overview_api_daily_fetch_budget)을 넘는 나머지는 이번엔 건드리지
+        않고 다음 새로고침으로 미룹니다 (place_accessibility_cache와 동일한 패턴).
+        """
+        debug_info: dict = {"mode": "mock" if self.use_mock else "live"}
+        if self.use_mock:
+            return debug_info
+
+        ldong_regn_map = {"경기도": "41", "서울": "11"}
+        ldong_regn_cd = ldong_regn_map.get(region, "41")
+        # 카테고리당 40개씩, 5개 카테고리라 최대 200개 후보 — 홈 화면에 실제로
+        # 노출될 만한 범위를 넉넉하게 커버합니다.
+        per_type_rows = 40
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            results_per_type = await asyncio.gather(
+                *(
+                    self._fetch_by_content_type(client, ldong_regn_cd, content_type_id, per_type_rows)
+                    for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
+                )
+            )
+            candidates: list[Attraction] = []
+            seen_ids: set[str] = set()
+            for group in results_per_type:
+                for a in group:
+                    if a.content_id and a.content_id not in seen_ids:
+                        seen_ids.add(a.content_id)
+                        candidates.append(a)
+            debug_info["total_candidates"] = len(candidates)
+
+            diag: dict = {}
+            await self._fill_overview_with_cache(
+                client,
+                candidates,
+                diag=diag,
+                max_concurrency=8,
+                max_new_fetches=settings.overview_api_daily_fetch_budget,
+            )
+            debug_info["diag"] = diag
+
+        logger.info(
+            "refresh_overview_cache(%s): 후보 %d개 / 새로 캐시 %d개 / 미룸 %d개",
+            region,
+            debug_info["total_candidates"],
+            diag.get("fetched", 0),
+            diag.get("deferred_no_budget", 0),
         )
         return debug_info
 
