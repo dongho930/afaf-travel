@@ -28,6 +28,12 @@ class AccessibilityFeatures(BaseModel):
     # 청각장애: signguide(수화안내)/videoguide(자막비디오가이드)/hearingroom(객실)/
     #   hearinghandicapetc(기타상세) 중 하나라도 있으면 True
     has_hearing_accessibility: bool = False
+    # 시각/청각장애 세부 편의시설이 몇 개나 있는지(개수). 시각장애는 점자블록/
+    # 보조견동반/안내요원/오디오가이드/큰활자홍보물/점자홍보물/유도안내설비
+    # 중 몇 개(0~7), 청각장애는 수화안내/자막비디오가이드/객실/기타상세 중
+    # 몇 개(0~4)인지를 세서, 단순 있음/없음보다 세분화된 점수를 매길 때 씁니다.
+    visual_accessibility_count: int = 0
+    hearing_accessibility_count: int = 0
 
 
 class CongestionForecast(BaseModel):

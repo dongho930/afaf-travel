@@ -528,6 +528,9 @@ class TourApiClient:
                     "hearinghandicapetc",  # 청각장애 기타상세
                 )
 
+                visual_count = sum(1 for f in visual_fields if has_text(f))
+                hearing_count = sum(1 for f in hearing_fields if has_text(f))
+
                 features = AccessibilityFeatures(
                     has_ramp=has_text("route"),
                     has_elevator=has_text("elevator"),
@@ -535,8 +538,10 @@ class TourApiClient:
                     has_wheelchair_rental=has_text("wheelchair"),
                     has_stroller_accessible_path=has_text("stroller"),
                     has_rest_area=has_text("lactationroom") or has_text("babysparechair"),
-                    has_visual_accessibility=any(has_text(f) for f in visual_fields),
-                    has_hearing_accessibility=any(has_text(f) for f in hearing_fields),
+                    has_visual_accessibility=visual_count > 0,
+                    has_hearing_accessibility=hearing_count > 0,
+                    visual_accessibility_count=visual_count,
+                    hearing_accessibility_count=hearing_count,
                 )
                 if diag is not None:
                     diag["has_record"] = diag.get("has_record", 0) + 1
@@ -690,6 +695,8 @@ class TourApiClient:
                             "has_rest_area": features.has_rest_area,
                             "has_visual_accessibility": features.has_visual_accessibility,
                             "has_hearing_accessibility": features.has_hearing_accessibility,
+                            "visual_accessibility_count": features.visual_accessibility_count,
+                            "hearing_accessibility_count": features.hearing_accessibility_count,
                             "record_found": True,
                             "fetched_at": datetime.datetime.utcnow().isoformat(),
                         }
@@ -728,6 +735,8 @@ class TourApiClient:
                     has_rest_area=bool(row.get("has_rest_area")),
                     has_visual_accessibility=bool(row.get("has_visual_accessibility")),
                     has_hearing_accessibility=bool(row.get("has_hearing_accessibility")),
+                    visual_accessibility_count=int(row.get("visual_accessibility_count") or 0),
+                    hearing_accessibility_count=int(row.get("hearing_accessibility_count") or 0),
                 )
         _ = stopped_early  # 로그/필요 시 확장을 위해 남겨둠 (현재는 diag로 충분히 노출됨)
 
@@ -1039,6 +1048,8 @@ class TourApiClient:
                     has_rest_area=bool(row.get("has_rest_area")),
                     has_visual_accessibility=bool(row.get("has_visual_accessibility")),
                     has_hearing_accessibility=bool(row.get("has_hearing_accessibility")),
+                    visual_accessibility_count=int(row.get("visual_accessibility_count") or 0),
+                    hearing_accessibility_count=int(row.get("hearing_accessibility_count") or 0),
                 )
             else:
                 features, ok = await self._fetch_accessibility(client, content_id)
@@ -1056,6 +1067,8 @@ class TourApiClient:
                                 "has_rest_area": features.has_rest_area,
                                 "has_visual_accessibility": features.has_visual_accessibility,
                                 "has_hearing_accessibility": features.has_hearing_accessibility,
+                                "visual_accessibility_count": features.visual_accessibility_count,
+                                "hearing_accessibility_count": features.hearing_accessibility_count,
                                 "record_found": True,
                                 "fetched_at": datetime.datetime.utcnow().isoformat(),
                             }
@@ -1496,17 +1509,32 @@ class TourApiClient:
 
             candidates = all_candidates
 
-        def score(a: Attraction) -> int:
+        # 탭(휠체어/시각/청각/고령자)마다 실제로 관련 있는 편의시설 항목만 세서
+        # 점수를 매깁니다 — 예전엔 모든 탭이 휠체어용 6개 항목만 공통으로 써서,
+        # 시각장애 탭인데 경사로/엘리베이터가 없다고 '주의' 등급이 뜨는 등
+        # 실제 그 유형과 무관한 점수가 나오는 문제가 있었습니다.
+        #
+        # 시각/청각장애는 세부 항목(점자블록, 오디오가이드 등)이 아니라 '있음/
+        # 없음' 하나로만 캐시돼 있어서, 점수가 0점 또는 100점 둘 중 하나로만
+        # 나옵니다 — 데이터 자체의 한계이지 계산 버그가 아닙니다.
+        def wheelchair_score(a: Attraction) -> int:
             feats = a.accessibility
-            checks = [
-                feats.has_ramp,
-                feats.has_elevator,
-                feats.has_accessible_restroom,
-                feats.has_wheelchair_rental,
-                feats.has_stroller_accessible_path,
-                feats.has_rest_area,
-            ]
+            checks = [feats.has_ramp, feats.has_elevator, feats.has_accessible_restroom, feats.has_wheelchair_rental]
             return round(sum(1 for c in checks if c) / len(checks) * 100)
+
+        def senior_score(a: Attraction) -> int:
+            feats = a.accessibility
+            checks = [feats.has_rest_area, feats.has_ramp, feats.has_elevator, feats.has_accessible_restroom]
+            return round(sum(1 for c in checks if c) / len(checks) * 100)
+
+        def visual_score(a: Attraction) -> int:
+            # 점자블록/보조견동반/안내요원/오디오가이드/큰활자홍보물/점자홍보물/
+            # 유도안내설비 중 몇 개나 있는지(최대 7개) 기준으로 세분화된 점수를 냅니다.
+            return round(min(a.accessibility.visual_accessibility_count, 7) / 7 * 100)
+
+        def hearing_score(a: Attraction) -> int:
+            # 수화안내/자막비디오가이드/객실/기타상세 중 몇 개나 있는지(최대 4개) 기준.
+            return round(min(a.accessibility.hearing_accessibility_count, 4) / 4 * 100)
 
         wheelchair_places = [a for a in candidates if a.accessibility.has_ramp or a.accessibility.has_wheelchair_rental]
         senior_places = [a for a in candidates if a.accessibility.has_rest_area]
@@ -1519,13 +1547,13 @@ class TourApiClient:
             a.content_id for a in (wheelchair_places + senior_places + stroller_places)
         }
 
-        top_wheelchair = sorted(wheelchair_places, key=score, reverse=True)[:5]
-        top_senior = sorted(senior_places, key=score, reverse=True)[:5]
-        top_visual = sorted(visual_places, key=score, reverse=True)[:5]
-        top_hearing = sorted(hearing_places, key=score, reverse=True)[:5]
+        top_wheelchair = sorted(wheelchair_places, key=wheelchair_score, reverse=True)[:5]
+        top_senior = sorted(senior_places, key=senior_score, reverse=True)[:5]
+        top_visual = sorted(visual_places, key=visual_score, reverse=True)[:5]
+        top_hearing = sorted(hearing_places, key=hearing_score, reverse=True)[:5]
 
-        def to_place_scores(places: list[Attraction]) -> list[dict]:
-            return [{"name": a.name, "score": score(a), "address": a.address} for a in places]
+        def to_place_scores(places: list[Attraction], score_fn) -> list[dict]:
+            return [{"name": a.name, "score": score_fn(a), "address": a.address} for a in places]
 
         return {
             "wheelchair_count": len(wheelchair_places),
@@ -1535,10 +1563,10 @@ class TourApiClient:
             # 자막비디오가이드 등)로 계산한 값입니다 — 더 이상 목업이 아닙니다.
             "visual_count": len(visual_places),
             "hearing_count": len(hearing_places),
-            "top_wheelchair_places": to_place_scores(top_wheelchair),
-            "top_senior_places": to_place_scores(top_senior),
-            "top_visual_places": to_place_scores(top_visual),
-            "top_hearing_places": to_place_scores(top_hearing),
+            "top_wheelchair_places": to_place_scores(top_wheelchair, wheelchair_score),
+            "top_senior_places": to_place_scores(top_senior, senior_score),
+            "top_visual_places": to_place_scores(top_visual, visual_score),
+            "top_hearing_places": to_place_scores(top_hearing, hearing_score),
             # 진단용 필드: 43 같은 숫자가 왜 그렇게 나왔는지 원인을 구분하기 위한 정보.
             # candidates_per_category: 카테고리별(관광지/음식점/문화시설/레포츠/숙박) 수집 건수
             # total_candidates_before_accessibility_fetch: 중복 제거 후 전체 후보 수
