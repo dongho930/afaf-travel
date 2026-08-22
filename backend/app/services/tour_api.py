@@ -952,6 +952,13 @@ class TourApiClient:
                         return None
 
                 if not items:
+                    # HTTP는 정상(200)으로 왔지만 결과가 0건인 경우 — 429/예외와 달리
+                    # 이전엔 로그가 하나도 안 남아서 원인 파악이 안 됐습니다.
+                    logger.warning(
+                        "관광지 상세 조회: detailCommon2가 결과 0건을 반환함 (contentId=%s). "
+                        "존재하지 않는 contentId이거나 API 응답 구조가 예상과 다를 수 있습니다.",
+                        content_id,
+                    )
                     return None
                 d = items[0]
                 content_type_id = int(d.get("contenttypeid") or 0)
