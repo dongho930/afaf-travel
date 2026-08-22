@@ -27,6 +27,10 @@ import httpx
 from app.config import get_settings
 from app.models.schemas import AccessibilityFeatures, Attraction, CongestionForecast
 from app.services.sigungu_codes import find_area_signgu, signgu_name
+from app.services.supabase_service import (
+    get_cached_place_accessibility,
+    save_place_accessibility_batch,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -270,7 +274,7 @@ class TourApiClient:
             return None
     async def _fetch_accessibility(
         self, client: httpx.AsyncClient, content_id: str, diag: dict | None = None
-    ) -> AccessibilityFeatures:
+    ) -> tuple[AccessibilityFeatures, bool]:
         """
         'detailWithTour2'(무장애정보조회) 오퍼레이션으로 편의시설 상세를 조회합니다.
         실제 확인된 응답 필드: route(이동로/경사로 설명), wheelchair(휠체어 대여/접근),
@@ -282,6 +286,12 @@ class TourApiClient:
         예전 코드는 이걸 다른 에러와 똑같이 취급해서 조용히 '접근성 없음'으로 처리했습니다.
         그러면 실제로는 정보가 있는 곳도 레이트리밋 때문에 없는 것처럼 집계됩니다.
         그래서 429는 별도로 감지해서 잠깐 기다렸다가 최대 3번까지 재시도합니다.
+
+        반환값: (AccessibilityFeatures, record_found)
+          record_found는 API 호출이 정상적으로 성공해서 실제 결과(레코드 있음/없음)를
+          확인했는지 여부입니다. 429가 계속되거나 다른 오류로 실패한 경우엔 False라서,
+          호출한 쪽에서 '진짜로 정보가 없는 곳'과 '조회 자체가 실패한 곳'을 구분해
+          후자는 캐시에 저장하지 않고 다음 새로고침 때 다시 시도하게 할 수 있습니다.
 
         diag(선택): 진단용 카운터 dict를 넘기면 아래 케이스를 구분해서 집계합니다.
           - no_record: 호출은 성공했지만 해당 contentId에 무장애 정보가 아예 등록돼 있지 않은 경우
@@ -311,14 +321,14 @@ class TourApiClient:
                         logger.warning(
                             "detailWithTour2 재시도 소진, 429 계속 발생 (contentId=%s)", content_id
                         )
-                    return AccessibilityFeatures()
+                    return AccessibilityFeatures(), False
 
                 resp.raise_for_status()
                 items = self._extract_items(resp.json())
                 if not items:
                     if diag is not None:
                         diag["no_record"] = diag.get("no_record", 0) + 1
-                    return AccessibilityFeatures()
+                    return AccessibilityFeatures(), True
                 d = items[0]
 
                 def has_text(key: str) -> bool:
@@ -334,15 +344,15 @@ class TourApiClient:
                 )
                 if diag is not None:
                     diag["has_record"] = diag.get("has_record", 0) + 1
-                return features
+                return features, True
             except Exception as exc:
                 # 429가 아닌 다른 오류(타임아웃 등)는 재시도하지 않고 바로 빈 값 처리
                 if diag is not None:
                     diag["api_error"] = diag.get("api_error", 0) + 1
                     logger.warning("detailWithTour2 호출 실패 (contentId=%s): %s", content_id, exc)
-                return AccessibilityFeatures()
+                return AccessibilityFeatures(), False
 
-        return AccessibilityFeatures()
+        return AccessibilityFeatures(), False
 
     async def _fetch_all_by_content_type(
         self,
@@ -406,10 +416,81 @@ class TourApiClient:
         content_id: str,
         semaphore: asyncio.Semaphore,
         diag: dict | None = None,
-    ) -> AccessibilityFeatures:
+    ) -> tuple[AccessibilityFeatures, bool]:
         """_fetch_accessibility를 동시 호출 개수 제한(세마포어)과 함께 실행합니다."""
         async with semaphore:
             return await self._fetch_accessibility(client, content_id, diag=diag)
+
+    async def _fill_accessibility_with_cache(
+        self,
+        client: httpx.AsyncClient,
+        candidates: list[Attraction],
+        diag: dict | None = None,
+        max_concurrency: int = 10,
+    ) -> None:
+        """
+        candidates 각각의 accessibility 필드를 채웁니다.
+
+        DB 캐시(place_accessibility_cache, supabase_service 경유)에 이미 있는 content_id는
+        API를 다시 호출하지 않고 캐시 값을 그대로 쓰고, 캐시에 없는(=새로 등장했거나
+        아직 한 번도 조회하지 못한) content_id만 실제 API로 조회합니다. 새로 조회한
+        결과는 (레코드 조회에 성공한 경우에 한해) 다시 캐시에 저장해둡니다.
+
+        레이트리밋(429)이 재시도까지 다 실패한 경우(record_found=False)는 캐시에
+        저장하지 않습니다 — 그래야 다음 새로고침 때 '캐시가 없으니 다시 시도'가 되고,
+        일시적인 API 장애가 영구적으로 '접근성 없음'으로 굳어버리는 걸 막을 수 있습니다.
+        """
+        content_ids = [a.content_id for a in candidates if a.content_id]
+        cached_rows = await get_cached_place_accessibility(content_ids)
+        if diag is not None:
+            diag["from_cache"] = diag.get("from_cache", 0) + len(cached_rows)
+
+        to_fetch = [a for a in candidates if a.content_id and a.content_id not in cached_rows]
+
+        semaphore = asyncio.Semaphore(max_concurrency)
+        fetch_results = await asyncio.gather(
+            *(
+                self._fetch_accessibility_bounded(client, a.content_id, semaphore, diag=diag)
+                for a in to_fetch
+            )
+        )
+
+        new_cache_rows: list[dict] = []
+        for attraction, (features, record_found) in zip(to_fetch, fetch_results):
+            attraction.accessibility = features
+            if record_found:
+                new_cache_rows.append(
+                    {
+                        "content_id": attraction.content_id,
+                        "has_ramp": features.has_ramp,
+                        "has_elevator": features.has_elevator,
+                        "has_accessible_restroom": features.has_accessible_restroom,
+                        "has_wheelchair_rental": features.has_wheelchair_rental,
+                        "has_stroller_accessible_path": features.has_stroller_accessible_path,
+                        "has_rest_area": features.has_rest_area,
+                        "record_found": True,
+                        "fetched_at": datetime.datetime.utcnow().isoformat(),
+                    }
+                )
+
+        if new_cache_rows:
+            await save_place_accessibility_batch(new_cache_rows)
+            if diag is not None:
+                diag["newly_fetched_and_cached"] = diag.get("newly_fetched_and_cached", 0) + len(
+                    new_cache_rows
+                )
+
+        for attraction in candidates:
+            row = cached_rows.get(attraction.content_id)
+            if row is not None:
+                attraction.accessibility = AccessibilityFeatures(
+                    has_ramp=bool(row.get("has_ramp")),
+                    has_elevator=bool(row.get("has_elevator")),
+                    has_accessible_restroom=bool(row.get("has_accessible_restroom")),
+                    has_wheelchair_rental=bool(row.get("has_wheelchair_rental")),
+                    has_stroller_accessible_path=bool(row.get("has_stroller_accessible_path")),
+                    has_rest_area=bool(row.get("has_rest_area")),
+                )
 
     async def _fetch_by_content_type(
         self,
@@ -499,12 +580,9 @@ class TourApiClient:
                 # 원래 후보라도 보여주는 게 낫습니다.
                 attractions = filtered if filtered else attractions
 
-            # 각 관광지의 편의시설 상세 정보를 채웁니다 (동시에 여러 건 조회).
-            accessibility_list = await asyncio.gather(
-                *(self._fetch_accessibility(client, a.content_id) for a in attractions)
-            )
-            for attraction, accessibility in zip(attractions, accessibility_list):
-                attraction.accessibility = accessibility
+            # 각 관광지의 편의시설 상세 정보를 채웁니다. 캐시에 있으면 캐시를 쓰고,
+            # 없는 것만 API로 조회합니다 (일일 트래픽 절약).
+            await self._fill_accessibility_with_cache(client, attractions)
 
         results = attractions
         if user_type == "wheelchair":
@@ -684,22 +762,17 @@ class TourApiClient:
                 debug_info["total_candidates_before_accessibility_fetch"] = len(all_candidates)
 
                 # 2) 전체 항목 각각의 편의시설 상세 정보를 채웁니다.
-                #    동시 연결 개수는 세마포어로, 실제 요청 '속도'는 self._rate_limiter로
-                #    각각 제한합니다 (세마포어만으로는 순간적으로 몰려서 429가 났었음).
-                semaphore = asyncio.Semaphore(10)
+                #    캐시(place_accessibility_cache)에 이미 있는 content_id는 API를
+                #    다시 부르지 않고, 새로 등장한 content_id만 조회합니다.
+                #    (동시 연결 개수는 세마포어, 실제 요청 '속도'는 self._rate_limiter로 제한)
                 accessibility_diag: dict = {}
-                accessibility_list = await asyncio.gather(
-                    *(
-                        self._fetch_accessibility_bounded(
-                            client, a.content_id, semaphore, diag=accessibility_diag
-                        )
-                        for a in all_candidates
-                    )
+                await self._fill_accessibility_with_cache(
+                    client, all_candidates, diag=accessibility_diag, max_concurrency=10
                 )
-                for attraction, accessibility in zip(all_candidates, accessibility_list):
-                    attraction.accessibility = accessibility
 
                 debug_info["accessibility_fetch"] = {
+                    "from_cache": accessibility_diag.get("from_cache", 0),
+                    "newly_fetched_and_cached": accessibility_diag.get("newly_fetched_and_cached", 0),
                     "no_record": accessibility_diag.get("no_record", 0),
                     "has_record": accessibility_diag.get("has_record", 0),
                     "api_error": accessibility_diag.get("api_error", 0),
@@ -708,11 +781,14 @@ class TourApiClient:
                 }
                 logger.info(
                     "get_accessibility_summary(%s): 후보 %d건 / 카테고리별 %s / "
+                    "캐시적중 %d건, 신규조회 %d건 / "
                     "무장애정보 등록없음 %d건, 등록됨 %d건, 조회실패 %d건, "
                     "429재시도 %d회, 429재시도소진 %d건",
                     region,
                     len(all_candidates),
                     debug_info["candidates_per_category"],
+                    accessibility_diag.get("from_cache", 0),
+                    accessibility_diag.get("newly_fetched_and_cached", 0),
                     accessibility_diag.get("no_record", 0),
                     accessibility_diag.get("has_record", 0),
                     accessibility_diag.get("api_error", 0),
