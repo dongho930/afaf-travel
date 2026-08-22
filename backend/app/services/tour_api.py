@@ -33,10 +33,12 @@ from app.services.sigungu_codes import (
     signgu_name,
 )
 from app.services.supabase_service import (
+    get_cached_attraction_basic,
     get_cached_congestion_rates,
     get_cached_congestion_signgu_cds,
     get_cached_overviews,
     get_cached_place_accessibility,
+    save_attraction_basic,
     save_congestion_rates_batch,
     save_overviews_batch,
     save_place_accessibility_batch,
@@ -873,12 +875,16 @@ class TourApiClient:
 
     async def get_attraction_detail(self, content_id: str) -> Attraction | None:
         """
-        관광지 상세 페이지용 단건 조회. 목록 조회와 달리 딱 하나만 다루므로
-        예산/조기중단 로직 없이 바로 조회합니다 (부담이 훨씬 적음).
+        관광지 상세 페이지용 단건 조회.
 
-        무장애 정보/집중률/소개문을 한 번에 다 채워서 반환합니다 — 캐시에
-        있으면 캐시를 쓰고, 없는 것만 그 자리에서 조회 후 캐시에 저장합니다.
-        찾지 못하면 None.
+        기본정보(이름/주소/좌표/이미지/카테고리/소개문)를 attraction_overview_cache에
+        캐시합니다 — 예전엔 소개문만 캐시하고 기본정보는 상세 페이지 열 때마다
+        매번 실시간으로 다시 불렀는데, 그러다 보니 API가 막혀 있으면 상세 페이지
+        전체가 통째로 안 뜨는 문제가 있었습니다. 이제 한 번만 성공하면 그 다음부턴
+        API 호출 없이 항상 뜹니다. 캐시에 없을 때만 429 재시도(최대 3번)를 하며
+        새로 조회합니다.
+
+        무장애 정보/집중률도 각자의 캐시에서 채우고, 찾지 못하면 None을 반환합니다.
         """
         if self.use_mock:
             for a in _MOCK_ATTRACTIONS:
@@ -894,31 +900,78 @@ class TourApiClient:
             return None
 
         async with httpx.AsyncClient(timeout=15) as client:
-            try:
-                resp = await client.get(
-                    f"{settings.tour_api_base_url}/KorWithService2/detailCommon2",
-                    params=self._common_params(
-                        {
-                            "contentId": content_id,
-                            "defaultYN": "Y",
-                            "addrinfoYN": "Y",
-                            "overviewYN": "Y",
-                        }
-                    ),
+            cached_basic = await get_cached_attraction_basic(content_id)
+            if cached_basic:
+                attraction = Attraction(
+                    content_id=content_id,
+                    name=cached_basic.get("name") or "",
+                    address=cached_basic.get("address") or "",
+                    latitude=float(cached_basic.get("latitude") or 0),
+                    longitude=float(cached_basic.get("longitude") or 0),
+                    category=cached_basic.get("category") or "",
+                    image_url=cached_basic.get("image_url") or None,
+                    overview=cached_basic.get("overview") or None,
                 )
-                resp.raise_for_status()
-                items = self._extract_items(resp.json())
-            except Exception as exc:
-                logger.warning("관광지 상세 조회 실패 (contentId=%s): %s", content_id, exc)
-                return None
+            else:
+                max_retries = 3
+                items: list[dict] = []
+                for attempt in range(max_retries + 1):
+                    await self._rate_limiter.wait_turn()
+                    try:
+                        resp = await client.get(
+                            f"{settings.tour_api_base_url}/KorWithService2/detailCommon2",
+                            params=self._common_params(
+                                {
+                                    "contentId": content_id,
+                                    "defaultYN": "Y",
+                                    "addrinfoYN": "Y",
+                                    "overviewYN": "Y",
+                                }
+                            ),
+                        )
+                        if resp.status_code == 429:
+                            if attempt < max_retries:
+                                retry_after = resp.headers.get("Retry-After")
+                                wait_seconds = (
+                                    float(retry_after) if retry_after else 0.5 * (2 ** attempt)
+                                )
+                                await asyncio.sleep(wait_seconds)
+                                continue
+                            logger.warning(
+                                "관광지 상세 조회 재시도 소진, 429 계속 발생 (contentId=%s)",
+                                content_id,
+                            )
+                            return None
+                        resp.raise_for_status()
+                        items = self._extract_items(resp.json())
+                        break
+                    except Exception as exc:
+                        logger.warning(
+                            "관광지 상세 조회 실패 (contentId=%s): %s", content_id, exc
+                        )
+                        return None
 
-            if not items:
-                return None
-            d = items[0]
-            content_type_id = int(d.get("contenttypeid") or 0)
-            attraction = self._map_item_to_attraction(d, content_type_id)
-            # 상세 페이지는 카드보다 넉넉하게 보여줍니다 (카드용 110자보다 김).
-            attraction.overview = self._shorten_overview(d.get("overview"), max_len=400)
+                if not items:
+                    return None
+                d = items[0]
+                content_type_id = int(d.get("contenttypeid") or 0)
+                attraction = self._map_item_to_attraction(d, content_type_id)
+                # 상세 페이지는 카드보다 넉넉하게 보여줍니다 (카드용 110자보다 김).
+                attraction.overview = self._shorten_overview(d.get("overview"), max_len=400)
+
+                await save_attraction_basic(
+                    {
+                        "content_id": content_id,
+                        "name": attraction.name,
+                        "address": attraction.address,
+                        "latitude": attraction.latitude,
+                        "longitude": attraction.longitude,
+                        "category": attraction.category,
+                        "image_url": attraction.image_url,
+                        "overview": attraction.overview or "",
+                        "fetched_at": datetime.datetime.utcnow().isoformat(),
+                    }
+                )
 
             # 무장애 정보: 캐시 우선, 없으면 이번 하나만 즉시 조회
             cached = await get_cached_place_accessibility([content_id])

@@ -486,17 +486,29 @@ async def save_congestion_rates_batch(rows: list[dict]) -> None:
         print(f"[supabase] 집중률 캐시 저장 실패: {e}")
 
 
-# ---- 관광지 소개문(overview) 캐시 ----
+# ---- 관광지 소개문 + 기본정보(이름/주소/좌표/이미지/카테고리) 캐시 ----
 #
-# detailCommon2(공통정보조회)의 overview 필드는 장소당 한 번만 받아두면 되는
-# (거의 안 바뀌는) 정보라, 무장애 정보와 똑같은 방식으로 캐시합니다. 이 API는
-# 무장애 정보(KorWithService2)와 같은 일일 트래픽 한도를 공유하므로, 캐시로
-# 재조회를 막는 게 특히 중요합니다.
+# detailCommon2(공통정보조회)는 장소당 한 번만 받아두면 되는(거의 안 바뀌는)
+# 정보라, 무장애 정보와 똑같은 방식으로 캐시합니다. 이 API는 무장애 정보
+# (KorWithService2)와 같은 일일 트래픽 한도를 공유하므로, 캐시로 재조회를
+# 막는 게 특히 중요합니다.
 #
-# Supabase 대시보드에서 미리 만들어둬야 하는 테이블:
+# 원래는 overview(소개문)만 캐시했는데, 관광지 상세 페이지가 이름/주소/좌표/
+# 이미지까지 매번 실시간으로 다시 조회하다 보니 API가 막히면 상세 페이지 전체가
+# 아예 안 뜨는 문제가 있었습니다. 그래서 detailCommon2 응답 전체를 여기 같이
+# 캐시해서, 한 번 성공하면 그 다음부턴 API 호출 없이 항상 뜨도록 합니다.
+#
+# Supabase 대시보드에서 미리 만들어둬야 하는 테이블(기존 attraction_overview_cache에
+# 컬럼을 추가):
 #   attraction_overview_cache
 #     - content_id (text, Primary Key)
 #     - overview (text)
+#     - name (text)
+#     - address (text)
+#     - latitude (double precision)
+#     - longitude (double precision)
+#     - category (text)
+#     - image_url (text)
 #     - fetched_at (timestamptz)
 
 _OVERVIEW_TABLE = "attraction_overview_cache"
@@ -520,6 +532,40 @@ async def get_cached_overviews(content_ids: list[str]) -> dict[str, str]:
         print(f"[supabase] 관광지 소개문 캐시 조회 실패: {e}")
         return {}
     return found
+
+
+async def get_cached_attraction_basic(content_id: str) -> dict | None:
+    """
+    상세 페이지용: 캐시된 기본정보(이름/주소/좌표/이미지/카테고리/소개문) 한 건을
+    돌려줍니다. name이 비어있으면(예: 소개문만 캐시됐던 예전 행) 캐시 미스로 취급합니다.
+    """
+    if _client is None or not content_id:
+        return None
+    try:
+        result = (
+            _client.table(_OVERVIEW_TABLE)
+            .select("*")
+            .eq("content_id", content_id)
+            .limit(1)
+            .execute()
+        )
+        rows = result.data or []
+        if not rows or not rows[0].get("name"):
+            return None
+        return rows[0]
+    except Exception as e:
+        print(f"[supabase] 관광지 기본정보 캐시 조회 실패: {e}")
+        return None
+
+
+async def save_attraction_basic(row: dict) -> None:
+    """상세 페이지 조회 성공 시, 기본정보 전체를 캐시에 upsert합니다."""
+    if _client is None or not row:
+        return
+    try:
+        _client.table(_OVERVIEW_TABLE).upsert(row).execute()
+    except Exception as e:
+        print(f"[supabase] 관광지 기본정보 캐시 저장 실패: {e}")
 
 
 async def save_overviews_batch(rows: list[dict]) -> None:
