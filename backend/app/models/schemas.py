@@ -196,7 +196,11 @@ class SavedCourseDetail(BaseModel):
 
 class AccessibilityPlaceScore(BaseModel):
     """'접근성' 탭의 '휠체어 주요 여행지' 목록 항목"""
-    content_id: str
+    # content_id를 나중에 추가하면서, 그 전에 캐시된 accessibility_stats 데이터에는
+    # 이 필드가 없어서 필수로 두면 그 캐시를 읽을 때마다 검증 에러로 API 전체가
+    # 죽었습니다. 캐시가 새로고침되기 전까지는 빈 문자열일 수 있다는 뜻이라
+    # Optional로 둡니다 (모바일 쪽에서 빈 값이면 상세 페이지 이동을 막습니다).
+    content_id: str = ""
     name: str
     score: int
     address: str
