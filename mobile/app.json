@@ -12,7 +12,8 @@
       "infoPlist": {
         "NSMicrophoneUsageDescription": "음성으로 여행 코스를 요청하기 위해 마이크 접근 권한이 필요합니다.",
         "NSSpeechRecognitionUsageDescription": "음성 질의를 텍스트로 변환하기 위해 음성 인식 권한이 필요합니다.",
-        "NSLocationWhenInUseUsageDescription": "근처 무장애 관광지를 추천하기 위해 위치 권한이 필요합니다."
+        "NSLocationWhenInUseUsageDescription": "근처 무장애 관광지를 추천하기 위해 위치 권한이 필요합니다.",
+        "NSPhotoLibraryUsageDescription": "프로필 사진을 설정하기 위해 사진 접근 권한이 필요합니다."
       }
     },
     "android": {
@@ -26,6 +27,12 @@
     "plugins": [
       "expo-router",
       "expo-location",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "프로필 사진을 설정하기 위해 사진 접근 권한이 필요합니다."
+        }
+      ],
       [
         "expo-speech-recognition",
         {
@@ -43,8 +50,10 @@
       ]
     ],
     "extra": {
-      "apiBaseUrl": "http://192.168.0.3:8000",
-      "kakaoJsKey": "85a79aa42ca8b4e79b45ec7135625d0c"
+      "apiBaseUrl": "https://afaf-travel.onrender.com",
+      "kakaoJsKey": "85a79aa42ca8b4e79b45ec7135625d0c",
+      "supabaseUrl": "https://muhzjojydvozaqwihdig.supabase.co",
+      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im11aHpqb2p5ZHZvemFxd2loZGlnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY5MzM5ODQsImV4cCI6MjEwMjUwOTk4NH0.k1piW3dNvtdqFN_A3RvDrFtRYaa4IBHXC2l5ilKDRNA"
     }
   }
 }

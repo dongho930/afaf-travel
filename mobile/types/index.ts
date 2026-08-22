@@ -36,6 +36,16 @@ export interface CourseStop {
   reason: string;
 }
 
+export interface PlaceCandidate {
+  attraction: Attraction;
+  reason: string;
+}
+
+export interface RegionOption {
+  code: number;
+  name: string;
+}
+
 export interface CourseResponse {
   course_id: string;
   title: string;
@@ -51,3 +61,57 @@ export const USER_TYPE_LABELS: Record<UserType, string> = {
   pregnant: "임산부",
   general: "일반",
 };
+
+export type CourseCategory = "가족" | "커플" | "친구" | "혼자" | "기타";
+
+export const COURSE_CATEGORIES: CourseCategory[] = ["가족", "커플", "친구", "혼자", "기타"];
+
+export interface TripSummary {
+  trip_id: string;
+  name: string;
+  category: CourseCategory;
+  course_count: number;
+  start_date?: string | null;
+  end_date?: string | null;
+  created_at?: string | null;
+}
+
+export interface SavedCourseSummary {
+  course_id: string;
+  title: string;
+  summary: string;
+  region: string;
+  stop_count: number;
+  created_at?: string | null;
+}
+
+export interface SavedCourseDetail {
+  course: CourseResponse;
+  trip_id: string;
+  trip_name: string;
+  category: CourseCategory;
+  region: string;
+  created_at?: string | null;
+}
+
+export interface UserProfile {
+  id: string;
+  username: string;
+  email: string;
+  avatar_url?: string | null;
+}
+
+export interface AccessibilityPlaceScore {
+  name: string;
+  score: number;
+  address: string;
+}
+
+export interface AccessibilitySummary {
+  wheelchair_count: number;
+  senior_count: number;
+  total_accessible_count: number;
+  visual_count_mock: number;
+  hearing_count_mock: number;
+  top_wheelchair_places: AccessibilityPlaceScore[];
+}
