@@ -174,6 +174,7 @@ class AccessibilitySummary(BaseModel):
     """'접근성' 탭 요약 정보"""
     wheelchair_count: int
     senior_count: int
+    total_accessible_count: int  # 휠체어/유모차/고령자·임산부 중 하나라도 해당하는 장소를 합친(중복 제거) 개수
     visual_count_mock: int   # 실제 데이터 없음 — 화면 표시용 목업 숫자
     hearing_count_mock: int  # 실제 데이터 없음 — 화면 표시용 목업 숫자
     top_wheelchair_places: list[AccessibilityPlaceScore]
