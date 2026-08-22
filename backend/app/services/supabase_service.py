@@ -307,3 +307,45 @@ async def get_saved_course_detail(course_id: str, user_id: str) -> Optional[dict
     except Exception as e:
         print(f"[supabase] 저장된 코스 상세 조회 실패: {e}")
         return None
+
+
+async def get_cached_accessibility_stats(region: str) -> Optional[dict]:
+    """
+    '접근성' 탭/홈 화면 통계용으로 미리 계산해둔 고정 값을 조회합니다.
+    아직 한 번도 계산해서 저장한 적이 없으면(캐시 없음) None을 반환합니다.
+    """
+    if _client is None:
+        return None
+    try:
+        result = (
+            _client.table("accessibility_stats")
+            .select("*")
+            .eq("region", region)
+            .limit(1)
+            .execute()
+        )
+        rows = result.data or []
+        return rows[0] if rows else None
+    except Exception as e:
+        print(f"[supabase] 접근성 통계 캐시 조회 실패: {e}")
+        return None
+
+
+async def save_accessibility_stats(region: str, data: dict) -> None:
+    """
+    새로 계산한 접근성 통계를 저장(있으면 갱신, 없으면 생성)합니다.
+    이후 조회는 이 저장된 값을 그대로 읽기만 해서, 다시 계산하기 전까지는 항상
+    같은(고정된) 숫자가 나옵니다.
+    """
+    if _client is None:
+        return
+    try:
+        existing = _client.table("accessibility_stats").select("id").eq("region", region).limit(1).execute()
+        rows = existing.data or []
+        payload = {**data, "region": region}
+        if rows:
+            _client.table("accessibility_stats").update(payload).eq("region", region).execute()
+        else:
+            _client.table("accessibility_stats").insert(payload).execute()
+    except Exception as e:
+        print(f"[supabase] 접근성 통계 캐시 저장 실패: {e}")
