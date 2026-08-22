@@ -519,12 +519,19 @@ class TourApiClient:
 
         wheelchair_places = [a for a in candidates if a.accessibility.has_ramp or a.accessibility.has_wheelchair_rental]
         senior_places = [a for a in candidates if a.accessibility.has_rest_area]
+        stroller_places = [a for a in candidates if a.accessibility.has_stroller_accessible_path]
+        # '무장애 여행지' 총 개수는 휠체어/유모차/고령자·임산부(휴게공간) 중
+        # 하나라도 해당하는 장소를 중복 없이 합친 값입니다.
+        any_accessible_ids = {
+            a.content_id for a in (wheelchair_places + senior_places + stroller_places)
+        }
 
         top_wheelchair = sorted(wheelchair_places, key=score, reverse=True)[:5]
 
         return {
             "wheelchair_count": len(wheelchair_places),
             "senior_count": len(senior_places),
+            "total_accessible_count": len(any_accessible_ids),
             # 시각/청각장애 관련 편의시설 데이터를 제공하는 API가 없어 실제 계산이 불가능합니다.
             # 화면 구성을 위한 표시용 숫자입니다 (실제 데이터 아님).
             "visual_count_mock": 613,
