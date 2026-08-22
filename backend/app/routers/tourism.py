@@ -40,7 +40,7 @@ async def list_regions(province: str = Query(default="경기도")):
 async def list_attractions(
     region: str = Query(default="경기도"),
     user_type: UserType = Query(default=UserType.GENERAL),
-    limit: int = Query(default=20, le=100),
+    limit: int = Query(default=20, le=50),
     sigungu_cd: int | None = Query(default=None, description="특정 시/군/구로 좁혀서 조회 (선택)"),
 ):
     """무장애 필터링이 적용된 관광지 목록"""
