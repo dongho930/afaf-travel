@@ -21,7 +21,6 @@ USE_MOCK_DATA=true (기본값) 일 때는 경기도 지역 목업 데이터를 �
 import asyncio
 import datetime
 import logging
-import re
 
 import httpx
 
@@ -888,32 +887,6 @@ class TourApiClient:
 
         return results
 
-    async def debug_raw_detail_common(self, content_id: str) -> dict:
-        """
-        [임시 디버그용] detailCommon2 원본 응답을 가공 없이 그대로 돌려줍니다.
-        get_attraction_detail은 결과를 Attraction으로 가공해버려서 '왜' 0건인지
-        (totalCount=0인지, resultCode 에러인지, items 키 자체가 없는지) 안 보이는데,
-        이 메서드로 원인을 정확히 확인한 뒤 지워도 됩니다.
-        """
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(
-                f"{settings.tour_api_base_url}/KorWithService2/detailCommon2",
-                params=self._common_params(
-                    {
-                        "contentId": content_id,
-                        "numOfRows": 1,
-                        "pageNo": 1,
-                    }
-                ),
-            )
-            # serviceKey는 민감정보라 화면/로그에 그대로 노출되지 않도록 마스킹합니다.
-            masked_url = re.sub(r"(serviceKey=)[^&]+", r"\1***", str(resp.url))
-            return {
-                "status_code": resp.status_code,
-                "url": masked_url,
-                "body": resp.text,
-            }
-
     async def get_attraction_detail(self, content_id: str) -> Attraction | None:
         """
         관광지 상세 페이지용 단건 조회.
@@ -1003,8 +976,10 @@ class TourApiClient:
                 d = items[0]
                 content_type_id = int(d.get("contenttypeid") or 0)
                 attraction = self._map_item_to_attraction(d, content_type_id)
-                # 상세 페이지는 카드보다 넉넉하게 보여줍니다 (카드용 110자보다 김).
-                attraction.overview = self._shorten_overview(d.get("overview"), max_len=400)
+                # 상세 페이지는 전체 소개문을 그대로 보여줍니다 (홈 카드용 요약과 달리
+                # 글자 수를 자르지 않음). 앞뒤 공백만 정리합니다.
+                raw_overview = (d.get("overview") or "").strip() or None
+                attraction.overview = raw_overview
 
                 await save_attraction_basic(
                     {
@@ -1015,7 +990,10 @@ class TourApiClient:
                         "longitude": attraction.longitude,
                         "category": attraction.category,
                         "image_url": attraction.image_url,
-                        "overview": attraction.overview or "",
+                        # 캐시에는 항상 원문 전체를 저장합니다 — 홈 카드는 이 캐시를
+                        # 읽어올 때(_fill_overview_with_cache) 자기가 알아서 짧게
+                        # 줄여서 쓰고, 상세 페이지는 원문 그대로 씁니다.
+                        "overview": raw_overview or "",
                         "fetched_at": datetime.datetime.utcnow().isoformat(),
                     }
                 )
