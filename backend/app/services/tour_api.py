@@ -427,6 +427,7 @@ class TourApiClient:
         candidates: list[Attraction],
         diag: dict | None = None,
         max_concurrency: int = 10,
+        max_new_fetches: int | None = None,
     ) -> None:
         """
         candidates 각각의 accessibility 필드를 채웁니다.
@@ -439,6 +440,17 @@ class TourApiClient:
         레이트리밋(429)이 재시도까지 다 실패한 경우(record_found=False)는 캐시에
         저장하지 않습니다 — 그래야 다음 새로고침 때 '캐시가 없으니 다시 시도'가 되고,
         일시적인 API 장애가 영구적으로 '접근성 없음'으로 굳어버리는 걸 막을 수 있습니다.
+
+        max_new_fetches(선택): 이번 호출에서 '새로 조회'할 최대 건수. 개발계정처럼
+        일일 트래픽 한도가 낮을 때, 후보 전체를 한 번에 다 시도하다가 한도를 넘겨서
+        전부 429로 낭비하는 걸 막기 위한 예산입니다. 한도를 넘는 나머지는 이번엔
+        건드리지 않고 그대로 남겨둬서(캐시에 없는 채로), 다음 새로고침(=다음날)에
+        이어서 채워집니다.
+
+        또한 배치를 청크 단위로 순차 처리하면서, 한 청크가 통째로 레이트리밋으로
+        실패하면(=이미 일일 한도를 소진했다고 판단) 남은 후보는 더 시도하지 않고
+        바로 멈춥니다 — 이미 막힌 걸 알면서 나머지 수천 건에 재시도 백오프까지
+        들여가며 시간을 낭비하지 않기 위함입니다.
         """
         content_ids = [a.content_id for a in candidates if a.content_id]
         cached_rows = await get_cached_place_accessibility(content_ids)
@@ -447,31 +459,57 @@ class TourApiClient:
 
         to_fetch = [a for a in candidates if a.content_id and a.content_id not in cached_rows]
 
-        semaphore = asyncio.Semaphore(max_concurrency)
-        fetch_results = await asyncio.gather(
-            *(
-                self._fetch_accessibility_bounded(client, a.content_id, semaphore, diag=diag)
-                for a in to_fetch
-            )
-        )
+        deferred_count = 0
+        if max_new_fetches is not None and len(to_fetch) > max_new_fetches:
+            deferred_count = len(to_fetch) - max_new_fetches
+            to_fetch = to_fetch[:max_new_fetches]
+        if diag is not None:
+            diag["deferred_no_budget"] = diag.get("deferred_no_budget", 0) + deferred_count
 
         new_cache_rows: list[dict] = []
-        for attraction, (features, record_found) in zip(to_fetch, fetch_results):
-            attraction.accessibility = features
-            if record_found:
-                new_cache_rows.append(
-                    {
-                        "content_id": attraction.content_id,
-                        "has_ramp": features.has_ramp,
-                        "has_elevator": features.has_elevator,
-                        "has_accessible_restroom": features.has_accessible_restroom,
-                        "has_wheelchair_rental": features.has_wheelchair_rental,
-                        "has_stroller_accessible_path": features.has_stroller_accessible_path,
-                        "has_rest_area": features.has_rest_area,
-                        "record_found": True,
-                        "fetched_at": datetime.datetime.utcnow().isoformat(),
-                    }
+        stopped_early = False
+        for chunk_start in range(0, len(to_fetch), max_concurrency):
+            chunk = to_fetch[chunk_start : chunk_start + max_concurrency]
+            semaphore = asyncio.Semaphore(max_concurrency)
+            chunk_results = await asyncio.gather(
+                *(
+                    self._fetch_accessibility_bounded(client, a.content_id, semaphore, diag=diag)
+                    for a in chunk
                 )
+            )
+
+            chunk_all_rate_limited = True
+            for attraction, (features, record_found) in zip(chunk, chunk_results):
+                attraction.accessibility = features
+                if record_found:
+                    chunk_all_rate_limited = False
+                    new_cache_rows.append(
+                        {
+                            "content_id": attraction.content_id,
+                            "has_ramp": features.has_ramp,
+                            "has_elevator": features.has_elevator,
+                            "has_accessible_restroom": features.has_accessible_restroom,
+                            "has_wheelchair_rental": features.has_wheelchair_rental,
+                            "has_stroller_accessible_path": features.has_stroller_accessible_path,
+                            "has_rest_area": features.has_rest_area,
+                            "record_found": True,
+                            "fetched_at": datetime.datetime.utcnow().isoformat(),
+                        }
+                    )
+
+            # 청크 전체가 레이트리밋으로 실패했다면 일일 한도를 이미 다 쓴 것으로 보고 중단
+            if chunk_all_rate_limited and len(chunk) > 0:
+                remaining = len(to_fetch) - (chunk_start + len(chunk))
+                if diag is not None:
+                    diag["stopped_early_rate_limited"] = True
+                    diag["deferred_no_budget"] = diag.get("deferred_no_budget", 0) + remaining
+                stopped_early = True
+                logger.warning(
+                    "무장애정보 조회를 일찍 중단합니다 (연속 429로 일일 한도 소진 추정, "
+                    "남은 %d건은 다음 새로고침으로 미룸)",
+                    remaining,
+                )
+                break
 
         if new_cache_rows:
             await save_place_accessibility_batch(new_cache_rows)
@@ -491,6 +529,7 @@ class TourApiClient:
                     has_stroller_accessible_path=bool(row.get("has_stroller_accessible_path")),
                     has_rest_area=bool(row.get("has_rest_area")),
                 )
+        _ = stopped_early  # 로그/필요 시 확장을 위해 남겨둠 (현재는 diag로 충분히 노출됨)
 
     async def _fetch_by_content_type(
         self,
@@ -763,11 +802,16 @@ class TourApiClient:
 
                 # 2) 전체 항목 각각의 편의시설 상세 정보를 채웁니다.
                 #    캐시(place_accessibility_cache)에 이미 있는 content_id는 API를
-                #    다시 부르지 않고, 새로 등장한 content_id만 조회합니다.
-                #    (동시 연결 개수는 세마포어, 실제 요청 '속도'는 self._rate_limiter로 제한)
+                #    다시 부르지 않고, 새로 등장한 content_id만 (하루 예산 한도 안에서)
+                #    조회합니다. (동시 연결 개수는 세마포어, 실제 요청 '속도'는
+                #    self._rate_limiter로 제한)
                 accessibility_diag: dict = {}
                 await self._fill_accessibility_with_cache(
-                    client, all_candidates, diag=accessibility_diag, max_concurrency=10
+                    client,
+                    all_candidates,
+                    diag=accessibility_diag,
+                    max_concurrency=10,
+                    max_new_fetches=settings.tour_api_daily_fetch_budget,
                 )
 
                 debug_info["accessibility_fetch"] = {
@@ -778,10 +822,17 @@ class TourApiClient:
                     "api_error": accessibility_diag.get("api_error", 0),
                     "rate_limited_retry": accessibility_diag.get("rate_limited_retry", 0),
                     "rate_limit_exhausted": accessibility_diag.get("rate_limit_exhausted", 0),
+                    # 일일 예산(tour_api_daily_fetch_budget) 또는 연속 429로 인해
+                    # 이번엔 아예 시도하지 못하고 미뤄진 건수. 이 값이 0이 될 때까지
+                    # /refresh를 반복 호출하면(보통 매일 한 번씩) 캐시가 다 채워집니다.
+                    "deferred_no_budget": accessibility_diag.get("deferred_no_budget", 0),
+                    "stopped_early_rate_limited": accessibility_diag.get(
+                        "stopped_early_rate_limited", False
+                    ),
                 }
                 logger.info(
                     "get_accessibility_summary(%s): 후보 %d건 / 카테고리별 %s / "
-                    "캐시적중 %d건, 신규조회 %d건 / "
+                    "캐시적중 %d건, 신규조회 %d건, 미룸(예산/한도) %d건 / "
                     "무장애정보 등록없음 %d건, 등록됨 %d건, 조회실패 %d건, "
                     "429재시도 %d회, 429재시도소진 %d건",
                     region,
@@ -789,6 +840,7 @@ class TourApiClient:
                     debug_info["candidates_per_category"],
                     accessibility_diag.get("from_cache", 0),
                     accessibility_diag.get("newly_fetched_and_cached", 0),
+                    accessibility_diag.get("deferred_no_budget", 0),
                     accessibility_diag.get("no_record", 0),
                     accessibility_diag.get("has_record", 0),
                     accessibility_diag.get("api_error", 0),

@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     # 개발 편의를 위한 모드 플래그: 실제 키가 없을 때는 목업 데이터로 동작
     use_mock_data: bool = os.getenv("USE_MOCK_DATA", "true").lower() == "true"
 
+    # 무장애 정보(detailWithTour2) 전수조사용 일일 예산.
+    # 지금 발급받은 키가 '개발계정'이라 하루 트래픽 한도가 1,000건입니다.
+    # 한 번의 /refresh 호출에서 이 한도를 다 써버리면 그날은 이후 다른 API 호출도
+    # 막힐 수 있어, 여유를 두고 기본값을 900으로 잡았습니다. 운영계정으로 전환하면
+    # TOUR_API_DAILY_FETCH_BUDGET 환경변수로 더 큰 값(예: 90000)을 넣어주면 됩니다.
+    tour_api_daily_fetch_budget: int = int(os.getenv("TOUR_API_DAILY_FETCH_BUDGET", "900"))
+
     class Config:
         env_file = ".env"
 
