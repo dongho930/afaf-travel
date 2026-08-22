@@ -49,6 +49,13 @@ class Attraction(BaseModel):
     congestion_forecast: list[CongestionForecast] = Field(default_factory=list)
     related_attraction_ids: list[str] = Field(default_factory=list)
     nearby_medical_info: Optional[str] = None
+    # 캐시된 관광지 집중률(congestion_cache, 0~100%). 캐시에 없으면 None —
+    # "데이터 없음"과 "0%"를 구분하기 위해 0이 아니라 None을 씁니다.
+    congestion_rate: Optional[float] = None
+    # 짧은 소개문 (detailCommon2의 overview를 간략화, attraction_overview_cache 경유)
+    overview: Optional[str] = None
+    # AccessibilityFeatures를 사람이 읽는 한글 라벨로 풀어낸 목록 (예: ["경사로", "휠체어 대여"])
+    accessibility_benefits: list[str] = Field(default_factory=list)
 
 
 class RegionOption(BaseModel):

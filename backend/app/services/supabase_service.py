@@ -484,3 +484,52 @@ async def save_congestion_rates_batch(rows: list[dict]) -> None:
             _client.table(_CONGESTION_TABLE).upsert(chunk).execute()
     except Exception as e:
         print(f"[supabase] 집중률 캐시 저장 실패: {e}")
+
+
+# ---- 관광지 소개문(overview) 캐시 ----
+#
+# detailCommon2(공통정보조회)의 overview 필드는 장소당 한 번만 받아두면 되는
+# (거의 안 바뀌는) 정보라, 무장애 정보와 똑같은 방식으로 캐시합니다. 이 API는
+# 무장애 정보(KorWithService2)와 같은 일일 트래픽 한도를 공유하므로, 캐시로
+# 재조회를 막는 게 특히 중요합니다.
+#
+# Supabase 대시보드에서 미리 만들어둬야 하는 테이블:
+#   attraction_overview_cache
+#     - content_id (text, Primary Key)
+#     - overview (text)
+#     - fetched_at (timestamptz)
+
+_OVERVIEW_TABLE = "attraction_overview_cache"
+
+
+async def get_cached_overviews(content_ids: list[str]) -> dict[str, str]:
+    """캐시된 소개문을 {content_id: overview} 형태로 돌려줍니다."""
+    if _client is None or not content_ids:
+        return {}
+    found: dict[str, str] = {}
+    chunk_size = 500
+    try:
+        for i in range(0, len(content_ids), chunk_size):
+            chunk = content_ids[i : i + chunk_size]
+            result = (
+                _client.table(_OVERVIEW_TABLE).select("*").in_("content_id", chunk).execute()
+            )
+            for row in result.data or []:
+                found[row["content_id"]] = row.get("overview") or ""
+    except Exception as e:
+        print(f"[supabase] 관광지 소개문 캐시 조회 실패: {e}")
+        return {}
+    return found
+
+
+async def save_overviews_batch(rows: list[dict]) -> None:
+    """새로 조회한 소개문을 캐시 테이블에 upsert합니다."""
+    if _client is None or not rows:
+        return
+    chunk_size = 500
+    try:
+        for i in range(0, len(rows), chunk_size):
+            chunk = rows[i : i + chunk_size]
+            _client.table(_OVERVIEW_TABLE).upsert(chunk).execute()
+    except Exception as e:
+        print(f"[supabase] 관광지 소개문 캐시 저장 실패: {e}")

@@ -35,12 +35,31 @@ from app.services.sigungu_codes import (
 from app.services.supabase_service import (
     get_cached_congestion_rates,
     get_cached_congestion_signgu_cds,
+    get_cached_overviews,
     get_cached_place_accessibility,
     save_congestion_rates_batch,
+    save_overviews_batch,
     save_place_accessibility_batch,
 )
 
 logger = logging.getLogger(__name__)
+
+# AccessibilityFeatures 각 항목을 사람이 읽는 한글 라벨로 바꾸는 매핑.
+# 인기 여행지 카드 등에서 "이 장소가 가진 이점"을 보여줄 때 씁니다.
+_BENEFIT_LABELS: list[tuple[str, str]] = [
+    ("has_ramp", "경사로"),
+    ("has_elevator", "엘리베이터"),
+    ("has_accessible_restroom", "장애인 화장실"),
+    ("has_wheelchair_rental", "휠체어 대여"),
+    ("has_stroller_accessible_path", "유모차 이동 가능"),
+    ("has_rest_area", "임산부/고령자 휴게공간"),
+    ("has_visual_accessibility", "시각장애 편의시설"),
+    ("has_hearing_accessibility", "청각장애 편의시설"),
+]
+
+
+def _accessibility_benefit_labels(features: AccessibilityFeatures) -> list[str]:
+    return [label for field, label in _BENEFIT_LABELS if getattr(features, field, False)]
 
 settings = get_settings()
 
@@ -258,6 +277,117 @@ class TourApiClient:
             return items[0] if items else None
         except Exception:
             return None
+
+    async def _fetch_overview(
+        self, client: httpx.AsyncClient, content_id: str, diag: dict | None = None
+    ) -> tuple[str | None, bool]:
+        """
+        detailCommon2(overviewYN=Y)로 소개문(overview)을 가져옵니다.
+        이 API는 무장애 정보와 같은 서비스(같은 일일 트래픽 한도)를 쓰므로,
+        429는 별도로 감지해서 재시도하고 실패하면 캐시에 안 남도록 신호를 줍니다.
+
+        반환값: (overview 또는 None, api_ok)
+        """
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            await self._rate_limiter.wait_turn()
+            try:
+                resp = await client.get(
+                    f"{settings.tour_api_base_url}/KorWithService2/detailCommon2",
+                    params=self._common_params(
+                        {"contentId": content_id, "defaultYN": "Y", "overviewYN": "Y"}
+                    ),
+                )
+                if resp.status_code == 429:
+                    if attempt < max_retries:
+                        if diag is not None:
+                            diag["rate_limited_retry"] = diag.get("rate_limited_retry", 0) + 1
+                        retry_after = resp.headers.get("Retry-After")
+                        wait_seconds = float(retry_after) if retry_after else 0.5 * (2 ** attempt)
+                        await asyncio.sleep(wait_seconds)
+                        continue
+                    if diag is not None:
+                        diag["rate_limit_exhausted"] = diag.get("rate_limit_exhausted", 0) + 1
+                    return None, False
+
+                resp.raise_for_status()
+                items = self._extract_items(resp.json())
+                overview = (items[0].get("overview") or "").strip() if items else ""
+                if diag is not None:
+                    diag["fetched"] = diag.get("fetched", 0) + 1
+                return (overview or None), True
+            except Exception as exc:
+                if diag is not None:
+                    diag["api_error"] = diag.get("api_error", 0) + 1
+                    logger.warning(
+                        "detailCommon2(overview) 호출 실패 (contentId=%s): %s", content_id, exc
+                    )
+                return None, False
+        return None, False
+
+    @staticmethod
+    def _shorten_overview(text: str | None, max_len: int = 110) -> str | None:
+        """소개문은 원문이 길어서 카드에 넣기 위해 첫 문장 위주로 짧게 자릅니다."""
+        if not text:
+            return None
+        # 마침표 기준 첫 문장을 우선 쓰고, 그래도 너무 길면 글자 수로 자릅니다.
+        first_sentence = text.split(". ")[0].strip()
+        candidate = first_sentence if first_sentence else text
+        was_truncated = len(candidate) < len(text.strip())
+        if len(candidate) > max_len:
+            candidate = candidate[:max_len].rstrip()
+            was_truncated = True
+        if was_truncated and not candidate.endswith((".", "…")):
+            candidate += "…"
+        elif not was_truncated and not candidate.endswith("."):
+            candidate += "."
+        return candidate
+
+    async def _fill_overview_with_cache(
+        self,
+        client: httpx.AsyncClient,
+        attractions: list[Attraction],
+        diag: dict | None = None,
+        max_concurrency: int = 8,
+    ) -> None:
+        """
+        attractions 각각의 overview 필드를 채웁니다. 캐시(attraction_overview_cache)에
+        있으면 그대로 쓰고, 없는 것만 새로 조회한 뒤 캐시에 저장합니다. 소개문은
+        거의 안 바뀌는 정보라 place_accessibility_cache와 달리 예산/조기중단 없이
+        간단하게 처리합니다 — 홈 화면 목록(20개 이하) 규모라 부담이 적습니다.
+        """
+        content_ids = [a.content_id for a in attractions if a.content_id]
+        cached = await get_cached_overviews(content_ids)
+        for a in attractions:
+            if a.content_id in cached:
+                a.overview = self._shorten_overview(cached[a.content_id])
+
+        to_fetch = [a for a in attractions if a.content_id and a.content_id not in cached]
+        if not to_fetch:
+            return
+
+        semaphore = asyncio.Semaphore(max_concurrency)
+
+        async def bounded_fetch(a: Attraction) -> tuple[Attraction, str | None, bool]:
+            async with semaphore:
+                overview, api_ok = await self._fetch_overview(client, a.content_id, diag=diag)
+                return a, overview, api_ok
+
+        results = await asyncio.gather(*(bounded_fetch(a) for a in to_fetch))
+
+        new_rows: list[dict] = []
+        for a, overview, api_ok in results:
+            if api_ok:
+                a.overview = self._shorten_overview(overview)
+                new_rows.append(
+                    {
+                        "content_id": a.content_id,
+                        "overview": overview or "",
+                        "fetched_at": datetime.datetime.utcnow().isoformat(),
+                    }
+                )
+        if new_rows:
+            await save_overviews_batch(new_rows)
 
     async def _resolve_attraction_by_name(
         self, client: httpx.AsyncClient, name: str
@@ -602,14 +732,20 @@ class TourApiClient:
         뒤, 각 관광지의 address 문자열에 해당 시/군/구명이 포함되는지로 직접 걸러냅니다.
         """
         if self.use_mock:
-            results = list(_MOCK_ATTRACTIONS)
+            results = [a.model_copy(deep=True) for a in _MOCK_ATTRACTIONS]
             if user_type == "wheelchair":
                 results = [a for a in results if a.accessibility.has_ramp]
             elif user_type == "stroller":
                 results = [a for a in results if a.accessibility.has_stroller_accessible_path]
             elif user_type in ("senior", "pregnant"):
                 results = [a for a in results if a.accessibility.has_rest_area]
-            return results[:limit]
+            results = results[:limit]
+            for a in results:
+                a.accessibility_benefits = _accessibility_benefit_labels(a.accessibility)
+                # 목업 모드에는 실제 집중률/API 소개문이 없어 표시용 예시 값을 넣습니다.
+                a.congestion_rate = 42.0
+                a.overview = f"{a.name}은(는) {a.category} 카테고리의 무장애 여행지입니다."
+            return results
 
         # 실제 API 연동 (법정동 시도 코드 기준 — 경기도=41, 서울=11)
         ldong_regn_map = {"경기도": "41", "서울": "11"}
@@ -688,12 +824,18 @@ class TourApiClient:
             await get_cached_congestion_rates(distinct_signgu) if distinct_signgu else {}
         )
 
-        def congestion_sort_key(a: Attraction) -> tuple[int, float]:
+        # 정렬에 쓸 congestion_rate와, 카드에 바로 표시할 accessibility_benefits를
+        # 이 시점에 각 Attraction에 채워둡니다.
+        for a in attractions:
             signgu_cd = signgu_by_content_id.get(a.content_id)
             row = congestion_rows.get((signgu_cd, a.name)) if signgu_cd is not None else None
-            if row is None:
+            a.congestion_rate = float(row["cnctr_rate"]) if row else None
+            a.accessibility_benefits = _accessibility_benefit_labels(a.accessibility)
+
+        def congestion_sort_key(a: Attraction) -> tuple[int, float]:
+            if a.congestion_rate is None:
                 return (1, 0.0)  # 데이터 없음 → 뒤로
-            return (0, -float(row["cnctr_rate"]))  # 집중률 높은 순
+            return (0, -a.congestion_rate)  # 집중률 높은 순
 
         attractions.sort(key=congestion_sort_key)
 
@@ -704,7 +846,25 @@ class TourApiClient:
             results = [a for a in results if a.accessibility.has_stroller_accessible_path] or attractions
         elif user_type in ("senior", "pregnant"):
             results = [a for a in results if a.accessibility.has_rest_area] or attractions
-        return results[:limit]
+        results = results[:limit]
+
+        # 소개문은 API 호출 비용이 있어서, 최종적으로 화면에 노출되는 목록에
+        # 대해서만(잘려나가기 전 전체가 아니라) 조회합니다. 캐시에 있으면 API를
+        # 안 부르니, 반복 조회 시엔 대부분 여기서 바로 채워집니다.
+        # (위쪽 관광지 목록 조회에 쓰던 client는 이미 닫혀서 새로 엽니다.)
+        async with httpx.AsyncClient(timeout=15) as overview_client:
+            try:
+                await asyncio.wait_for(
+                    self._fill_overview_with_cache(overview_client, results),
+                    timeout=6.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "search_accessible_attractions: 소개문 조회가 6초 안에 끝나지 않아 "
+                    "일부는 비어있는 채로 반환합니다."
+                )
+
+        return results
 
     async def get_related_attractions(self, content_id: str) -> list[Attraction]:
         """
