@@ -20,6 +20,14 @@ class AccessibilityFeatures(BaseModel):
     has_wheelchair_rental: bool = False     # 휠체어 대여
     has_stroller_accessible_path: bool = False  # 유모차 이동 가능 동선
     has_rest_area: bool = False             # 임산부/고령자용 휴게 공간
+    # 활용매뉴얼(v4.3) 기준 실제 응답 필드로 계산 — 더 이상 목업이 아닙니다.
+    # 시각장애: braileblock(점자블록)/helpdog(보조견동반)/guidehuman(안내요원)/
+    #   audioguide(오디오가이드)/bigprint(큰활자홍보물)/brailepromotion(점자홍보물)/
+    #   guidesystem(유도안내설비)/blindhandicapetc(기타상세) 중 하나라도 있으면 True
+    has_visual_accessibility: bool = False
+    # 청각장애: signguide(수화안내)/videoguide(자막비디오가이드)/hearingroom(객실)/
+    #   hearinghandicapetc(기타상세) 중 하나라도 있으면 True
+    has_hearing_accessibility: bool = False
 
 
 class CongestionForecast(BaseModel):
@@ -175,8 +183,8 @@ class AccessibilitySummary(BaseModel):
     wheelchair_count: int
     senior_count: int
     total_accessible_count: int  # 휠체어/유모차/고령자·임산부 중 하나라도 해당하는 장소를 합친(중복 제거) 개수
-    visual_count_mock: int   # 실제 데이터 없음 — 화면 표시용 목업 숫자
-    hearing_count_mock: int  # 실제 데이터 없음 — 화면 표시용 목업 숫자
+    visual_count: int   # 시각장애 편의시설(점자블록/오디오가이드 등) 보유 장소 수 — 실제 데이터
+    hearing_count: int  # 청각장애 편의시설(수화안내/자막비디오가이드 등) 보유 장소 수 — 실제 데이터
     top_wheelchair_places: list[AccessibilityPlaceScore]
     # 진단용(선택): wheelchair_count 등이 왜 그렇게 나왔는지 원인 확인용 정보.
     # 카테고리별 후보 수, 무장애 정보 등록 여부(no_record/has_record), API 실패 건수 등.

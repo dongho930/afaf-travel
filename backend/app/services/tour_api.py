@@ -334,6 +334,24 @@ class TourApiClient:
                 def has_text(key: str) -> bool:
                     return bool((d.get(key) or "").strip())
 
+                # 활용매뉴얼(v4.3) [무장애여행 조회] 오퍼레이션 명세 기준 필드.
+                visual_fields = (
+                    "braileblock",       # 점자블록
+                    "helpdog",           # 보조견 동반
+                    "guidehuman",        # 안내요원
+                    "audioguide",        # 오디오가이드
+                    "bigprint",          # 큰 활자 홍보물
+                    "brailepromotion",   # 점자 홍보물 및 점자표지판
+                    "guidesystem",       # 유도 안내설비
+                    "blindhandicapetc",  # 시각장애 기타상세
+                )
+                hearing_fields = (
+                    "signguide",          # 수화 안내
+                    "videoguide",         # 자막 비디오가이드 및 영상 자막안내
+                    "hearingroom",        # 객실
+                    "hearinghandicapetc",  # 청각장애 기타상세
+                )
+
                 features = AccessibilityFeatures(
                     has_ramp=has_text("route"),
                     has_elevator=has_text("elevator"),
@@ -341,6 +359,8 @@ class TourApiClient:
                     has_wheelchair_rental=has_text("wheelchair"),
                     has_stroller_accessible_path=has_text("stroller"),
                     has_rest_area=has_text("lactationroom") or has_text("babysparechair"),
+                    has_visual_accessibility=any(has_text(f) for f in visual_fields),
+                    has_hearing_accessibility=any(has_text(f) for f in hearing_fields),
                 )
                 if diag is not None:
                     diag["has_record"] = diag.get("has_record", 0) + 1
@@ -492,6 +512,8 @@ class TourApiClient:
                             "has_wheelchair_rental": features.has_wheelchair_rental,
                             "has_stroller_accessible_path": features.has_stroller_accessible_path,
                             "has_rest_area": features.has_rest_area,
+                            "has_visual_accessibility": features.has_visual_accessibility,
+                            "has_hearing_accessibility": features.has_hearing_accessibility,
                             "record_found": True,
                             "fetched_at": datetime.datetime.utcnow().isoformat(),
                         }
@@ -528,6 +550,8 @@ class TourApiClient:
                     has_wheelchair_rental=bool(row.get("has_wheelchair_rental")),
                     has_stroller_accessible_path=bool(row.get("has_stroller_accessible_path")),
                     has_rest_area=bool(row.get("has_rest_area")),
+                    has_visual_accessibility=bool(row.get("has_visual_accessibility")),
+                    has_hearing_accessibility=bool(row.get("has_hearing_accessibility")),
                 )
         _ = stopped_early  # 로그/필요 시 확장을 위해 남겨둠 (현재는 diag로 충분히 노출됨)
 
@@ -621,7 +645,26 @@ class TourApiClient:
 
             # 각 관광지의 편의시설 상세 정보를 채웁니다. 캐시에 있으면 캐시를 쓰고,
             # 없는 것만 API로 조회합니다 (일일 트래픽 절약).
-            await self._fill_accessibility_with_cache(client, attractions)
+            #
+            # 이 엔드포인트는 홈 화면/검색처럼 사람이 화면을 보면서 기다리는 곳이라,
+            # 무장애 정보 API가 오늘처럼 레이트리밋에 걸려 응답이 계속 느려지는
+            # 상황이어도 화면이 무한정 멈춰있으면 안 됩니다. 그래서 (1) 새로 조회할
+            # 건수를 이번 목록 크기만큼으로 제한하고, (2) 전체 소요 시간에 상한선을
+            # 둬서, 시간 안에 다 못 끝나면 지금까지 된 것만 반영하고 넘어갑니다.
+            # (관광지 목록 자체는 이미 확보돼 있으니, 편의시설 정보가 일부 비어있는
+            # 채로라도 화면에는 바로 뜹니다.)
+            try:
+                await asyncio.wait_for(
+                    self._fill_accessibility_with_cache(
+                        client, attractions, max_new_fetches=len(attractions)
+                    ),
+                    timeout=8.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "search_accessible_attractions: 편의시설 정보 조회가 8초 안에 "
+                    "끝나지 않아 일부(또는 전부)는 비어있는 채로 목록을 반환합니다."
+                )
 
         results = attractions
         if user_type == "wheelchair":
@@ -865,6 +908,8 @@ class TourApiClient:
         wheelchair_places = [a for a in candidates if a.accessibility.has_ramp or a.accessibility.has_wheelchair_rental]
         senior_places = [a for a in candidates if a.accessibility.has_rest_area]
         stroller_places = [a for a in candidates if a.accessibility.has_stroller_accessible_path]
+        visual_places = [a for a in candidates if a.accessibility.has_visual_accessibility]
+        hearing_places = [a for a in candidates if a.accessibility.has_hearing_accessibility]
         # '무장애 여행지' 총 개수는 휠체어/유모차/고령자·임산부(휴게공간) 중
         # 하나라도 해당하는 장소를 중복 없이 합친 값입니다.
         any_accessible_ids = {
@@ -877,10 +922,10 @@ class TourApiClient:
             "wheelchair_count": len(wheelchair_places),
             "senior_count": len(senior_places),
             "total_accessible_count": len(any_accessible_ids),
-            # 시각/청각장애 관련 편의시설 데이터를 제공하는 API가 없어 실제 계산이 불가능합니다.
-            # 화면 구성을 위한 표시용 숫자입니다 (실제 데이터 아님).
-            "visual_count_mock": 613,
-            "hearing_count_mock": 594,
+            # 활용매뉴얼(v4.3) 기준 실제 응답 필드(점자블록/오디오가이드/수화안내/
+            # 자막비디오가이드 등)로 계산한 값입니다 — 더 이상 목업이 아닙니다.
+            "visual_count": len(visual_places),
+            "hearing_count": len(hearing_places),
             "top_wheelchair_places": [
                 {
                     "name": a.name,

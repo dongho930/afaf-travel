@@ -8,6 +8,24 @@ from app.services.tour_api import tour_api_client
 router = APIRouter(prefix="/api/tourism", tags=["tourism"])
 
 
+def _is_regression(existing: dict | None, data: dict) -> bool:
+    """
+    이번에 새로 계산한 data가 기존 캐시(existing)보다 '더 안 좋은 미완성 결과'인지 판단합니다.
+
+    일일 트래픽 예산(tour_api_daily_fetch_budget)이나 연속 429 때문에 이번 실행이
+    중간에 멈추면(debug.accessibility_fetch.deferred_no_budget > 0), 아직 못 채운
+    후보들은 전부 '접근성 없음(False)'으로 잡혀서 wheelchair_count 등이 실제보다
+    낮게 나옵니다. 이런 미완성 결과가 예전의 더 정확했던 값을 덮어써버리면 화면에
+    보이는 숫자가 갑자기 0 같은 값으로 퇴보하니, 그 경우엔 저장하지 않습니다.
+    """
+    if not existing:
+        return False
+    deferred = data.get("debug", {}).get("accessibility_fetch", {}).get("deferred_no_budget", 0)
+    if deferred <= 0:
+        return False
+    return data.get("wheelchair_count", 0) < existing.get("wheelchair_count", 0)
+
+
 @router.get("/regions", response_model=list[RegionOption])
 async def list_regions(province: str = Query(default="경기도")):
     """
@@ -74,7 +92,20 @@ async def refresh_accessibility_summary(region: str = Query(default="경기도")
     다 조회하느라 몇 분 정도 걸릴 수 있어요 — 응답이 바로 안 와도 정상입니다.
     필요할 때(예: 하루 한 번)
     수동으로 호출해주세요 — 자동으로는 갱신되지 않습니다.
+
+    일일 트래픽 예산/레이트리밋 때문에 이번 실행이 중간에 멈춰서(아직 못 채운
+    후보가 남아서) 기존에 저장된 값보다 더 안 좋은 결과가 나온 경우엔, 화면에
+    보이는 숫자가 갑자기 퇴보하지 않도록 캐시를 덮어쓰지 않습니다 — 응답에는
+    이번에 새로 계산한 값(과 debug)을 그대로 돌려드리니 진행 상황 확인용으로 쓰시면 됩니다.
     """
+    existing = await get_cached_accessibility_stats(region)
     data = await tour_api_client.get_accessibility_summary(region)
-    await save_accessibility_stats(region, {k: v for k, v in data.items() if k != "debug"})
+    if _is_regression(existing, data):
+        logger_msg_data = data.get("debug", {}).get("accessibility_fetch", {})
+        print(
+            f"[tourism] 이번 계산이 미완성 상태(deferred={logger_msg_data.get('deferred_no_budget')})라 "
+            f"기존 캐시(wheelchair_count={existing.get('wheelchair_count')})를 유지하고 저장은 건너뜁니다."
+        )
+    else:
+        await save_accessibility_stats(region, {k: v for k, v in data.items() if k != "debug"})
     return AccessibilitySummary(**data)
