@@ -26,6 +26,7 @@ import httpx
 
 from app.config import get_settings
 from app.models.schemas import AccessibilityFeatures, Attraction, CongestionForecast
+from app.services.review_service import get_average_ratings
 from app.services.sigungu_codes import (
     area_code_for_signgu,
     find_area_signgu,
@@ -837,10 +838,10 @@ class TourApiClient:
                     "끝나지 않아 일부(또는 전부)는 비어있는 채로 목록을 반환합니다."
                 )
 
-        # 캐시된 집중률(≈인기도)로 정렬합니다. refresh_congestion_cache로 미리
-        # 채워둔 DB 캐시만 읽으니, 이 단계는 별도 API 호출이 없습니다(빠름).
-        # 집중률 데이터가 있는 장소는 높은 순으로, 없는 장소는 원래(카테고리
-        # 라운드로빈) 순서 그대로 뒤에 남깁니다.
+        # 캐시된 혼잡도(구 집중률)를 카드 표시용으로만 채웁니다. refresh_congestion_cache로
+        # 미리 채워둔 DB 캐시만 읽으니, 이 단계는 별도 API 호출이 없습니다(빠름).
+        # 정렬에는 더 이상 쓰지 않고(아래 popularity_sort_key는 평점만 봄), 화면에
+        # 숫자를 보여주기 위한 용도로만 남겨둡니다.
         signgu_by_content_id: dict[str, int] = {}
         for a in attractions:
             area_signgu = find_area_signgu(a.address)
@@ -851,20 +852,31 @@ class TourApiClient:
             await get_cached_congestion_rates(distinct_signgu) if distinct_signgu else {}
         )
 
-        # 정렬에 쓸 congestion_rate와, 카드에 바로 표시할 accessibility_benefits를
-        # 이 시점에 각 Attraction에 채워둡니다.
+        # 방문자 리뷰 평균 평점 (외부 API 없이 우리 DB 조회라 부담 없음)
+        rating_rows = await get_average_ratings([a.content_id for a in attractions if a.content_id])
+
+        # congestion_rate(카드 표시용)와 avg_rating(정렬 기준), 카드에 바로 표시할
+        # accessibility_benefits를 이 시점에 각 Attraction에 채워둡니다.
         for a in attractions:
             signgu_cd = signgu_by_content_id.get(a.content_id)
             row = congestion_rows.get((signgu_cd, a.name)) if signgu_cd is not None else None
             a.congestion_rate = float(row["cnctr_rate"]) if row else None
             a.accessibility_benefits = _accessibility_benefit_labels(a.accessibility)
+            rating_row = rating_rows.get(a.content_id)
+            a.avg_rating = rating_row["avg_rating"] if rating_row else None
+            a.review_count = rating_row["review_count"] if rating_row else 0
 
-        def congestion_sort_key(a: Attraction) -> tuple[int, float]:
-            if a.congestion_rate is None:
-                return (1, 0.0)  # 데이터 없음 → 뒤로
-            return (0, -a.congestion_rate)  # 집중률 높은 순
+        def popularity_sort_key(a: Attraction) -> tuple[int, float]:
+            # 평점이 있는 곳을 먼저(높은 순), 평점이 없는 곳들은 원래(카테고리
+            # 라운드로빈) 순서 그대로 뒤에 남습니다. 혼잡도(구 집중률)는 카드에
+            # 표시는 하지만 더 이상 정렬 기준으로 쓰지 않습니다.
+            has_rating = a.avg_rating is not None
+            return (
+                0 if has_rating else 1,
+                -(a.avg_rating or 0.0),
+            )
 
-        attractions.sort(key=congestion_sort_key)
+        attractions.sort(key=popularity_sort_key)
 
         results = attractions
         if user_type == "wheelchair":
@@ -1047,6 +1059,13 @@ class TourApiClient:
                 rows = await get_cached_congestion_rates([area_signgu[1]])
                 row = rows.get((area_signgu[1], attraction.name))
                 attraction.congestion_rate = float(row["cnctr_rate"]) if row else None
+
+            # 방문자 리뷰 평균 평점
+            rating_rows = await get_average_ratings([content_id])
+            rating_row = rating_rows.get(content_id)
+            if rating_row:
+                attraction.avg_rating = rating_row["avg_rating"]
+                attraction.review_count = rating_row["review_count"]
 
             return attraction
 
