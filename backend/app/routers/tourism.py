@@ -61,7 +61,9 @@ async def accessibility_summary(region: str = Query(default="경기도")):
         return AccessibilitySummary(**cached)
 
     data = await tour_api_client.get_accessibility_summary(region)
-    await save_accessibility_stats(region, data)
+    # debug는 이번 계산 과정을 들여다보기 위한 진단용 필드라 캐시 테이블에는 저장하지
+    # 않습니다 (accessibility_stats 테이블에 debug 컬럼이 없으면 저장이 실패할 수 있음).
+    await save_accessibility_stats(region, {k: v for k, v in data.items() if k != "debug"})
     return AccessibilitySummary(**data)
 
 
@@ -74,5 +76,5 @@ async def refresh_accessibility_summary(region: str = Query(default="경기도")
     수동으로 호출해주세요 — 자동으로는 갱신되지 않습니다.
     """
     data = await tour_api_client.get_accessibility_summary(region)
-    await save_accessibility_stats(region, data)
+    await save_accessibility_stats(region, {k: v for k, v in data.items() if k != "debug"})
     return AccessibilitySummary(**data)

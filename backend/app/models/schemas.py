@@ -178,3 +178,7 @@ class AccessibilitySummary(BaseModel):
     visual_count_mock: int   # 실제 데이터 없음 — 화면 표시용 목업 숫자
     hearing_count_mock: int  # 실제 데이터 없음 — 화면 표시용 목업 숫자
     top_wheelchair_places: list[AccessibilityPlaceScore]
+    # 진단용(선택): wheelchair_count 등이 왜 그렇게 나왔는지 원인 확인용 정보.
+    # 카테고리별 후보 수, 무장애 정보 등록 여부(no_record/has_record), API 실패 건수 등.
+    # 화면에는 표시하지 않아도 되고, 디버깅 때 응답 JSON에서 바로 확인하기 위한 용도입니다.
+    debug: dict | None = None

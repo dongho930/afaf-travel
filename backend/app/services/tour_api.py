@@ -20,12 +20,15 @@ USE_MOCK_DATA=true (기본값) 일 때는 경기도 지역 목업 데이터를 �
 """
 import asyncio
 import datetime
+import logging
 
 import httpx
 
 from app.config import get_settings
 from app.models.schemas import AccessibilityFeatures, Attraction, CongestionForecast
 from app.services.sigungu_codes import find_area_signgu, signgu_name
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -237,13 +240,22 @@ class TourApiClient:
             return self._map_item_to_attraction(item, content_type_id)
         except Exception:
             return None
-    async def _fetch_accessibility(self, client: httpx.AsyncClient, content_id: str) -> AccessibilityFeatures:
+    async def _fetch_accessibility(
+        self, client: httpx.AsyncClient, content_id: str, diag: dict | None = None
+    ) -> AccessibilityFeatures:
         """
         'detailWithTour2'(무장애정보조회) 오퍼레이션으로 편의시설 상세를 조회합니다.
         실제 확인된 응답 필드: route(이동로/경사로 설명), wheelchair(휠체어 대여/접근),
         elevator, restroom, stroller(유모차), lactationroom/babysparechair(가족 편의) 등
         모두 boolean이 아닌 '설명 텍스트' 필드라, 텍스트가 비어있지 않으면 해당 편의시설이
         있는 것으로 간주합니다.
+
+        diag(선택): 진단용 카운터 dict를 넘기면 아래 세 가지 케이스를 구분해서 집계합니다.
+          - api_error: 호출 자체가 실패(타임아웃/HTTP 에러 등)해서 빈 값으로 처리된 경우
+          - no_record: 호출은 성공했지만 해당 contentId에 무장애 정보가 아예 등록돼 있지 않은 경우
+          - has_record: 무장애 정보 레코드는 있고, 그 안의 값(route/wheelchair 등)을 읽어온 경우
+        이 세 카운터로 43이라는 숫자가 "실제로 접근성이 없어서" 낮은 건지,
+        "애초에 등록된 정보 자체가 적어서" 낮은 건지 구분할 수 있습니다.
         """
         try:
             resp = await client.get(
@@ -253,13 +265,15 @@ class TourApiClient:
             resp.raise_for_status()
             items = self._extract_items(resp.json())
             if not items:
+                if diag is not None:
+                    diag["no_record"] = diag.get("no_record", 0) + 1
                 return AccessibilityFeatures()
             d = items[0]
 
             def has_text(key: str) -> bool:
                 return bool((d.get(key) or "").strip())
 
-            return AccessibilityFeatures(
+            features = AccessibilityFeatures(
                 has_ramp=has_text("route"),
                 has_elevator=has_text("elevator"),
                 has_accessible_restroom=has_text("restroom"),
@@ -267,8 +281,14 @@ class TourApiClient:
                 has_stroller_accessible_path=has_text("stroller"),
                 has_rest_area=has_text("lactationroom") or has_text("babysparechair"),
             )
-        except Exception:
+            if diag is not None:
+                diag["has_record"] = diag.get("has_record", 0) + 1
+            return features
+        except Exception as exc:
             # API 오류가 나도 전체 요청이 죽지 않게 안전하게 빈 값 처리
+            if diag is not None:
+                diag["api_error"] = diag.get("api_error", 0) + 1
+                logger.warning("detailWithTour2 호출 실패 (contentId=%s): %s", content_id, exc)
             return AccessibilityFeatures()
 
     async def _fetch_all_by_content_type(
@@ -328,11 +348,15 @@ class TourApiClient:
         return all_items
 
     async def _fetch_accessibility_bounded(
-        self, client: httpx.AsyncClient, content_id: str, semaphore: asyncio.Semaphore
+        self,
+        client: httpx.AsyncClient,
+        content_id: str,
+        semaphore: asyncio.Semaphore,
+        diag: dict | None = None,
     ) -> AccessibilityFeatures:
         """_fetch_accessibility를 동시 호출 개수 제한(세마포어)과 함께 실행합니다."""
         async with semaphore:
-            return await self._fetch_accessibility(client, content_id)
+            return await self._fetch_accessibility(client, content_id, diag=diag)
 
     async def _fetch_by_content_type(
         self,
@@ -572,9 +596,13 @@ class TourApiClient:
         관광지별 접근성 점수는 6개 편의시설 항목 중 몇 개를 만족하는지로 계산합니다
         (예: 6개 중 5개 충족 → 83점).
         """
+        debug_info: dict = {}
+
         if self.use_mock:
             candidates = list(_MOCK_ATTRACTIONS)
+            debug_info["mode"] = "mock"
         else:
+            debug_info["mode"] = "live"
             ldong_regn_map = {"경기도": "41", "서울": "11"}
             ldong_regn_cd = ldong_regn_map.get(region, "41")
 
@@ -586,6 +614,13 @@ class TourApiClient:
                         for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
                     )
                 )
+                # 카테고리별로 몇 건씩 수집됐는지 기록 (특정 카테고리만 0건이면 그
+                # 카테고리 호출/파라미터에 문제가 있다는 신호입니다).
+                debug_info["candidates_per_category"] = {
+                    str(content_type_id): len(group)
+                    for content_type_id, group in zip(_DEFAULT_CONTENT_TYPE_IDS, results_per_type)
+                }
+
                 all_candidates: list[Attraction] = []
                 seen_ids: set[str] = set()
                 for group in results_per_type:
@@ -593,18 +628,38 @@ class TourApiClient:
                         if a.content_id and a.content_id not in seen_ids:
                             seen_ids.add(a.content_id)
                             all_candidates.append(a)
+                debug_info["total_candidates_before_accessibility_fetch"] = len(all_candidates)
 
                 # 2) 전체 항목 각각의 편의시설 상세 정보를 채웁니다.
                 #    동시 요청 개수를 제한해서(세마포어) API에 과부하를 주지 않습니다.
                 semaphore = asyncio.Semaphore(20)
+                accessibility_diag: dict = {}
                 accessibility_list = await asyncio.gather(
                     *(
-                        self._fetch_accessibility_bounded(client, a.content_id, semaphore)
+                        self._fetch_accessibility_bounded(
+                            client, a.content_id, semaphore, diag=accessibility_diag
+                        )
                         for a in all_candidates
                     )
                 )
                 for attraction, accessibility in zip(all_candidates, accessibility_list):
                     attraction.accessibility = accessibility
+
+                debug_info["accessibility_fetch"] = {
+                    "no_record": accessibility_diag.get("no_record", 0),
+                    "has_record": accessibility_diag.get("has_record", 0),
+                    "api_error": accessibility_diag.get("api_error", 0),
+                }
+                logger.info(
+                    "get_accessibility_summary(%s): 후보 %d건 / 카테고리별 %s / "
+                    "무장애정보 등록없음 %d건, 등록됨 %d건, 조회실패 %d건",
+                    region,
+                    len(all_candidates),
+                    debug_info["candidates_per_category"],
+                    accessibility_diag.get("no_record", 0),
+                    accessibility_diag.get("has_record", 0),
+                    accessibility_diag.get("api_error", 0),
+                )
 
             candidates = all_candidates
 
@@ -647,6 +702,13 @@ class TourApiClient:
                 }
                 for a in top_wheelchair
             ],
+            # 진단용 필드: 43 같은 숫자가 왜 그렇게 나왔는지 원인을 구분하기 위한 정보.
+            # candidates_per_category: 카테고리별(관광지/음식점/문화시설/레포츠/숙박) 수집 건수
+            # total_candidates_before_accessibility_fetch: 중복 제거 후 전체 후보 수
+            # accessibility_fetch.no_record: 무장애 정보가 아예 등록 안 된 곳 (→ 자동으로 접근성 없음 처리됨)
+            # accessibility_fetch.has_record: 무장애 정보가 등록돼 실제 값을 읽어온 곳
+            # accessibility_fetch.api_error: 조회 자체가 실패해서 접근성 없음으로 처리된 곳
+            "debug": debug_info,
         }
 
 
