@@ -21,6 +21,7 @@ USE_MOCK_DATA=true (기본값) 일 때는 경기도 지역 목업 데이터를 �
 import asyncio
 import datetime
 import logging
+import re
 
 import httpx
 
@@ -884,6 +885,35 @@ class TourApiClient:
                 )
 
         return results
+
+    async def debug_raw_detail_common(self, content_id: str) -> dict:
+        """
+        [임시 디버그용] detailCommon2 원본 응답을 가공 없이 그대로 돌려줍니다.
+        get_attraction_detail은 결과를 Attraction으로 가공해버려서 '왜' 0건인지
+        (totalCount=0인지, resultCode 에러인지, items 키 자체가 없는지) 안 보이는데,
+        이 메서드로 원인을 정확히 확인한 뒤 지워도 됩니다.
+        """
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{settings.tour_api_base_url}/KorWithService2/detailCommon2",
+                params=self._common_params(
+                    {
+                        "contentId": content_id,
+                        "numOfRows": 1,
+                        "pageNo": 1,
+                        "defaultYN": "Y",
+                        "addrinfoYN": "Y",
+                        "overviewYN": "Y",
+                    }
+                ),
+            )
+            # serviceKey는 민감정보라 화면/로그에 그대로 노출되지 않도록 마스킹합니다.
+            masked_url = re.sub(r"(serviceKey=)[^&]+", r"\1***", str(resp.url))
+            return {
+                "status_code": resp.status_code,
+                "url": masked_url,
+                "body": resp.text,
+            }
 
     async def get_attraction_detail(self, content_id: str) -> Attraction | None:
         """

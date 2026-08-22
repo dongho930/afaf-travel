@@ -138,3 +138,12 @@ async def refresh_congestion_cache(region: str = Query(default="경기도")):
     깨지진 않습니다 — 다만 정렬이 실제 인기도를 반영하지 못할 뿐입니다.
     """
     return await tour_api_client.refresh_congestion_cache(region)
+
+
+@router.get("/debug/detail-raw/{content_id}")
+async def debug_detail_raw(content_id: str):
+    """
+    [임시 디버그용] detailCommon2 원본 응답을 그대로 보여줍니다. 원인 확인 후 이
+    엔드포인트는 지워도 됩니다.
+    """
+    return await tour_api_client.debug_raw_detail_common(content_id)
