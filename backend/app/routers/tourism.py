@@ -109,3 +109,20 @@ async def refresh_accessibility_summary(region: str = Query(default="경기도")
     else:
         await save_accessibility_stats(region, {k: v for k, v in data.items() if k != "debug"})
     return AccessibilitySummary(**data)
+
+
+@router.get("/congestion-cache/refresh")
+async def refresh_congestion_cache(region: str = Query(default="경기도")):
+    """
+    관광지 집중률(≈인기도) 캐시를 시/군/구 단위로 갱신합니다. 시/군/구 하나당
+    호출 1번으로 그 안의 관광지 여러 개를 한 번에 받아오기 때문에(경기도 기준
+    약 44개 시/군/구), 무장애 정보 전수조사보다 훨씬 빨리 끝납니다 — 보통 한
+    번의 호출로 전체가 다 채워지고, 예산(congestion_api_daily_fetch_budget)에
+    걸리거나 레이트리밋을 만나면 남은 시/군/구는 다음 호출로 넘어갑니다.
+
+    이 캐시가 채워져 있으면 /api/tourism/attractions(홈 화면 '인기 여행지' 등)가
+    캐시된 집중률 순으로 정렬해서 보여줍니다. 캐시가 비어있는 시/군/구는 그냥
+    기존 순서(카테고리 라운드로빈)로 표시되니, 이 엔드포인트를 안 불러도 앱이
+    깨지진 않습니다 — 다만 정렬이 실제 인기도를 반영하지 못할 뿐입니다.
+    """
+    return await tour_api_client.refresh_congestion_cache(region)

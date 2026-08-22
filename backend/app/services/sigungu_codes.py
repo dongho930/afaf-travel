@@ -296,9 +296,31 @@ def list_signgu_by_area(area_nm: str) -> list[tuple[int, str]]:
     return sorted(rows, key=lambda r: r[1])
 
 
+def list_area_signgu_by_area(area_nm: str) -> list[tuple[int, int, str]]:
+    """
+    '경기도' 같은 시/도 이름으로 그 안에 속한 시/군/구 목록을
+    [(areaCd, signguCd, signguNm), ...] 형태로 반환합니다. 집중률 API처럼
+    areaCd+signguCd를 둘 다 필요로 하는 곳(시/군/구 단위 전수조사)에 씁니다.
+    """
+    rows = [
+        (area_cd, signgu_cd, signgu_nm)
+        for area_cd, nm, signgu_cd, signgu_nm in SIGUNGU_TABLE
+        if nm == area_nm
+    ]
+    return sorted(rows, key=lambda r: r[2])
+
+
 def signgu_name(code: int) -> str | None:
     """법정동 시군구코드로 이름을 찾습니다 (예: 41115 -> '수원시 팔달구')."""
     for _, _, signgu_cd, signgu_nm in SIGUNGU_TABLE:
         if signgu_cd == code:
             return signgu_nm
+    return None
+
+
+def area_code_for_signgu(code: int) -> int | None:
+    """법정동 시군구코드로 그 상위 시/도 코드를 찾습니다 (예: 41115 -> 41)."""
+    for area_cd, _, signgu_cd, _ in SIGUNGU_TABLE:
+        if signgu_cd == code:
+            return area_cd
     return None

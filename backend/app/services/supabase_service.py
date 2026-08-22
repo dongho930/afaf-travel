@@ -416,3 +416,71 @@ async def save_place_accessibility_batch(rows: list[dict]) -> None:
             _client.table(_PLACE_ACCESSIBILITY_TABLE).upsert(chunk).execute()
     except Exception as e:
         print(f"[supabase] 장소별 무장애 정보 캐시 저장 실패: {e}")
+
+
+# ---- 관광지 집중률(≈인기도) 캐시 ----
+#
+# 한국관광공사 '관광지 집중률 방문자 추이 예측 정보'(TatsCnctrRateService)는
+# areaCd+signguCd만으로 그 시/군/구 안 관광지들의 집중률(cnctrRate, 0~100%)을
+# 한 번에 받아올 수 있습니다(관광지명 지정은 옵션). 시/군/구 단위 호출이라
+# 경기도 전체도 44개 시/군/구 정도로 커버되어, 무장애 정보(장소 단위 수천 건)
+# 보다 훨씬 적은 API 호출로 전수조사가 가능합니다.
+#
+# Supabase 대시보드에서 미리 만들어둬야 하는 테이블:
+#   congestion_cache
+#     - signgu_cd (integer)
+#     - tats_nm (text)          -- 관광지명 (API가 content_id를 안 주기 때문에 이름 기준)
+#     - cnctr_rate (numeric)
+#     - base_ymd (text)         -- 이 집중률이 어느 날짜 기준인지 (YYYYMMDD)
+#     - fetched_at (timestamptz)
+#     - PRIMARY KEY (signgu_cd, tats_nm)
+
+_CONGESTION_TABLE = "congestion_cache"
+
+
+async def get_cached_congestion_rates(signgu_cds: list[int]) -> dict[tuple[int, str], dict]:
+    """
+    주어진 시군구코드 목록에 해당하는 캐시된 집중률 행을 전부 가져와
+    {(signgu_cd, tats_nm): row} 형태로 돌려줍니다.
+    """
+    if _client is None or not signgu_cds:
+        return {}
+    found: dict[tuple[int, str], dict] = {}
+    try:
+        result = (
+            _client.table(_CONGESTION_TABLE)
+            .select("*")
+            .in_("signgu_cd", signgu_cds)
+            .execute()
+        )
+        for row in result.data or []:
+            found[(row["signgu_cd"], row["tats_nm"])] = row
+    except Exception as e:
+        print(f"[supabase] 집중률 캐시 조회 실패: {e}")
+        return {}
+    return found
+
+
+async def get_cached_congestion_signgu_cds() -> set[int]:
+    """캐시에 이미 채워져 있는 시군구코드 집합을 돌려줍니다 (전수조사 진행 상황 판단용)."""
+    if _client is None:
+        return set()
+    try:
+        result = _client.table(_CONGESTION_TABLE).select("signgu_cd").execute()
+        return {row["signgu_cd"] for row in (result.data or [])}
+    except Exception as e:
+        print(f"[supabase] 집중률 캐시 시군구 목록 조회 실패: {e}")
+        return set()
+
+
+async def save_congestion_rates_batch(rows: list[dict]) -> None:
+    """새로 조회한 집중률 데이터를 캐시 테이블에 upsert합니다."""
+    if _client is None or not rows:
+        return
+    chunk_size = 500
+    try:
+        for i in range(0, len(rows), chunk_size):
+            chunk = rows[i : i + chunk_size]
+            _client.table(_CONGESTION_TABLE).upsert(chunk).execute()
+    except Exception as e:
+        print(f"[supabase] 집중률 캐시 저장 실패: {e}")

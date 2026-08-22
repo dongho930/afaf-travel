@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     # TOUR_API_DAILY_FETCH_BUDGET 환경변수로 더 큰 값(예: 90000)을 넣어주면 됩니다.
     tour_api_daily_fetch_budget: int = int(os.getenv("TOUR_API_DAILY_FETCH_BUDGET", "900"))
 
+    # 관광지 집중률(TatsCnctrRateService) 전수조사용 일일 예산.
+    # 이 API는 장소 단위가 아니라 시/군/구 단위로 한 번에 여러 관광지 정보를
+    # 받아오기 때문에(경기도 전체가 시/군/구 약 44개), 무장애 정보보다 훨씬
+    # 적은 호출 수로 끝납니다 — 그래도 별도 서비스라 별도 일일 한도가 있을 수
+    # 있어 안전하게 예산을 둡니다.
+    congestion_api_daily_fetch_budget: int = int(
+        os.getenv("CONGESTION_API_DAILY_FETCH_BUDGET", "200")
+    )
+
     class Config:
         env_file = ".env"
 

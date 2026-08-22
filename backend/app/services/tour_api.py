@@ -26,9 +26,17 @@ import httpx
 
 from app.config import get_settings
 from app.models.schemas import AccessibilityFeatures, Attraction, CongestionForecast
-from app.services.sigungu_codes import find_area_signgu, signgu_name
+from app.services.sigungu_codes import (
+    area_code_for_signgu,
+    find_area_signgu,
+    list_area_signgu_by_area,
+    signgu_name,
+)
 from app.services.supabase_service import (
+    get_cached_congestion_rates,
+    get_cached_congestion_signgu_cds,
     get_cached_place_accessibility,
+    save_congestion_rates_batch,
     save_place_accessibility_batch,
 )
 
@@ -666,6 +674,29 @@ class TourApiClient:
                     "끝나지 않아 일부(또는 전부)는 비어있는 채로 목록을 반환합니다."
                 )
 
+        # 캐시된 집중률(≈인기도)로 정렬합니다. refresh_congestion_cache로 미리
+        # 채워둔 DB 캐시만 읽으니, 이 단계는 별도 API 호출이 없습니다(빠름).
+        # 집중률 데이터가 있는 장소는 높은 순으로, 없는 장소는 원래(카테고리
+        # 라운드로빈) 순서 그대로 뒤에 남깁니다.
+        signgu_by_content_id: dict[str, int] = {}
+        for a in attractions:
+            area_signgu = find_area_signgu(a.address)
+            if area_signgu:
+                signgu_by_content_id[a.content_id] = area_signgu[1]
+        distinct_signgu = sorted(set(signgu_by_content_id.values()))
+        congestion_rows = (
+            await get_cached_congestion_rates(distinct_signgu) if distinct_signgu else {}
+        )
+
+        def congestion_sort_key(a: Attraction) -> tuple[int, float]:
+            signgu_cd = signgu_by_content_id.get(a.content_id)
+            row = congestion_rows.get((signgu_cd, a.name)) if signgu_cd is not None else None
+            if row is None:
+                return (1, 0.0)  # 데이터 없음 → 뒤로
+            return (0, -float(row["cnctr_rate"]))  # 집중률 높은 순
+
+        attractions.sort(key=congestion_sort_key)
+
         results = attractions
         if user_type == "wheelchair":
             results = [a for a in results if a.accessibility.has_ramp] or attractions
@@ -794,6 +825,145 @@ class TourApiClient:
                     level = "low"
                 forecasts.append(CongestionForecast(date=date_str, hour=12, congestion_level=level))
             return forecasts
+
+    async def _fetch_congestion_rates_by_signgu(
+        self, client: httpx.AsyncClient, area_cd: int, signgu_cd: int, diag: dict | None = None
+    ) -> tuple[dict[str, dict], bool]:
+        """
+        시/군/구 하나 전체의 관광지 집중률을 한 번에 조회합니다 (tAtsNm 미지정).
+
+        반환값: ({관광지명: {"cnctr_rate": float, "base_ymd": str}}, api_ok)
+        - 관광지명별로 여러 날짜(baseYmd)가 올 수 있는데, 그 중 가장 이른(가까운) 날짜
+          하나만 '현재 집중률'로 남깁니다.
+        - api_ok가 False면(429 소진 등) 호출한 쪽에서 이 시군구를 캐시에 반영하지
+          않고 다음 새로고침에 다시 시도하게 합니다.
+        """
+        max_retries = 3
+        for attempt in range(max_retries + 1):
+            await self._rate_limiter.wait_turn()
+            try:
+                resp = await client.get(
+                    f"{_TATS_CNCTR_RATE_BASE}/tatsCnctrRatedList",
+                    params=self._common_params(
+                        {
+                            "areaCd": area_cd,
+                            "signguCd": signgu_cd,
+                            "numOfRows": 500,
+                            "pageNo": 1,
+                        }
+                    ),
+                )
+                if resp.status_code == 429:
+                    if attempt < max_retries:
+                        if diag is not None:
+                            diag["rate_limited_retry"] = diag.get("rate_limited_retry", 0) + 1
+                        retry_after = resp.headers.get("Retry-After")
+                        wait_seconds = float(retry_after) if retry_after else 0.5 * (2 ** attempt)
+                        await asyncio.sleep(wait_seconds)
+                        continue
+                    if diag is not None:
+                        diag["rate_limit_exhausted"] = diag.get("rate_limit_exhausted", 0) + 1
+                    return {}, False
+
+                resp.raise_for_status()
+                items = self._extract_items(resp.json())
+                by_name: dict[str, dict] = {}
+                for item in items:
+                    name = str(item.get("tAtsNm") or "").strip()
+                    base_ymd = str(item.get("baseYmd") or "")
+                    if not name or len(base_ymd) != 8:
+                        continue
+                    try:
+                        rate = float(item.get("cnctrRate") or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    existing = by_name.get(name)
+                    if existing is None or base_ymd < existing["base_ymd"]:
+                        by_name[name] = {"cnctr_rate": rate, "base_ymd": base_ymd}
+                if diag is not None:
+                    diag["signgu_ok"] = diag.get("signgu_ok", 0) + 1
+                    diag["names_found"] = diag.get("names_found", 0) + len(by_name)
+                return by_name, True
+            except Exception as exc:
+                if diag is not None:
+                    diag["api_error"] = diag.get("api_error", 0) + 1
+                    logger.warning(
+                        "tatsCnctrRatedList 호출 실패 (signguCd=%s): %s", signgu_cd, exc
+                    )
+                return {}, False
+
+        return {}, False
+
+    async def refresh_congestion_cache(self, region: str) -> dict:
+        """
+        region(예: 경기도) 안의 모든 시/군/구를 순회하며 관광지 집중률을 조회해
+        congestion_cache 테이블에 채워둡니다. 시/군/구 단위 호출이라(경기도 약
+        44개) 무장애 정보 전수조사보다 훨씬 적은 호출로 끝나지만, 그래도 별도
+        서비스라 하루 예산(congestion_api_daily_fetch_budget)과 연속 429 조기
+        중단은 동일하게 적용합니다.
+        """
+        debug_info: dict = {"mode": "mock" if self.use_mock else "live"}
+        if self.use_mock:
+            return debug_info
+
+        all_signgu = list_area_signgu_by_area(region)
+        debug_info["total_signgu"] = len(all_signgu)
+
+        already_cached = await get_cached_congestion_signgu_cds()
+        to_fetch = [row for row in all_signgu if row[1] not in already_cached]
+        debug_info["already_cached_signgu"] = len(already_cached & {r[1] for r in all_signgu})
+
+        budget = settings.congestion_api_daily_fetch_budget
+        deferred = 0
+        if len(to_fetch) > budget:
+            deferred = len(to_fetch) - budget
+            to_fetch = to_fetch[:budget]
+        debug_info["deferred_no_budget"] = deferred
+
+        diag: dict = {}
+        fetched_signgu = 0
+        async with httpx.AsyncClient(timeout=30) as client:
+            for area_cd, signgu_cd, signgu_nm in to_fetch:
+                by_name, api_ok = await self._fetch_congestion_rates_by_signgu(
+                    client, area_cd, signgu_cd, diag=diag
+                )
+                if not api_ok:
+                    # 이 시군구는 이번엔 실패 — 캐시에 안 남겨서 다음 새로고침에 재시도
+                    diag["stopped_early_rate_limited"] = True
+                    debug_info["deferred_no_budget"] = debug_info.get("deferred_no_budget", 0) + (
+                        len(to_fetch) - fetched_signgu
+                    )
+                    logger.warning(
+                        "집중률 조회를 일찍 중단합니다 (signguCd=%s 실패, 나머지는 다음에)",
+                        signgu_cd,
+                    )
+                    break
+                fetched_signgu += 1
+                if by_name:
+                    rows = [
+                        {
+                            "signgu_cd": signgu_cd,
+                            "tats_nm": name,
+                            "cnctr_rate": vals["cnctr_rate"],
+                            "base_ymd": vals["base_ymd"],
+                            "fetched_at": datetime.datetime.utcnow().isoformat(),
+                        }
+                        for name, vals in by_name.items()
+                    ]
+                    await save_congestion_rates_batch(rows)
+
+        debug_info["signgu_fetched_this_run"] = fetched_signgu
+        debug_info["diag"] = diag
+        logger.info(
+            "refresh_congestion_cache(%s): 전체 시군구 %d개 / 이미 캐시됨 %d개 / "
+            "이번에 조회 %d개 / 미룸 %d개",
+            region,
+            debug_info["total_signgu"],
+            debug_info["already_cached_signgu"],
+            fetched_signgu,
+            debug_info["deferred_no_budget"],
+        )
+        return debug_info
 
     async def get_accessibility_summary(self, region: str) -> dict:
         """
