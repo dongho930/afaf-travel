@@ -1520,6 +1520,12 @@ class TourApiClient:
         }
 
         top_wheelchair = sorted(wheelchair_places, key=score, reverse=True)[:5]
+        top_senior = sorted(senior_places, key=score, reverse=True)[:5]
+        top_visual = sorted(visual_places, key=score, reverse=True)[:5]
+        top_hearing = sorted(hearing_places, key=score, reverse=True)[:5]
+
+        def to_place_scores(places: list[Attraction]) -> list[dict]:
+            return [{"name": a.name, "score": score(a), "address": a.address} for a in places]
 
         return {
             "wheelchair_count": len(wheelchair_places),
@@ -1529,14 +1535,10 @@ class TourApiClient:
             # 자막비디오가이드 등)로 계산한 값입니다 — 더 이상 목업이 아닙니다.
             "visual_count": len(visual_places),
             "hearing_count": len(hearing_places),
-            "top_wheelchair_places": [
-                {
-                    "name": a.name,
-                    "score": score(a),
-                    "address": a.address,
-                }
-                for a in top_wheelchair
-            ],
+            "top_wheelchair_places": to_place_scores(top_wheelchair),
+            "top_senior_places": to_place_scores(top_senior),
+            "top_visual_places": to_place_scores(top_visual),
+            "top_hearing_places": to_place_scores(top_hearing),
             # 진단용 필드: 43 같은 숫자가 왜 그렇게 나왔는지 원인을 구분하기 위한 정보.
             # candidates_per_category: 카테고리별(관광지/음식점/문화시설/레포츠/숙박) 수집 건수
             # total_candidates_before_accessibility_fetch: 중복 제거 후 전체 후보 수
