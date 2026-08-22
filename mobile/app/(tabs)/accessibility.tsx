@@ -5,8 +5,8 @@ import { AccessibilitySummary } from "../../types";
 
 const CATEGORY_META = [
   { key: "wheelchair_count", icon: "♿", label: "휠체어", isMock: false },
-  { key: "visual_count_mock", icon: "👁️", label: "시각 장애", isMock: true },
-  { key: "hearing_count_mock", icon: "💡", label: "청각 장애", isMock: true },
+  { key: "visual_count", icon: "👁️", label: "시각 장애", isMock: false },
+  { key: "hearing_count", icon: "💡", label: "청각 장애", isMock: false },
   { key: "senior_count", icon: "🧓", label: "고령자", isMock: false },
 ] as const;
 
@@ -17,9 +17,8 @@ function tierLabel(score: number): { label: string; color: string } {
 }
 
 /**
- * '접근성' 탭. 휠체어/고령자 개수는 실제 편의시설 데이터로 계산되고,
- * 시각/청각장애 개수는 관련 API 데이터가 없어 표시용 목업 숫자입니다
- * (카드에 "참고용" 표시를 붙여 구분).
+ * '접근성' 탭. 휠체어/고령자/시각/청각 개수 모두 실제 편의시설 데이터로 계산됩니다
+ * (활용매뉴얼 v4.3 기준 점자블록/오디오가이드/수화안내/자막비디오가이드 등).
  */
 export default function AccessibilityScreen() {
   const [summary, setSummary] = useState<AccessibilitySummary | null>(null);
@@ -44,8 +43,8 @@ export default function AccessibilityScreen() {
   const counts: Record<string, number> = summary
     ? {
         wheelchair_count: summary.wheelchair_count,
-        visual_count_mock: summary.visual_count_mock,
-        hearing_count_mock: summary.hearing_count_mock,
+        visual_count: summary.visual_count,
+        hearing_count: summary.hearing_count,
         senior_count: summary.senior_count,
       }
     : {};

@@ -7,6 +7,8 @@ export interface AccessibilityFeatures {
   has_wheelchair_rental: boolean;
   has_stroller_accessible_path: boolean;
   has_rest_area: boolean;
+  has_visual_accessibility: boolean;
+  has_hearing_accessibility: boolean;
 }
 
 export interface CongestionForecast {
@@ -111,7 +113,7 @@ export interface AccessibilitySummary {
   wheelchair_count: number;
   senior_count: number;
   total_accessible_count: number;
-  visual_count_mock: number;
-  hearing_count_mock: number;
+  visual_count: number;
+  hearing_count: number;
   top_wheelchair_places: AccessibilityPlaceScore[];
 }
