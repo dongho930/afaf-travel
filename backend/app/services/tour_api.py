@@ -271,7 +271,13 @@ class TourApiClient:
             resp = await client.get(
                 f"{settings.tour_api_base_url}/KorWithService2/detailCommon2",
                 params=self._common_params(
-                    {"contentId": content_id, "defaultYN": "Y", "addrinfoYN": "Y"}
+                    {
+                        "contentId": content_id,
+                        "numOfRows": 1,
+                        "pageNo": 1,
+                        "defaultYN": "Y",
+                        "addrinfoYN": "Y",
+                    }
                 ),
             )
             resp.raise_for_status()
@@ -297,7 +303,13 @@ class TourApiClient:
                 resp = await client.get(
                     f"{settings.tour_api_base_url}/KorWithService2/detailCommon2",
                     params=self._common_params(
-                        {"contentId": content_id, "defaultYN": "Y", "overviewYN": "Y"}
+                        {
+                            "contentId": content_id,
+                            "numOfRows": 1,
+                            "pageNo": 1,
+                            "defaultYN": "Y",
+                            "overviewYN": "Y",
+                        }
                     ),
                 )
                 if resp.status_code == 429:
@@ -923,6 +935,8 @@ class TourApiClient:
                             params=self._common_params(
                                 {
                                     "contentId": content_id,
+                                    "numOfRows": 1,
+                                    "pageNo": 1,
                                     "defaultYN": "Y",
                                     "addrinfoYN": "Y",
                                     "overviewYN": "Y",
