@@ -152,9 +152,37 @@ _TAR_RLTE_TAR_BASE = "http://apis.data.go.kr/B551011/TarRlteTarService1"
 _TATS_CNCTR_RATE_BASE = "http://apis.data.go.kr/B551011/TatsCnctrRateService"
 
 
+class _RateLimiter:
+    """
+    호출과 호출 사이에 최소 간격을 강제하는 간단한 레이트리미터.
+
+    data.go.kr(공공데이터포털)는 순간적으로 요청이 몰리면 '429 Too Many Requests'를
+    바로 돌려줍니다. 세마포어로 동시 실행 개수만 줄이는 것만으로는 부족해서(세마포어를
+    풀고 여러 개가 거의 동시에 새 요청을 쏘면 여전히 몰릴 수 있음), 실제로 요청이
+    나가는 시점 자체를 최소 간격으로 강제합니다.
+    """
+
+    def __init__(self, min_interval_seconds: float) -> None:
+        self._min_interval = min_interval_seconds
+        self._lock = asyncio.Lock()
+        self._last_call_at: float = 0.0
+
+    async def wait_turn(self) -> None:
+        async with self._lock:
+            loop = asyncio.get_event_loop()
+            now = loop.time()
+            elapsed = now - self._last_call_at
+            if elapsed < self._min_interval:
+                await asyncio.sleep(self._min_interval - elapsed)
+            self._last_call_at = loop.time()
+
+
 class TourApiClient:
     def __init__(self) -> None:
         self.use_mock = settings.use_mock_data or not settings.tour_api_key
+        # 초당 최대 요청 수를 제한합니다 (0.15초 간격 ≈ 초당 최대 약 6~7건).
+        # data.go.kr 429 응답이 잦으면 이 값을 더 키워서(간격을 늘려서) 완화하세요.
+        self._rate_limiter = _RateLimiter(min_interval_seconds=0.15)
 
     def _common_params(self, extra: dict) -> dict:
         return {
@@ -250,46 +278,71 @@ class TourApiClient:
         모두 boolean이 아닌 '설명 텍스트' 필드라, 텍스트가 비어있지 않으면 해당 편의시설이
         있는 것으로 간주합니다.
 
-        diag(선택): 진단용 카운터 dict를 넘기면 아래 세 가지 케이스를 구분해서 집계합니다.
-          - api_error: 호출 자체가 실패(타임아웃/HTTP 에러 등)해서 빈 값으로 처리된 경우
+        data.go.kr는 순간적으로 요청이 몰리면 '429 Too Many Requests'를 바로 돌려주는데,
+        예전 코드는 이걸 다른 에러와 똑같이 취급해서 조용히 '접근성 없음'으로 처리했습니다.
+        그러면 실제로는 정보가 있는 곳도 레이트리밋 때문에 없는 것처럼 집계됩니다.
+        그래서 429는 별도로 감지해서 잠깐 기다렸다가 최대 3번까지 재시도합니다.
+
+        diag(선택): 진단용 카운터 dict를 넘기면 아래 케이스를 구분해서 집계합니다.
           - no_record: 호출은 성공했지만 해당 contentId에 무장애 정보가 아예 등록돼 있지 않은 경우
           - has_record: 무장애 정보 레코드는 있고, 그 안의 값(route/wheelchair 등)을 읽어온 경우
-        이 세 카운터로 43이라는 숫자가 "실제로 접근성이 없어서" 낮은 건지,
-        "애초에 등록된 정보 자체가 적어서" 낮은 건지 구분할 수 있습니다.
+          - rate_limited_retry: 429를 받아서 재시도한 횟수 (여러 번 찍힐 수 있음)
+          - rate_limit_exhausted: 재시도까지 다 했는데도 429가 계속 나서 결국 포기한 경우
+          - api_error: 429가 아닌 다른 이유(타임아웃, 5xx 등)로 실패한 경우
         """
-        try:
-            resp = await client.get(
-                f"{settings.tour_api_base_url}/KorWithService2/detailWithTour2",
-                params=self._common_params({"contentId": content_id}),
-            )
-            resp.raise_for_status()
-            items = self._extract_items(resp.json())
-            if not items:
+        max_retries = 3
+        for attempt in range(max_retries + 1):
+            await self._rate_limiter.wait_turn()
+            try:
+                resp = await client.get(
+                    f"{settings.tour_api_base_url}/KorWithService2/detailWithTour2",
+                    params=self._common_params({"contentId": content_id}),
+                )
+                if resp.status_code == 429:
+                    if attempt < max_retries:
+                        if diag is not None:
+                            diag["rate_limited_retry"] = diag.get("rate_limited_retry", 0) + 1
+                        retry_after = resp.headers.get("Retry-After")
+                        wait_seconds = float(retry_after) if retry_after else 0.5 * (2 ** attempt)
+                        await asyncio.sleep(wait_seconds)
+                        continue
+                    if diag is not None:
+                        diag["rate_limit_exhausted"] = diag.get("rate_limit_exhausted", 0) + 1
+                        logger.warning(
+                            "detailWithTour2 재시도 소진, 429 계속 발생 (contentId=%s)", content_id
+                        )
+                    return AccessibilityFeatures()
+
+                resp.raise_for_status()
+                items = self._extract_items(resp.json())
+                if not items:
+                    if diag is not None:
+                        diag["no_record"] = diag.get("no_record", 0) + 1
+                    return AccessibilityFeatures()
+                d = items[0]
+
+                def has_text(key: str) -> bool:
+                    return bool((d.get(key) or "").strip())
+
+                features = AccessibilityFeatures(
+                    has_ramp=has_text("route"),
+                    has_elevator=has_text("elevator"),
+                    has_accessible_restroom=has_text("restroom"),
+                    has_wheelchair_rental=has_text("wheelchair"),
+                    has_stroller_accessible_path=has_text("stroller"),
+                    has_rest_area=has_text("lactationroom") or has_text("babysparechair"),
+                )
                 if diag is not None:
-                    diag["no_record"] = diag.get("no_record", 0) + 1
+                    diag["has_record"] = diag.get("has_record", 0) + 1
+                return features
+            except Exception as exc:
+                # 429가 아닌 다른 오류(타임아웃 등)는 재시도하지 않고 바로 빈 값 처리
+                if diag is not None:
+                    diag["api_error"] = diag.get("api_error", 0) + 1
+                    logger.warning("detailWithTour2 호출 실패 (contentId=%s): %s", content_id, exc)
                 return AccessibilityFeatures()
-            d = items[0]
 
-            def has_text(key: str) -> bool:
-                return bool((d.get(key) or "").strip())
-
-            features = AccessibilityFeatures(
-                has_ramp=has_text("route"),
-                has_elevator=has_text("elevator"),
-                has_accessible_restroom=has_text("restroom"),
-                has_wheelchair_rental=has_text("wheelchair"),
-                has_stroller_accessible_path=has_text("stroller"),
-                has_rest_area=has_text("lactationroom") or has_text("babysparechair"),
-            )
-            if diag is not None:
-                diag["has_record"] = diag.get("has_record", 0) + 1
-            return features
-        except Exception as exc:
-            # API 오류가 나도 전체 요청이 죽지 않게 안전하게 빈 값 처리
-            if diag is not None:
-                diag["api_error"] = diag.get("api_error", 0) + 1
-                logger.warning("detailWithTour2 호출 실패 (contentId=%s): %s", content_id, exc)
-            return AccessibilityFeatures()
+        return AccessibilityFeatures()
 
     async def _fetch_all_by_content_type(
         self,
@@ -631,8 +684,9 @@ class TourApiClient:
                 debug_info["total_candidates_before_accessibility_fetch"] = len(all_candidates)
 
                 # 2) 전체 항목 각각의 편의시설 상세 정보를 채웁니다.
-                #    동시 요청 개수를 제한해서(세마포어) API에 과부하를 주지 않습니다.
-                semaphore = asyncio.Semaphore(20)
+                #    동시 연결 개수는 세마포어로, 실제 요청 '속도'는 self._rate_limiter로
+                #    각각 제한합니다 (세마포어만으로는 순간적으로 몰려서 429가 났었음).
+                semaphore = asyncio.Semaphore(10)
                 accessibility_diag: dict = {}
                 accessibility_list = await asyncio.gather(
                     *(
@@ -649,16 +703,21 @@ class TourApiClient:
                     "no_record": accessibility_diag.get("no_record", 0),
                     "has_record": accessibility_diag.get("has_record", 0),
                     "api_error": accessibility_diag.get("api_error", 0),
+                    "rate_limited_retry": accessibility_diag.get("rate_limited_retry", 0),
+                    "rate_limit_exhausted": accessibility_diag.get("rate_limit_exhausted", 0),
                 }
                 logger.info(
                     "get_accessibility_summary(%s): 후보 %d건 / 카테고리별 %s / "
-                    "무장애정보 등록없음 %d건, 등록됨 %d건, 조회실패 %d건",
+                    "무장애정보 등록없음 %d건, 등록됨 %d건, 조회실패 %d건, "
+                    "429재시도 %d회, 429재시도소진 %d건",
                     region,
                     len(all_candidates),
                     debug_info["candidates_per_category"],
                     accessibility_diag.get("no_record", 0),
                     accessibility_diag.get("has_record", 0),
                     accessibility_diag.get("api_error", 0),
+                    accessibility_diag.get("rate_limited_retry", 0),
+                    accessibility_diag.get("rate_limit_exhausted", 0),
                 )
 
             candidates = all_candidates
