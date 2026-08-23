@@ -66,7 +66,7 @@ async def create_review(
 
 
 async def list_reviews_for_place(content_id: str) -> list[dict]:
-    """특정 장소의 리뷰 전체를 최신순으로 반환합니다 (작성자 아이디 포함)."""
+    """특정 장소의 리뷰 전체를 최신순으로 반환합니다 (작성자 아이디/프로필 사진 포함)."""
     if _client is None:
         return []
     try:
@@ -83,17 +83,23 @@ async def list_reviews_for_place(content_id: str) -> list[dict]:
 
         user_ids = list({r["user_id"] for r in rows})
         usernames: dict[str, str] = {}
+        avatar_urls: dict[str, str | None] = {}
         try:
             profile_result = (
-                _client.table("profiles").select("id, username").in_("id", user_ids).execute()
+                _client.table("profiles")
+                .select("id, username, avatar_url")
+                .in_("id", user_ids)
+                .execute()
             )
             for p in profile_result.data or []:
                 usernames[p["id"]] = p.get("username") or "익명"
+                avatar_urls[p["id"]] = p.get("avatar_url") or None
         except Exception as e:
-            print(f"[review] 작성자 아이디 조회 실패: {e}")
+            print(f"[review] 작성자 정보 조회 실패: {e}")
 
         for r in rows:
             r["username"] = usernames.get(r["user_id"], "익명")
+            r["avatar_url"] = avatar_urls.get(r["user_id"])
         return rows
     except Exception as e:
         print(f"[review] 리뷰 목록 조회 실패: {e}")

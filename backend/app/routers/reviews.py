@@ -18,6 +18,7 @@ class ReviewItem(BaseModel):
     content_id: str
     user_id: str
     username: str
+    avatar_url: Optional[str] = None
     rating: int
     body: str
     created_at: str
