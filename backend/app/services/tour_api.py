@@ -390,7 +390,11 @@ class TourApiClient:
         많은 건수를 한 번에 처리할 때, 새로 조회할 최대 건수를 제한합니다.
         """
         content_ids = [a.content_id for a in attractions if a.content_id]
-        cached = await get_cached_overviews(content_ids)
+        cached_raw = await get_cached_overviews(content_ids)
+        # 예전에 빈 값으로 잘못 캐시된 행이 남아있을 수 있어서(위 버그 수정 전
+        # 데이터), 읽을 때도 빈 문자열은 "캐시 없음"으로 취급해 자동으로
+        # 재시도되게 합니다 — 오래된 빈 캐시가 스스로 복구됩니다.
+        cached = {cid: overview for cid, overview in cached_raw.items() if overview}
         for a in attractions:
             if a.content_id in cached:
                 a.overview = self._shorten_overview(cached[a.content_id])
@@ -417,13 +421,20 @@ class TourApiClient:
             for a, overview, api_ok in chunk_results:
                 if api_ok:
                     a.overview = self._shorten_overview(overview)
-                    new_rows.append(
-                        {
-                            "content_id": a.content_id,
-                            "overview": overview or "",
-                            "fetched_at": datetime.datetime.utcnow().isoformat(),
-                        }
-                    )
+                    # 호출은 성공했지만 내용이 비어있는 경우(overview가 없음)는
+                    # 캐시에 저장하지 않습니다 — 저장해버리면 그 다음부터는 계속
+                    # "캐시 있음"으로 처리돼서 실제로 소개문이 있는데도 영원히
+                    # 빈 값만 나오는 문제가 있었습니다. 캐시에 안 남기면 다음
+                    # 조회 때 다시 시도해서, 일시적인 빈 응답이었을 경우 스스로
+                    # 복구됩니다.
+                    if overview:
+                        new_rows.append(
+                            {
+                                "content_id": a.content_id,
+                                "overview": overview,
+                                "fetched_at": datetime.datetime.utcnow().isoformat(),
+                            }
+                        )
             if new_rows:
                 await save_overviews_batch(new_rows)
 
