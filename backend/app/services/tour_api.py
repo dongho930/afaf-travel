@@ -1654,12 +1654,14 @@ class TourApiClient:
 
         # 접근성 탭에서 '더보기'로 여러 페이지 볼 수 있도록 5개보다 훨씬 넉넉하게
         # 담아둡니다. 실제 화면 노출은 앱에서 5개씩 나눠서 보여줍니다.
-        top_wheelchair = sorted(wheelchair_places, key=wheelchair_score, reverse=True)[:50]
-        top_senior = sorted(senior_places, key=senior_score, reverse=True)[:50]
-        top_visual = sorted(visual_places, key=visual_score, reverse=True)[:50]
-        top_hearing = sorted(hearing_places, key=hearing_score, reverse=True)[:50]
-        top_family = sorted(family_places, key=family_score, reverse=True)[:50]
-        top_pregnant = sorted(pregnant_places, key=pregnant_score, reverse=True)[:50]
+        # 접근성 탭에서 '더보기'로 여러 페이지 볼 수 있도록 넉넉하게 담아둡니다.
+        # 실제 화면 노출은 앱에서 5개씩 나눠서 보여줍니다.
+        top_wheelchair = sorted(wheelchair_places, key=wheelchair_score, reverse=True)[:200]
+        top_senior = sorted(senior_places, key=senior_score, reverse=True)[:200]
+        top_visual = sorted(visual_places, key=visual_score, reverse=True)[:200]
+        top_hearing = sorted(hearing_places, key=hearing_score, reverse=True)[:200]
+        top_family = sorted(family_places, key=family_score, reverse=True)[:200]
+        top_pregnant = sorted(pregnant_places, key=pregnant_score, reverse=True)[:200]
 
         def to_place_scores(places: list[Attraction], score_fn) -> list[dict]:
             return [
