@@ -39,10 +39,22 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  listAttractions: (region: string, userType: UserType, sigunguCd?: number | null, limit: number = 20) =>
+  listAttractions: (
+    region: string,
+    userType: UserType,
+    sigunguCd?: number | null,
+    limit: number = 20,
+    includeOverview: boolean = true
+  ) =>
     request<Attraction[]>(
-      `/api/tourism/attractions?region=${encodeURIComponent(region)}&user_type=${userType}&limit=${limit}` +
+      `/api/tourism/attractions?region=${encodeURIComponent(region)}&user_type=${userType}&limit=${limit}&include_overview=${includeOverview}` +
         (sigunguCd ? `&sigungu_cd=${sigunguCd}` : "")
+    ),
+
+  // 특정 관광지들의 소개문만 따로 조회 (홈 화면 '더보기'로 새로 보이는 만큼만 채울 때 사용)
+  getOverviews: (contentIds: string[]) =>
+    request<Record<string, string | null>>(
+      `/api/tourism/attractions/overviews?content_ids=${contentIds.map(encodeURIComponent).join(",")}`
     ),
 
   // 지역 선택 UI용: 시/도 안의 시/군/구 목록 (예: 경기도 → 수원시 팔달구, ...)

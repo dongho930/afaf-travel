@@ -35,6 +35,11 @@ export default function HomeScreen() {
   const [loadingPlaces, setLoadingPlaces] = useState(true);
   const PLACES_PAGE_SIZE = 6;
   const [visiblePlacesCount, setVisiblePlacesCount] = useState(PLACES_PAGE_SIZE);
+  // '더보기'를 빠르게 여러 번 눌러도 안전하게 순서대로 진행되도록, 화면이 아직
+  // 리렌더링하기 전이라도 항상 최신 값을 즉시 참조할 수 있는 ref를 같이 둡니다.
+  // (state만 쓰면, 리렌더링 전에 또 누를 때 예전 값을 기준으로 계산해서
+  // 같은 구간을 중복 조회하거나 건너뛰는 문제가 있었습니다.)
+  const visiblePlacesCountRef = React.useRef(PLACES_PAGE_SIZE);
 
   // 프로필 사진은 다른 화면(프로필 화면)에서 바뀔 수 있어서, 이 탭에 다시
   // 들어올 때마다 최신 상태로 불러옵니다.
@@ -77,12 +82,54 @@ export default function HomeScreen() {
 
     setLoadingPlaces(true);
     setVisiblePlacesCount(PLACES_PAGE_SIZE);
+    visiblePlacesCountRef.current = PLACES_PAGE_SIZE;
+    // 목록 자체는 소개문 없이(include_overview=false) 빠르게 받고, 처음 보이는
+    // 6개의 소개문만 바로 이어서 따로 채웁니다. 나머지는 '더보기' 누를 때마다
+    // 그 시점에 새로 보이는 6개씩만 채워서, 한 번에 50개를 다 채우려다 뒤쪽이
+    // 6초 제한에 밀리는 문제를 피합니다.
     api
-      .listAttractions("경기도", wheelchairOnly ? "wheelchair" : "general", matchedRegion?.code ?? null, 50)
-      .then((places) => setPopularPlaces(places))
+      .listAttractions("경기도", wheelchairOnly ? "wheelchair" : "general", matchedRegion?.code ?? null, 50, false)
+      .then((places) => {
+        setPopularPlaces(places);
+        const firstIds = places.slice(0, PLACES_PAGE_SIZE).map((p) => p.content_id);
+        if (firstIds.length > 0) {
+          api
+            .getOverviews(firstIds)
+            .then((overviews) => {
+              setPopularPlaces((prev) =>
+                prev.map((p) => (overviews[p.content_id] ? { ...p, overview: overviews[p.content_id] } : p))
+              );
+            })
+            .catch(() => {});
+        }
+      })
       .catch(() => setPopularPlaces([]))
       .finally(() => setLoadingPlaces(false));
   }, [wheelchairOnly, selectedRegion, regionOptions]);
+
+  const handleShowMorePlaces = () => {
+    // ref가 항상 최신 값이라, 리렌더링을 기다리지 않고도 정확한 시작 지점을 씁니다.
+    const start = visiblePlacesCountRef.current;
+    const nextCount = Math.min(start + PLACES_PAGE_SIZE, popularPlaces.length);
+    if (nextCount <= start) return; // 이미 끝까지 다 보여준 상태면 아무것도 안 함
+    visiblePlacesCountRef.current = nextCount;
+    setVisiblePlacesCount(nextCount);
+
+    const newlyRevealedIds = popularPlaces
+      .slice(start, nextCount)
+      .filter((p) => !p.overview)
+      .map((p) => p.content_id);
+    if (newlyRevealedIds.length > 0) {
+      api
+        .getOverviews(newlyRevealedIds)
+        .then((overviews) => {
+          setPopularPlaces((prev) =>
+            prev.map((p) => (overviews[p.content_id] ? { ...p, overview: overviews[p.content_id] } : p))
+          );
+        })
+        .catch(() => {});
+    }
+  };
 
   const goToPlannerWithSearch = () => {
     if (searchText.trim()) {
@@ -250,10 +297,7 @@ export default function HomeScreen() {
         )}
 
         {!loadingPlaces && visiblePlacesCount < popularPlaces.length && (
-          <TouchableOpacity
-            style={styles.moreButton}
-            onPress={() => setVisiblePlacesCount((c) => c + PLACES_PAGE_SIZE)}
-          >
+          <TouchableOpacity style={styles.moreButton} onPress={handleShowMorePlaces}>
             <Text style={styles.moreButtonText}>더보기</Text>
           </TouchableOpacity>
         )}
