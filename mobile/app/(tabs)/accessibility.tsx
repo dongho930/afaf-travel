@@ -1,6 +1,6 @@
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { api } from "../../services/api";
 import { AccessibilityPlaceScore, AccessibilitySummary } from "../../types";
@@ -125,14 +125,21 @@ export default function AccessibilityScreen() {
             const tier = tierLabel(place.score);
             return (
               <Pressable
-                key={place.content_id}
+                key={place.content_id || place.name}
                 style={styles.placeRow}
-                onPress={() =>
+                onPress={() => {
+                  if (!place.content_id) {
+                    Alert.alert(
+                      "잠시만요",
+                      "이 목록은 아직 예전 데이터라 상세 페이지 연결 정보가 없어요. 통계를 새로고침한 뒤 다시 시도해주세요."
+                    );
+                    return;
+                  }
                   router.push({
                     pathname: "/attraction-detail",
                     params: { contentId: place.content_id, name: place.name },
-                  })
-                }
+                  });
+                }}
               >
                 <View style={[styles.scoreBadge, { backgroundColor: tier.color }]}>
                   <Text style={styles.scoreBadgeText}>{place.score}</Text>
