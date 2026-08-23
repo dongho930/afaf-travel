@@ -799,7 +799,12 @@ class TourApiClient:
             return []
 
     async def search_accessible_attractions(
-        self, region: str, user_type: str, limit: int = 20, sigungu_cd: int | None = None
+        self,
+        region: str,
+        user_type: str,
+        limit: int = 20,
+        sigungu_cd: int | None = None,
+        include_overview: bool = True,
     ) -> list[Attraction]:
         """
         무장애 여행 정보 기준으로 1차 필터링된 관광지 목록 조회.
@@ -810,6 +815,12 @@ class TourApiClient:
         참고: 이 무장애 서비스(KorWithService2)는 lDongSignguCd(시군구) 파라미터를
         API 단에서 지원하지 않아(테스트 결과 항상 0건) 시/도 전체로 넉넉하게 조회한
         뒤, 각 관광지의 address 문자열에 해당 시/군/구명이 포함되는지로 직접 걸러냅니다.
+
+        include_overview=False로 부르면 소개문 채우기 단계를 건너뜁니다. 홈 화면처럼
+        한 번에 최대 50개까지 요청하는 곳에서, 그 50개 전체를 6초 안에 다 채우려다
+        보니 뒤쪽(예: '더보기'로 나중에 보이는) 항목은 시간 안에 못 채워지는
+        문제가 있었습니다. 목록 자체는 빠르게 받고, 소개문은 실제로 화면에 보이는
+        6개씩만 get_overviews_for_ids()로 따로 채우는 방식과 짝을 이룹니다.
         """
         if self.use_mock:
             results = [a.model_copy(deep=True) for a in _MOCK_ATTRACTIONS]
@@ -942,20 +953,57 @@ class TourApiClient:
         # 소개문은 API 호출 비용이 있어서, 최종적으로 화면에 노출되는 목록에
         # 대해서만(잘려나가기 전 전체가 아니라) 조회합니다. 캐시에 있으면 API를
         # 안 부르니, 반복 조회 시엔 대부분 여기서 바로 채워집니다.
+        # include_overview=False면 이 단계 자체를 건너뜁니다 — 호출한 쪽이
+        # get_overviews_for_ids()로 화면에 실제 보이는 만큼만 따로 채울 때 씁니다.
         # (위쪽 관광지 목록 조회에 쓰던 client는 이미 닫혀서 새로 엽니다.)
-        async with httpx.AsyncClient(timeout=15) as overview_client:
+        if include_overview:
+            async with httpx.AsyncClient(timeout=15) as overview_client:
+                try:
+                    await asyncio.wait_for(
+                        self._fill_overview_with_cache(overview_client, results),
+                        timeout=6.0,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "search_accessible_attractions: 소개문 조회가 6초 안에 끝나지 않아 "
+                        "일부는 비어있는 채로 반환합니다."
+                    )
+
+        return results
+
+    async def get_overviews_for_ids(self, content_ids: list[str]) -> dict[str, str | None]:
+        """
+        주어진 content_id들의 소개문만 따로 채워서 {content_id: overview} 형태로
+        돌려줍니다. 캐시에 있으면 API 호출 없이 바로 나오고, 없는 것만 새로
+        조회합니다. 홈 화면 '더보기'처럼 한 번에 몇 개(보통 6개)만 새로 화면에
+        나타날 때, 그 몇 개에 대해서만 6초 예산을 쓰기 위한 용도입니다 — 전체
+        목록(최대 50개)을 한 번에 다 채우려다 뒤쪽이 밀리는 문제를 피할 수 있습니다.
+        """
+        if not content_ids:
+            return {}
+        if self.use_mock:
+            return {
+                cid: f"{cid} 목업 소개문입니다. 실제 API 연동 시 채워집니다." for cid in content_ids
+            }
+
+        # _fill_overview_with_cache는 Attraction 객체 목록을 받아 그 안의
+        # overview 필드를 채우는 방식이라, content_id만 있는 임시 객체를 만들어
+        # 넘긴 뒤 결과만 뽑아씁니다 (다른 필드는 이 용도에서 안 쓰여서 빈 값으로 둡니다).
+        placeholders = [
+            Attraction(content_id=cid, name="", address="", latitude=0.0, longitude=0.0, category="")
+            for cid in content_ids
+        ]
+        async with httpx.AsyncClient(timeout=15) as client:
             try:
                 await asyncio.wait_for(
-                    self._fill_overview_with_cache(overview_client, results),
+                    self._fill_overview_with_cache(client, placeholders, max_concurrency=8),
                     timeout=6.0,
                 )
             except asyncio.TimeoutError:
                 logger.warning(
-                    "search_accessible_attractions: 소개문 조회가 6초 안에 끝나지 않아 "
-                    "일부는 비어있는 채로 반환합니다."
+                    "get_overviews_for_ids: 6초 안에 끝나지 않아 일부는 비어있는 채로 반환합니다."
                 )
-
-        return results
+        return {a.content_id: a.overview for a in placeholders}
 
     async def get_attraction_detail(self, content_id: str) -> Attraction | None:
         """

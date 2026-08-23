@@ -42,11 +42,27 @@ async def list_attractions(
     user_type: UserType = Query(default=UserType.GENERAL),
     limit: int = Query(default=20, le=50),
     sigungu_cd: int | None = Query(default=None, description="특정 시/군/구로 좁혀서 조회 (선택)"),
+    include_overview: bool = Query(
+        default=True,
+        description="False면 소개문 채우기를 건너뜁니다. 목록을 빨리 받고 소개문은 "
+        "/attractions/overviews로 화면에 보이는 만큼만 따로 채우고 싶을 때 씁니다.",
+    ),
 ):
     """무장애 필터링이 적용된 관광지 목록"""
     return await tour_api_client.search_accessible_attractions(
-        region, user_type.value, limit, sigungu_cd
+        region, user_type.value, limit, sigungu_cd, include_overview
     )
+
+
+@router.get("/attractions/overviews")
+async def attraction_overviews(content_ids: str = Query(..., description="쉼표로 구분된 content_id 목록")):
+    """
+    주어진 content_id들의 소개문만 따로 조회합니다. 홈 화면에서 '더보기'로 새로
+    나타나는 6개처럼, 한 번에 몇 개만 소개문이 필요할 때 씁니다 (전체 목록을
+    include_overview=false로 빠르게 받은 뒤, 실제 화면에 보이는 만큼만 이걸로 채움).
+    """
+    ids = [c.strip() for c in content_ids.split(",") if c.strip()]
+    return await tour_api_client.get_overviews_for_ids(ids)
 
 
 @router.get("/attractions/{content_id}/related", response_model=list[Attraction])
