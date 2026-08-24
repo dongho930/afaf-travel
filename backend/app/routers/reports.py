@@ -9,6 +9,7 @@ from app.services.report_service import (
     count_reports_by_user,
     create_report,
     list_reports_by_category,
+    list_reports_by_user,
 )
 from app.services.tour_api import tour_api_client
 
@@ -24,6 +25,15 @@ class ReportItem(BaseModel):
     user_id: str
     username: str
     avatar_url: Optional[str] = None
+    created_at: str
+
+
+class MyReportItem(BaseModel):
+    id: str
+    content_id: str
+    place_name: str
+    category: str
+    body: str
     created_at: str
 
 
@@ -53,6 +63,14 @@ async def my_report_count(user_id: Optional[str] = Depends(get_optional_user_id)
     if not user_id:
         return {"count": 0}
     return {"count": await count_reports_by_user(user_id)}
+
+
+@router.get("/me/list", response_model=list[MyReportItem])
+async def my_reports(user_id: Optional[str] = Depends(get_optional_user_id)):
+    """'내 여행' 탭의 '접근성 제보' 통계 카드를 눌렀을 때 쓰는, 내가 작성한 제보 전체."""
+    if not user_id:
+        return []
+    return await list_reports_by_user(user_id)
 
 
 @router.get("/{category}", response_model=list[ReportItem])

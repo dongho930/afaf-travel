@@ -123,6 +123,26 @@ async def count_reviews_by_user(user_id: str) -> int:
         return 0
 
 
+async def list_reviews_by_user(user_id: str, limit: int = 50) -> list[dict]:
+    """'내 여행' 탭의 '리뷰 작성' 통계 카드를 눌렀을 때 쓰는, 이 사용자가 작성한
+    리뷰 전체를 최신순으로 반환합니다 (어떤 장소인지 알 수 있게 content_id 포함)."""
+    if _client is None:
+        return []
+    try:
+        result = (
+            _client.table(_REVIEWS_TABLE)
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        print(f"[review] 내 리뷰 목록 조회 실패: {e}")
+        return []
+
+
 async def get_average_ratings(content_ids: list[str]) -> dict[str, dict]:
     """
     주어진 content_id 목록에 대해 {content_id: {"avg_rating": float, "review_count": int}}를

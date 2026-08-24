@@ -116,3 +116,23 @@ async def count_reports_by_user(user_id: str) -> int:
     except Exception as e:
         print(f"[report] 내 제보 개수 조회 실패: {e}")
         return 0
+
+
+async def list_reports_by_user(user_id: str, limit: int = 50) -> list[dict]:
+    """'내 여행' 탭의 '접근성 제보' 통계 카드를 눌렀을 때 쓰는, 이 사용자가
+    작성한 제보 전체를 최신순으로 반환합니다."""
+    if _client is None:
+        return []
+    try:
+        result = (
+            _client.table(_REPORTS_TABLE)
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        print(f"[report] 내 제보 목록 조회 실패: {e}")
+        return []

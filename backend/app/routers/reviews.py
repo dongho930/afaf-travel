@@ -7,8 +7,10 @@ from app.services.auth import get_optional_user_id
 from app.services.review_service import (
     count_reviews_by_user,
     create_review,
+    list_reviews_by_user,
     list_reviews_for_place,
 )
+from app.services.tour_api import tour_api_client
 
 router = APIRouter(prefix="/api/reviews", tags=["reviews"])
 
@@ -19,6 +21,15 @@ class ReviewItem(BaseModel):
     user_id: str
     username: str
     avatar_url: Optional[str] = None
+    rating: int
+    body: str
+    created_at: str
+
+
+class MyReviewItem(BaseModel):
+    id: str
+    content_id: str
+    place_name: str
     rating: int
     body: str
     created_at: str
@@ -35,6 +46,32 @@ async def my_review_count(user_id: Optional[str] = Depends(get_optional_user_id)
     if not user_id:
         return {"count": 0}
     return {"count": await count_reviews_by_user(user_id)}
+
+
+@router.get("/me/list", response_model=list[MyReviewItem])
+async def my_reviews(user_id: Optional[str] = Depends(get_optional_user_id)):
+    """
+    '내 여행' 탭의 '리뷰 작성' 통계 카드를 눌렀을 때 쓰는, 내가 작성한 리뷰
+    전체입니다. place_reviews 테이블엔 여행지 이름이 안 저장돼 있어서(content_id만
+    있음), 화면에 어떤 장소인지 보여주기 위해 상세 조회로 이름을 붙여줍니다.
+    """
+    if not user_id:
+        return []
+    rows = await list_reviews_by_user(user_id)
+    result = []
+    for r in rows:
+        attraction = await tour_api_client.get_attraction_detail(r["content_id"])
+        result.append(
+            MyReviewItem(
+                id=r["id"],
+                content_id=r["content_id"],
+                place_name=attraction.name if attraction else "알 수 없는 장소",
+                rating=r["rating"],
+                body=r["body"],
+                created_at=r["created_at"],
+            )
+        )
+    return result
 
 
 @router.get("/{content_id}", response_model=list[ReviewItem])

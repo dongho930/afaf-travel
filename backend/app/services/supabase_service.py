@@ -82,6 +82,31 @@ async def list_recent_courses(limit: int = 20, user_id: Optional[str] = None) ->
         return []
 
 
+async def list_saved_courses(user_id: str, limit: int = 50) -> list[dict]:
+    """
+    '내 여행' 탭의 '저장한 경로' 통계 카드를 눌렀을 때 보여줄, 실제로 여행에
+    저장된(trip_id가 있는) 코스 전체를 여행 구분 없이 한 번에 최신순으로
+    반환합니다. list_recent_courses는 여행에 저장하지 않은 것까지 다 포함해서
+    '저장한 경로' 개수(trips의 course_count 합)와 안 맞을 수 있어 따로 둡니다.
+    """
+    if _client is None or not user_id:
+        return []
+    try:
+        result = (
+            _client.table("courses")
+            .select("*")
+            .eq("user_id", user_id)
+            .not_.is_("trip_id", "null")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        print(f"[supabase] 저장된 코스 전체 조회 실패: {e}")
+        return []
+
+
 async def create_trip(
     user_id: str,
     name: str,

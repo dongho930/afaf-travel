@@ -24,6 +24,7 @@ from app.services.supabase_service import (
     delete_trip,
     get_saved_course_detail,
     list_recent_courses,
+    list_saved_courses,
     list_trip_courses,
     list_trips,
     row_to_course_response,
@@ -113,6 +114,31 @@ async def get_course_history(
 ):
     """로그인한 사용자의 최근 코스 이력을 조회합니다 (여행 저장 여부와 상관없이 생성된 것 전부)."""
     return await list_recent_courses(limit=limit, user_id=user_id)
+
+
+@courses_router.get("/saved", response_model=list[SavedCourseSummary])
+async def list_saved_courses_endpoint(
+    limit: int = 50,
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """
+    '내 여행' 탭의 '저장한 경로' 통계 카드를 눌렀을 때 쓰는 목록입니다.
+    실제로 여행에 저장된 코스만(여행 구분 없이 전부) 최신순으로 반환합니다.
+    """
+    if not user_id:
+        return []
+    rows = await list_saved_courses(user_id, limit=limit)
+    return [
+        SavedCourseSummary(
+            course_id=row["id"],
+            title=row["title"],
+            summary=row["summary"],
+            region=row.get("region") or "",
+            stop_count=len(row.get("stops") or []),
+            created_at=row.get("created_at"),
+        )
+        for row in rows
+    ]
 
 
 @courses_router.post("/{course_id}/save")
