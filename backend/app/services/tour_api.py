@@ -79,6 +79,8 @@ _MOCK_ATTRACTIONS: list[Attraction] = [
         accessibility=AccessibilityFeatures(
             has_ramp=True, has_elevator=False, has_accessible_restroom=True,
             has_wheelchair_rental=True, has_stroller_accessible_path=True, has_rest_area=True,
+            wheelchair_accessibility_count=4, visual_accessibility_count=0, hearing_accessibility_count=0,
+            family_accessibility_count=2, pregnant_accessibility_count=3,
         ),
         congestion_forecast=[
             CongestionForecast(date="2026-08-22", hour=10, congestion_level="low"),
@@ -98,6 +100,8 @@ _MOCK_ATTRACTIONS: list[Attraction] = [
         accessibility=AccessibilityFeatures(
             has_ramp=True, has_elevator=False, has_accessible_restroom=True,
             has_wheelchair_rental=False, has_stroller_accessible_path=True, has_rest_area=True,
+            wheelchair_accessibility_count=3, visual_accessibility_count=0, hearing_accessibility_count=0,
+            family_accessibility_count=2, pregnant_accessibility_count=3,
         ),
         congestion_forecast=[
             CongestionForecast(date="2026-08-22", hour=9, congestion_level="low"),
@@ -117,6 +121,9 @@ _MOCK_ATTRACTIONS: list[Attraction] = [
         accessibility=AccessibilityFeatures(
             has_ramp=True, has_elevator=True, has_accessible_restroom=True,
             has_wheelchair_rental=True, has_stroller_accessible_path=True, has_rest_area=True,
+            has_visual_accessibility=True, has_hearing_accessibility=True,
+            wheelchair_accessibility_count=6, visual_accessibility_count=2, hearing_accessibility_count=1,
+            family_accessibility_count=3, pregnant_accessibility_count=5,
         ),
         congestion_forecast=[
             CongestionForecast(date="2026-08-22", hour=11, congestion_level="high"),
@@ -136,6 +143,9 @@ _MOCK_ATTRACTIONS: list[Attraction] = [
         accessibility=AccessibilityFeatures(
             has_ramp=False, has_elevator=False, has_accessible_restroom=True,
             has_wheelchair_rental=True, has_stroller_accessible_path=False, has_rest_area=True,
+            has_visual_accessibility=True,
+            wheelchair_accessibility_count=2, visual_accessibility_count=1, hearing_accessibility_count=0,
+            family_accessibility_count=1, pregnant_accessibility_count=2,
         ),
         congestion_forecast=[
             CongestionForecast(date="2026-08-22", hour=13, congestion_level="medium"),
@@ -154,6 +164,8 @@ _MOCK_ATTRACTIONS: list[Attraction] = [
         accessibility=AccessibilityFeatures(
             has_ramp=True, has_elevator=False, has_accessible_restroom=False,
             has_wheelchair_rental=False, has_stroller_accessible_path=True, has_rest_area=False,
+            wheelchair_accessibility_count=2, visual_accessibility_count=0, hearing_accessibility_count=0,
+            family_accessibility_count=1, pregnant_accessibility_count=1,
         ),
         congestion_forecast=[
             CongestionForecast(date="2026-08-22", hour=12, congestion_level="high"),
@@ -835,12 +847,17 @@ class TourApiClient:
         """
         if self.use_mock:
             results = [a.model_copy(deep=True) for a in _MOCK_ATTRACTIONS]
+            # 접근성 탭(get_accessibility_summary)의 카테고리별 판단 기준과 정확히
+            # 동일하게 맞춥니다 — 그래야 "접근성 탭에서 우수하게 나오는 곳"과
+            # "AI 코스 생성 1단계 후보"가 서로 다른 기준으로 갈리지 않습니다.
             if user_type == "wheelchair":
-                results = [a for a in results if a.accessibility.has_ramp]
+                results = [a for a in results if a.accessibility.wheelchair_accessibility_count > 0]
             elif user_type == "stroller":
-                results = [a for a in results if a.accessibility.has_stroller_accessible_path]
-            elif user_type in ("senior", "pregnant"):
+                results = [a for a in results if a.accessibility.family_accessibility_count > 0]
+            elif user_type == "senior":
                 results = [a for a in results if a.accessibility.has_rest_area]
+            elif user_type == "pregnant":
+                results = [a for a in results if a.accessibility.pregnant_accessibility_count > 0]
             elif user_type == "visual":
                 results = [a for a in results if a.accessibility.has_visual_accessibility]
             elif user_type == "hearing":
@@ -957,12 +974,19 @@ class TourApiClient:
         attractions.sort(key=popularity_sort_key)
 
         results = attractions
+        # 접근성 탭(get_accessibility_summary)의 카테고리별 판단 기준과 정확히
+        # 동일하게 맞춥니다 — '접근성 탭에서 우수한 곳'과 'AI 코스 생성 1단계
+        # 후보'가 서로 다른 기준으로 갈리지 않도록 하기 위함입니다. 필터링 결과가
+        # 0건이면(그 지역/조건에 딱 맞는 곳이 아직 캐시에 없을 수 있어서) 안전하게
+        # 원래 목록 전체로 되돌립니다.
         if user_type == "wheelchair":
-            results = [a for a in results if a.accessibility.has_ramp] or attractions
+            results = [a for a in results if a.accessibility.wheelchair_accessibility_count > 0] or attractions
         elif user_type == "stroller":
-            results = [a for a in results if a.accessibility.has_stroller_accessible_path] or attractions
-        elif user_type in ("senior", "pregnant"):
+            results = [a for a in results if a.accessibility.family_accessibility_count > 0] or attractions
+        elif user_type == "senior":
             results = [a for a in results if a.accessibility.has_rest_area] or attractions
+        elif user_type == "pregnant":
+            results = [a for a in results if a.accessibility.pregnant_accessibility_count > 0] or attractions
         elif user_type == "visual":
             results = [a for a in results if a.accessibility.has_visual_accessibility] or attractions
         elif user_type == "hearing":
