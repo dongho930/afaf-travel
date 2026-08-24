@@ -8,7 +8,9 @@ Groq API(OpenAI 호환)를 이용한 자연어 질의 파싱 및 무장애 여�
 - GROQ_API_KEY가 없으면 규칙 기반 목업 생성기로 대체되어,
   키 발급 전에도 프론트엔드 개발이 막히지 않습니다.
 """
+import asyncio
 import json
+import logging
 import uuid
 
 import httpx
@@ -25,6 +27,7 @@ from app.models.schemas import (
 )
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 
@@ -149,6 +152,11 @@ def _mock_generate(request: CourseRequest, candidates: list[Attraction]) -> dict
     }
 
 
+class GroqRateLimitedError(Exception):
+    """Groq API가 요청 한도(429)에 걸렸을 때 발생시켜서, 호출한 쪽이 규칙 기반
+    대체 로직으로 넘어갈 수 있게 신호를 줍니다."""
+
+
 async def _groq_call(system_prompt: str, user_prompt: str) -> dict:
     payload = {
         "model": settings.groq_model,
@@ -161,13 +169,26 @@ async def _groq_call(system_prompt: str, user_prompt: str) -> dict:
         "temperature": 0.3,
     }
     headers = {"Authorization": f"Bearer {settings.groq_api_key}"}
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(GROQ_ENDPOINT, headers=headers, json=payload)
+
+    # Groq 무료 티어는 순간적으로 요청이 몰리면 429가 나는데, 잠깐 기다리면
+    # 풀리는 경우가 많아서 최대 2번까지 짧게 재시도합니다. 그래도 안 되면
+    # GroqRateLimitedError를 던져서, 호출한 쪽이 규칙 기반 대체 로직으로
+    # 자연스럽게 넘어가게 합니다 (사용자는 500 에러 대신 결과를 받습니다).
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(GROQ_ENDPOINT, headers=headers, json=payload)
+        if resp.status_code == 429:
+            if attempt < max_retries:
+                await asyncio.sleep(1.5 * (attempt + 1))
+                continue
+            raise GroqRateLimitedError("Groq API 요청 한도(429) 초과")
         resp.raise_for_status()
         data = resp.json()
+        text = data["choices"][0]["message"]["content"]
+        return json.loads(text)
 
-    text = data["choices"][0]["message"]["content"]
-    return json.loads(text)
+    raise GroqRateLimitedError("Groq API 요청 한도(429) 초과")
 
 
 async def _groq_generate(request: CourseRequest, candidates: list[Attraction]) -> dict:
@@ -197,7 +218,11 @@ async def generate_course(request: CourseRequest, candidates: list[Attraction]) 
         raise ValueError("추천할 수 있는 무장애 관광지 후보가 없습니다.")
 
     if settings.groq_api_key:
-        raw = await _groq_generate(request, candidates)
+        try:
+            raw = await _groq_generate(request, candidates)
+        except GroqRateLimitedError:
+            logger.warning("Groq 요청 한도 초과 — 규칙 기반 대체 로직으로 코스를 생성합니다.")
+            raw = _mock_generate(request, candidates)
     else:
         raw = _mock_generate(request, candidates)
 
@@ -259,7 +284,11 @@ async def recommend_places(
         raise ValueError("추천할 수 있는 무장애 관광지 후보가 없습니다.")
 
     if settings.groq_api_key:
-        selected = await _groq_recommend(request, candidates)
+        try:
+            selected = await _groq_recommend(request, candidates)
+        except GroqRateLimitedError:
+            logger.warning("Groq 요청 한도 초과 — 규칙 기반 대체 로직으로 장소를 추천합니다.")
+            selected = _mock_recommend(request, candidates)
     else:
         selected = _mock_recommend(request, candidates)
 
@@ -291,9 +320,13 @@ async def generate_course_from_selection(
     )
 
     if settings.groq_api_key:
-        raw = await _groq_call(
-            ORDER_SYSTEM_PROMPT, _build_user_prompt(course_request, selected_attractions)
-        )
+        try:
+            raw = await _groq_call(
+                ORDER_SYSTEM_PROMPT, _build_user_prompt(course_request, selected_attractions)
+            )
+        except GroqRateLimitedError:
+            logger.warning("Groq 요청 한도 초과 — 규칙 기반 대체 로직으로 순서를 정합니다.")
+            raw = _mock_generate(course_request, selected_attractions)
     else:
         raw = _mock_generate(course_request, selected_attractions)
 
