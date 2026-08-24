@@ -841,6 +841,10 @@ class TourApiClient:
                 results = [a for a in results if a.accessibility.has_stroller_accessible_path]
             elif user_type in ("senior", "pregnant"):
                 results = [a for a in results if a.accessibility.has_rest_area]
+            elif user_type == "visual":
+                results = [a for a in results if a.accessibility.has_visual_accessibility]
+            elif user_type == "hearing":
+                results = [a for a in results if a.accessibility.has_hearing_accessibility]
             results = results[:limit]
             for a in results:
                 a.accessibility_benefits = _accessibility_benefit_labels(a.accessibility)
@@ -959,6 +963,10 @@ class TourApiClient:
             results = [a for a in results if a.accessibility.has_stroller_accessible_path] or attractions
         elif user_type in ("senior", "pregnant"):
             results = [a for a in results if a.accessibility.has_rest_area] or attractions
+        elif user_type == "visual":
+            results = [a for a in results if a.accessibility.has_visual_accessibility] or attractions
+        elif user_type == "hearing":
+            results = [a for a in results if a.accessibility.has_hearing_accessibility] or attractions
         results = results[:limit]
 
         # 소개문은 API 호출 비용이 있어서, 최종적으로 화면에 노출되는 목록에

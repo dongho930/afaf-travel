@@ -5,10 +5,12 @@ from pydantic import BaseModel, Field
 
 
 class UserType(str, Enum):
-    WHEELCHAIR = "wheelchair"          # 휠체어 이용자
+    WHEELCHAIR = "wheelchair"          # 지체 장애인
     STROLLER = "stroller"              # 유모차 동반 가족
     SENIOR = "senior"                  # 고령자
     PREGNANT = "pregnant"              # 임산부
+    VISUAL = "visual"                  # 시각 장애인
+    HEARING = "hearing"                # 청각 장애인
     GENERAL = "general"                # 일반 (참고용 기본값)
 
 
