@@ -21,6 +21,7 @@ USE_MOCK_DATA=true (기본값) 일 때는 경기도 지역 목업 데이터를 �
 import asyncio
 import datetime
 import logging
+import math
 
 import httpx
 
@@ -1264,6 +1265,94 @@ class TourApiClient:
                 attraction.review_count = rating_row["review_count"]
 
             return attraction
+
+    async def get_nearby_attractions(self, content_id: str, radius_km: float = 2.0) -> list[dict]:
+        """
+        관광지 상세 페이지 '근처 가볼 만한 곳'용. 한국관광공사 [위치기반 관광정보
+        조회](locationBasedList2) 오퍼레이션을 씁니다 — 좌표+반경으로 검색하면
+        응답에 각 장소까지의 거리(dist, m)가 이미 포함돼 있어서 직접 거리 계산이
+        필요 없습니다. arrange=E로 거리순 정렬까지 API가 대신 해줍니다.
+
+        개수 제한 없이 반경(기본 2km) 안의 결과를 전부 반환합니다.
+        """
+        base = await self.get_attraction_detail(content_id)
+        if not base or not base.latitude or not base.longitude:
+            return []
+
+        if self.use_mock:
+            # mock 모드엔 위치기반 조회 API가 없어서, 좌표 거리(Haversine)를
+            # 직접 계산해 흉내 냅니다.
+            def haversine_km(lat1, lon1, lat2, lon2):
+                r = 6371.0
+                p1, p2 = math.radians(lat1), math.radians(lat2)
+                dphi = math.radians(lat2 - lat1)
+                dlambda = math.radians(lon2 - lon1)
+                a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlambda / 2) ** 2
+                return 2 * r * math.asin(math.sqrt(a))
+
+            nearby = []
+            for a in _MOCK_ATTRACTIONS:
+                if a.content_id == content_id:
+                    continue
+                d = haversine_km(base.latitude, base.longitude, a.latitude, a.longitude)
+                if d <= radius_km:
+                    nearby.append(
+                        {
+                            "content_id": a.content_id,
+                            "name": a.name,
+                            "image_url": a.image_url,
+                            "category": a.category,
+                            "distance_km": round(d, 1),
+                        }
+                    )
+            nearby.sort(key=lambda x: x["distance_km"])
+            return nearby
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            try:
+                resp = await client.get(
+                    f"{settings.tour_api_base_url}/KorWithService2/locationBasedList2",
+                    params=self._common_params(
+                        {
+                            "mapX": base.longitude,
+                            "mapY": base.latitude,
+                            "radius": int(radius_km * 1000),
+                            "arrange": "E",  # 거리순 정렬
+                            # 개수 제한이 없어서, 반경 안의 결과를 최대한 다 담을
+                            # 수 있게 넉넉히 요청합니다 (본인 자신도 포함되니 여유분 포함).
+                            "numOfRows": 100,
+                            "pageNo": 1,
+                        }
+                    ),
+                )
+                resp.raise_for_status()
+                items = self._extract_items(resp.json())
+            except Exception as exc:
+                logger.warning("근처 관광지 조회 실패 (content_id=%s): %s", content_id, exc)
+                return []
+
+        nearby = []
+        for item in items:
+            item_content_id = str(item.get("contentid") or "")
+            if not item_content_id or item_content_id == content_id:
+                continue  # 자기 자신 제외
+            dist_m = item.get("dist")
+            try:
+                distance_km = round(float(dist_m) / 1000, 1) if dist_m is not None else None
+            except (TypeError, ValueError):
+                distance_km = None
+            if distance_km is None or distance_km > radius_km:
+                continue
+            nearby.append(
+                {
+                    "content_id": item_content_id,
+                    "name": item.get("title") or "",
+                    "image_url": item.get("firstimage") or item.get("firstimage2") or None,
+                    "category": _CONTENT_TYPE_LABELS.get(int(item.get("contenttypeid") or 0), "기타"),
+                    "distance_km": distance_km,
+                }
+            )
+        return nearby
 
     async def get_related_attractions(self, content_id: str) -> list[Attraction]:
         """

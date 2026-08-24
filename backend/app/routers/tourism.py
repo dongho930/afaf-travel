@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query
 
-from app.models.schemas import AccessibilitySummary, Attraction, RegionOption, UserType
+from app.models.schemas import AccessibilitySummary, Attraction, NearbyAttraction, RegionOption, UserType
 from app.services.sigungu_codes import list_signgu_by_area
 from app.services.supabase_service import get_cached_accessibility_stats, save_accessibility_stats
 from app.services.tour_api import tour_api_client
@@ -71,6 +71,15 @@ async def related_attractions(content_id: str):
     if not results:
         return []
     return results
+
+
+@router.get("/attractions/{content_id}/nearby", response_model=list[NearbyAttraction])
+async def nearby_attractions(
+    content_id: str,
+    radius_km: float = Query(default=2.0, le=20.0, description="검색 반경(km), 최대 20km"),
+):
+    """관광지 상세 페이지 '근처 가볼 만한 곳' — 반경(기본 2km) 안의 결과를 개수 제한 없이 거리순으로."""
+    return await tour_api_client.get_nearby_attractions(content_id, radius_km)
 
 
 @router.get("/attractions/{content_id}", response_model=Attraction)

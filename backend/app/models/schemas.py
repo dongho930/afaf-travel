@@ -224,6 +224,15 @@ class SavedCourseDetail(BaseModel):
     created_at: Optional[str] = None
 
 
+class NearbyAttraction(BaseModel):
+    """관광지 상세 페이지 '근처 가볼 만한 곳' 목록 항목"""
+    content_id: str
+    name: str
+    image_url: Optional[str] = None
+    category: str
+    distance_km: float
+
+
 class AccessibilityPlaceScore(BaseModel):
     """'접근성' 탭의 '휠체어 주요 여행지' 목록 항목"""
     # content_id를 나중에 추가하면서, 그 전에 캐시된 accessibility_stats 데이터에는
