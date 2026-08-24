@@ -31,6 +31,32 @@ logger = logging.getLogger(__name__)
 
 GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 
+# 이동유형별로 실제 관련 있는 편의시설 필드만 골라 AI에게 넘기기 위한 매핑입니다.
+# 예전엔 accessibility 전체(경사로/화장실/유모차로/시각/청각 등 모든 필드)를
+# 사용자 유형과 상관없이 통째로 넘겨서, AI가 시각장애인용 추천인데도 "경사로가
+# 있어서"처럼 무관한 이유를 대는 문제가 있었습니다. 이제 이동유형에 실제로
+# 맞는 필드만 추려서 넘기므로, AI가 애초에 무관한 필드를 볼 수 없습니다.
+_RELEVANT_FIELDS_BY_USER_TYPE: dict[str, list[str]] = {
+    "wheelchair": [
+        "has_ramp", "has_elevator", "has_accessible_restroom",
+        "has_wheelchair_rental", "wheelchair_accessibility_count",
+    ],
+    "stroller": ["has_stroller_accessible_path", "family_accessibility_count"],
+    "senior": ["has_rest_area", "has_ramp", "has_elevator", "has_accessible_restroom"],
+    "pregnant": ["has_rest_area", "pregnant_accessibility_count"],
+    "visual": ["has_visual_accessibility", "visual_accessibility_count"],
+    "hearing": ["has_hearing_accessibility", "hearing_accessibility_count"],
+}
+
+
+def _relevant_accessibility_payload(features: dict, user_type: str) -> dict:
+    """이동유형(user_type)과 실제로 관련 있는 접근성 필드만 골라 반환합니다.
+    general이거나 매핑에 없는 유형이면 전체를 그대로 넘깁니다."""
+    relevant_keys = _RELEVANT_FIELDS_BY_USER_TYPE.get(user_type)
+    if not relevant_keys:
+        return features
+    return {k: features[k] for k in relevant_keys if k in features}
+
 SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동반 가족, 고령자, 임산부, 시각 장애인, 청각 장애인)를 위한
 경기도 무장애 여행 코스를 설계하는 여행 플래너 AI입니다.
 
@@ -44,6 +70,10 @@ SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동반 가
 - 반드시 후보 목록에 있는 관광지만 사용하세요.
 - 혼잡도가 낮은 시간대를 우선 배치하세요.
 - 사용자 유형에 맞는 이동/휴식 동선을 고려하세요 (예: 고령자/임산부는 휴게 공간이 있는 곳 우선).
+- reason은 반드시 candidates에 주어진 accessibility 필드에 실제로 있는 내용만
+  근거로 쓰세요. 주어지지 않은 편의시설(예: 시각장애 사용자에게 경사로나 화장실처럼
+  무관한 항목)은 절대 언급하지 마세요 — accessibility에 이미 해당 유형과
+  관련된 필드만 들어있습니다.
 - 응답은 반드시 아래 JSON 스키마로만 출력하고, 다른 설명은 절대 포함하지 마세요.
 
 {
@@ -71,6 +101,10 @@ RECOMMEND_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 
 - 질의와 사용자 유형에 맞는 장소를 최대 12개까지, 다양한 카테고리(관광지/음식점/문화시설 등)가
   골고루 섞이도록 선택하세요. 후보가 12개보다 적으면 있는 만큼만 반환하세요.
 - 순서는 중요하지 않습니다 (사용자가 나중에 직접 고릅니다).
+- reason은 반드시 candidates에 주어진 accessibility 필드에 실제로 있는 내용만
+  근거로 쓰세요. 주어지지 않은 편의시설(예: 시각장애 사용자에게 경사로나 화장실처럼
+  무관한 항목)은 절대 언급하지 마세요 — accessibility에 이미 해당 유형과
+  관련된 필드만 들어있습니다.
 - 응답은 반드시 아래 JSON 스키마로만 출력하고, 다른 설명은 절대 포함하지 마세요.
 
 {
@@ -96,6 +130,10 @@ ORDER_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동�
 - candidates에 주어진 모든 관광지를 빠짐없이 포함하세요 (제외 금지, 추가 금지).
 - 혼잡도가 낮은 시간대를 우선 배치하세요.
 - 사용자 유형에 맞는 이동/휴식 동선을 고려해 순서를 정하세요.
+- reason은 반드시 candidates에 주어진 accessibility 필드에 실제로 있는 내용만
+  근거로 쓰세요. 주어지지 않은 편의시설(예: 시각장애 사용자에게 경사로나 화장실처럼
+  무관한 항목)은 절대 언급하지 마세요 — accessibility에 이미 해당 유형과
+  관련된 필드만 들어있습니다.
 - 응답은 반드시 아래 JSON 스키마로만 출력하고, 다른 설명은 절대 포함하지 마세요.
 
 {
@@ -114,7 +152,9 @@ def _build_user_prompt(request: CourseRequest, candidates: list[Attraction]) -> 
             "content_id": a.content_id,
             "name": a.name,
             "category": a.category,
-            "accessibility": a.accessibility.model_dump(),
+            "accessibility": _relevant_accessibility_payload(
+                a.accessibility.model_dump(), request.user_type
+            ),
             "congestion_forecast": [c.model_dump() for c in a.congestion_forecast],
         }
         for a in candidates
@@ -262,7 +302,9 @@ async def _groq_recommend(request: PlaceRecommendationRequest, candidates: list[
                     "content_id": a.content_id,
                     "name": a.name,
                     "category": a.category,
-                    "accessibility": a.accessibility.model_dump(),
+                    "accessibility": _relevant_accessibility_payload(
+                        a.accessibility.model_dump(), request.user_type
+                    ),
                 }
                 for a in candidates
             ],
