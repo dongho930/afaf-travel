@@ -1016,6 +1016,53 @@ class TourApiClient:
                 )
         return {a.content_id: a.overview for a in placeholders}
 
+    async def search_attractions_by_keyword(self, keyword: str, limit: int = 8) -> list[dict]:
+        """
+        접근성 제보 작성 시 '여행지 이름 검색(자동완성)'에 씁니다. 무장애 정보/
+        소개문 같은 무거운 보강 없이 이름/주소/카테고리만 가볍게 반환합니다
+        (searchKeyword2는 detailWithTour2와 같은 일일 트래픽 한도를 공유하므로,
+        자동완성이라고 남발하면 안 되고 프론트에서 디바운스 필수).
+        """
+        if not keyword.strip():
+            return []
+        if self.use_mock:
+            kw = keyword.strip()
+            return [
+                {"content_id": a.content_id, "name": a.name, "address": a.address, "category": a.category}
+                for a in _MOCK_ATTRACTIONS
+                if kw in a.name
+            ][:limit]
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            try:
+                resp = await client.get(
+                    f"{settings.tour_api_base_url}/KorWithService2/searchKeyword2",
+                    params=self._common_params(
+                        {"keyword": keyword.strip(), "numOfRows": limit, "pageNo": 1}
+                    ),
+                )
+                resp.raise_for_status()
+                items = self._extract_items(resp.json())
+            except Exception as exc:
+                logger.warning("여행지 이름 검색 실패 (keyword=%s): %s", keyword, exc)
+                return []
+
+        results = []
+        for item in items:
+            content_id = str(item.get("contentid") or "")
+            name = item.get("title") or ""
+            if not content_id or not name:
+                continue
+            results.append(
+                {
+                    "content_id": content_id,
+                    "name": name,
+                    "address": " ".join(filter(None, [item.get("addr1"), item.get("addr2")])).strip(),
+                    "category": _CONTENT_TYPE_LABELS.get(int(item.get("contenttypeid") or 0), "기타"),
+                }
+            )
+        return results
+
     async def get_attraction_detail(self, content_id: str) -> Attraction | None:
         """
         관광지 상세 페이지용 단건 조회.
