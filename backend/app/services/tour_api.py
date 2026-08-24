@@ -64,6 +64,39 @@ _BENEFIT_LABELS: list[tuple[str, str]] = [
 def _accessibility_benefit_labels(features: AccessibilityFeatures) -> list[str]:
     return [label for field, label in _BENEFIT_LABELS if getattr(features, field, False)]
 
+
+# place_accessibility_cache에 저장/복원할 개별 편의시설 boolean 필드 전체 목록.
+# 캐시 저장(딕셔너리로 직렬화)과 캐시 복원(AccessibilityFeatures 생성자 인자로
+# 역직렬화)이 총 4곳에서 반복돼서, 필드를 하나 추가할 때마다 4곳을 다 고쳐야
+# 하는 실수를 막기 위해 목록 하나로 관리합니다.
+_DETAIL_ACCESSIBILITY_FIELDS: tuple[str, ...] = (
+    "has_ramp", "has_elevator", "has_accessible_restroom", "has_wheelchair_rental",
+    "has_stroller_accessible_path", "has_rest_area", "has_parking", "has_exit",
+    "has_visual_accessibility", "has_hearing_accessibility",
+    "has_braille_block", "has_help_dog", "has_guide_human", "has_audio_guide",
+    "has_big_print", "has_braille_promotion", "has_guide_system",
+    "has_sign_guide", "has_video_guide", "has_hearing_room",
+    "has_lactation_room", "has_baby_spare_chair",
+)
+_COUNT_ACCESSIBILITY_FIELDS: tuple[str, ...] = (
+    "wheelchair_accessibility_count", "visual_accessibility_count",
+    "hearing_accessibility_count", "family_accessibility_count", "pregnant_accessibility_count",
+)
+
+
+def _accessibility_to_cache_row(features: AccessibilityFeatures) -> dict:
+    """AccessibilityFeatures를 place_accessibility_cache 저장용 딕셔너리로 변환."""
+    row = {f: getattr(features, f) for f in _DETAIL_ACCESSIBILITY_FIELDS}
+    row.update({f: getattr(features, f) for f in _COUNT_ACCESSIBILITY_FIELDS})
+    return row
+
+
+def _accessibility_from_cache_row(row: dict) -> AccessibilityFeatures:
+    """place_accessibility_cache의 한 행을 AccessibilityFeatures로 복원."""
+    kwargs = {f: bool(row.get(f)) for f in _DETAIL_ACCESSIBILITY_FIELDS}
+    kwargs.update({f: int(row.get(f) or 0) for f in _COUNT_ACCESSIBILITY_FIELDS})
+    return AccessibilityFeatures(**kwargs)
+
 settings = get_settings()
 
 # ---- 경기도 목업 데이터 (실 API 연동 전 개발/데모용) ----
@@ -122,6 +155,8 @@ _MOCK_ATTRACTIONS: list[Attraction] = [
             has_ramp=True, has_elevator=True, has_accessible_restroom=True,
             has_wheelchair_rental=True, has_stroller_accessible_path=True, has_rest_area=True,
             has_visual_accessibility=True, has_hearing_accessibility=True,
+            has_audio_guide=True, has_braille_block=True, has_sign_guide=True,
+            has_lactation_room=True,
             wheelchair_accessibility_count=6, visual_accessibility_count=2, hearing_accessibility_count=1,
             family_accessibility_count=3, pregnant_accessibility_count=5,
         ),
@@ -585,8 +620,22 @@ class TourApiClient:
                     has_wheelchair_rental=has_text("wheelchair"),
                     has_stroller_accessible_path=has_text("stroller"),
                     has_rest_area=has_text("lactationroom") or has_text("babysparechair"),
+                    has_parking=has_text("parking"),
+                    has_exit=has_text("exit"),
                     has_visual_accessibility=visual_count > 0,
                     has_hearing_accessibility=hearing_count > 0,
+                    has_braille_block=has_text("braileblock"),
+                    has_help_dog=has_text("helpdog"),
+                    has_guide_human=has_text("guidehuman"),
+                    has_audio_guide=has_text("audioguide"),
+                    has_big_print=has_text("bigprint"),
+                    has_braille_promotion=has_text("brailepromotion"),
+                    has_guide_system=has_text("guidesystem"),
+                    has_sign_guide=has_text("signguide"),
+                    has_video_guide=has_text("videoguide"),
+                    has_hearing_room=has_text("hearingroom"),
+                    has_lactation_room=has_text("lactationroom"),
+                    has_baby_spare_chair=has_text("babysparechair"),
                     wheelchair_accessibility_count=wheelchair_count,
                     visual_accessibility_count=visual_count,
                     hearing_accessibility_count=hearing_count,
@@ -737,19 +786,7 @@ class TourApiClient:
                     new_cache_rows.append(
                         {
                             "content_id": attraction.content_id,
-                            "has_ramp": features.has_ramp,
-                            "has_elevator": features.has_elevator,
-                            "has_accessible_restroom": features.has_accessible_restroom,
-                            "has_wheelchair_rental": features.has_wheelchair_rental,
-                            "has_stroller_accessible_path": features.has_stroller_accessible_path,
-                            "has_rest_area": features.has_rest_area,
-                            "has_visual_accessibility": features.has_visual_accessibility,
-                            "has_hearing_accessibility": features.has_hearing_accessibility,
-                            "wheelchair_accessibility_count": features.wheelchair_accessibility_count,
-                            "visual_accessibility_count": features.visual_accessibility_count,
-                            "hearing_accessibility_count": features.hearing_accessibility_count,
-                            "family_accessibility_count": features.family_accessibility_count,
-                            "pregnant_accessibility_count": features.pregnant_accessibility_count,
+                            **_accessibility_to_cache_row(features),
                             "record_found": True,
                             "fetched_at": datetime.datetime.utcnow().isoformat(),
                         }
@@ -779,21 +816,7 @@ class TourApiClient:
         for attraction in candidates:
             row = cached_rows.get(attraction.content_id)
             if row is not None:
-                attraction.accessibility = AccessibilityFeatures(
-                    has_ramp=bool(row.get("has_ramp")),
-                    has_elevator=bool(row.get("has_elevator")),
-                    has_accessible_restroom=bool(row.get("has_accessible_restroom")),
-                    has_wheelchair_rental=bool(row.get("has_wheelchair_rental")),
-                    has_stroller_accessible_path=bool(row.get("has_stroller_accessible_path")),
-                    has_rest_area=bool(row.get("has_rest_area")),
-                    has_visual_accessibility=bool(row.get("has_visual_accessibility")),
-                    has_hearing_accessibility=bool(row.get("has_hearing_accessibility")),
-                    wheelchair_accessibility_count=int(row.get("wheelchair_accessibility_count") or 0),
-                    visual_accessibility_count=int(row.get("visual_accessibility_count") or 0),
-                    hearing_accessibility_count=int(row.get("hearing_accessibility_count") or 0),
-                    family_accessibility_count=int(row.get("family_accessibility_count") or 0),
-                    pregnant_accessibility_count=int(row.get("pregnant_accessibility_count") or 0),
-                )
+                attraction.accessibility = _accessibility_from_cache_row(row)
         _ = stopped_early  # 로그/필요 시 확장을 위해 남겨둠 (현재는 diag로 충분히 노출됨)
 
     async def _fetch_by_content_type(
@@ -1209,22 +1232,7 @@ class TourApiClient:
             # 무장애 정보: 캐시 우선, 없으면 이번 하나만 즉시 조회
             cached = await get_cached_place_accessibility([content_id])
             if content_id in cached:
-                row = cached[content_id]
-                attraction.accessibility = AccessibilityFeatures(
-                    has_ramp=bool(row.get("has_ramp")),
-                    has_elevator=bool(row.get("has_elevator")),
-                    has_accessible_restroom=bool(row.get("has_accessible_restroom")),
-                    has_wheelchair_rental=bool(row.get("has_wheelchair_rental")),
-                    has_stroller_accessible_path=bool(row.get("has_stroller_accessible_path")),
-                    has_rest_area=bool(row.get("has_rest_area")),
-                    has_visual_accessibility=bool(row.get("has_visual_accessibility")),
-                    has_hearing_accessibility=bool(row.get("has_hearing_accessibility")),
-                    wheelchair_accessibility_count=int(row.get("wheelchair_accessibility_count") or 0),
-                    visual_accessibility_count=int(row.get("visual_accessibility_count") or 0),
-                    hearing_accessibility_count=int(row.get("hearing_accessibility_count") or 0),
-                    family_accessibility_count=int(row.get("family_accessibility_count") or 0),
-                    pregnant_accessibility_count=int(row.get("pregnant_accessibility_count") or 0),
-                )
+                attraction.accessibility = _accessibility_from_cache_row(cached[content_id])
             else:
                 features, ok = await self._fetch_accessibility(client, content_id)
                 attraction.accessibility = features
@@ -1233,19 +1241,7 @@ class TourApiClient:
                         [
                             {
                                 "content_id": content_id,
-                                "has_ramp": features.has_ramp,
-                                "has_elevator": features.has_elevator,
-                                "has_accessible_restroom": features.has_accessible_restroom,
-                                "has_wheelchair_rental": features.has_wheelchair_rental,
-                                "has_stroller_accessible_path": features.has_stroller_accessible_path,
-                                "has_rest_area": features.has_rest_area,
-                                "has_visual_accessibility": features.has_visual_accessibility,
-                                "has_hearing_accessibility": features.has_hearing_accessibility,
-                                "wheelchair_accessibility_count": features.wheelchair_accessibility_count,
-                                "visual_accessibility_count": features.visual_accessibility_count,
-                                "hearing_accessibility_count": features.hearing_accessibility_count,
-                                "family_accessibility_count": features.family_accessibility_count,
-                                "pregnant_accessibility_count": features.pregnant_accessibility_count,
+                                **_accessibility_to_cache_row(features),
                                 "record_found": True,
                                 "fetched_at": datetime.datetime.utcnow().isoformat(),
                             }

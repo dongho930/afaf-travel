@@ -22,6 +22,10 @@ class AccessibilityFeatures(BaseModel):
     has_wheelchair_rental: bool = False     # 휠체어 대여
     has_stroller_accessible_path: bool = False  # 유모차 이동 가능 동선
     has_rest_area: bool = False             # 임산부/고령자용 휴게 공간
+    # 접근성 탭에서 지체장애 점수를 매길 때 쓰는 6개 항목 중, 위에 없는 나머지 2개.
+    has_parking: bool = False               # 주차 여부
+    has_exit: bool = False                  # 출입통로
+
     # 활용매뉴얼(v4.3) 기준 실제 응답 필드로 계산 — 더 이상 목업이 아닙니다.
     # 시각장애: braileblock(점자블록)/helpdog(보조견동반)/guidehuman(안내요원)/
     #   audioguide(오디오가이드)/bigprint(큰활자홍보물)/brailepromotion(점자홍보물)/
@@ -30,6 +34,29 @@ class AccessibilityFeatures(BaseModel):
     # 청각장애: signguide(수화안내)/videoguide(자막비디오가이드)/hearingroom(객실)
     #   중 하나라도 있으면 True (기타상세 제외)
     has_hearing_accessibility: bool = False
+
+    # 시각장애 세부 항목(위 has_visual_accessibility를 구성하는 7개 항목 각각).
+    # AI플래너/장소선택 카드 등에서 "어떤" 시각장애 편의시설이 있는지 개별로
+    # 보여주기 위해 필요합니다 — has_visual_accessibility 하나로는 "있다"만
+    # 알 수 있고 "무엇이" 있는지는 알 수 없어서 따로 저장합니다.
+    has_braille_block: bool = False         # 점자블록
+    has_help_dog: bool = False              # 보조견 동반
+    has_guide_human: bool = False           # 안내요원
+    has_audio_guide: bool = False           # 오디오가이드
+    has_big_print: bool = False             # 큰 활자 홍보물
+    has_braille_promotion: bool = False     # 점자 홍보물 및 점자표지판
+    has_guide_system: bool = False          # 유도 안내설비
+
+    # 청각장애 세부 항목(위 has_hearing_accessibility를 구성하는 3개 항목 각각).
+    has_sign_guide: bool = False            # 수화 안내
+    has_video_guide: bool = False           # 자막 비디오가이드 및 영상 자막안내
+    has_hearing_room: bool = False          # 객실(청각장애인 편의시설이 있는 객실)
+
+    # 영유아가족/임산부 세부 항목(위 has_rest_area를 구성하는 항목 중 나머지 2개.
+    # has_stroller_accessible_path는 이미 위에 별도로 있습니다).
+    has_lactation_room: bool = False        # 수유실
+    has_baby_spare_chair: bool = False      # 유아용 보조의자
+
     # 지체장애/시각장애/청각장애/영유아가족 세부 편의시설이 몇 개나 있는지(개수).
     # 지체장애는 주차/접근로/휠체어대여/출입통로/엘리베이터/화장실 중 몇 개
     # (0~6), 시각장애는 점자블록/보조견동반/안내요원/오디오가이드/큰활자홍보물/
