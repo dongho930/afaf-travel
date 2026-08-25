@@ -16,6 +16,7 @@ from app.models.schemas import (
     TripCreateRequest,
     TripSummary,
     TripUpdateRequest,
+    UpdateCourseRequest,
     UpdateVisitedDateRequest,
     UserType,
     VisitedPlace,
@@ -39,6 +40,7 @@ from app.services.supabase_service import (
     row_to_course_response,
     save_course,
     unmark_trip_as_visited,
+    update_course,
     update_trip,
     update_visited_place_date,
 )
@@ -232,6 +234,25 @@ async def delete_course_endpoint(
     if not ok:
         raise HTTPException(status_code=404, detail=message)
     return {"ok": True}
+
+
+@courses_router.patch("/{course_id}", response_model=CourseResponse)
+async def update_course_endpoint(
+    course_id: str,
+    request: UpdateCourseRequest,
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """
+    저장된 코스의 제목을 바꾸거나(title), 관광지 순서를 바꿉니다(stop_order).
+    로그인이 필요하고, 본인 코스만 수정할 수 있습니다.
+    """
+    if not user_id:
+        raise HTTPException(status_code=401, detail="수정하려면 로그인이 필요해요.")
+
+    row, error = await update_course(course_id, user_id, title=request.title, stop_order=request.stop_order)
+    if row is None:
+        raise HTTPException(status_code=404 if "찾을 수 없" in (error or "") else 422, detail=error)
+    return row_to_course_response(row)
 
 
 @courses_router.get("/saved/{course_id}", response_model=SavedCourseDetail)

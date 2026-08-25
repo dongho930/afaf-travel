@@ -220,6 +220,14 @@ class UpdateVisitedDateRequest(BaseModel):
     visited_at: str = Field(..., description="YYYY-MM-DD 형식의 날짜")
 
 
+class UpdateCourseRequest(BaseModel):
+    """저장된 코스 수정 요청 — 제목 변경, 관광지 순서 변경(둘 중 하나 또는 둘 다)."""
+    title: Optional[str] = None
+    # 새 순서대로 나열한 content_id 목록. 기존 코스에 있는 관광지들과 정확히
+    # 같은 집합이어야 하며(추가/제외 불가), 순서만 이 목록 기준으로 바뀝니다.
+    stop_order: Optional[list[str]] = None
+
+
 class SavedCourseSummary(BaseModel):
     """여행 상세 화면 목록에 표시할 저장된 코스 요약 정보"""
     course_id: str

@@ -281,6 +281,55 @@ async def delete_course(course_id: str, user_id: str) -> tuple[bool, Optional[st
         return False, "삭제 중 오류가 발생했어요."
 
 
+async def update_course(
+    course_id: str,
+    user_id: str,
+    title: Optional[str] = None,
+    stop_order: Optional[list[str]] = None,
+) -> tuple[Optional[dict], Optional[str]]:
+    """
+    저장된 코스의 제목을 바꾸거나(title), 관광지 순서를 바꿉니다(stop_order —
+    새 순서대로 나열한 content_id 목록). stop_order를 줄 땐 기존 stops에 있는
+    항목들과 정확히 같은 집합이어야 하고(추가/제외 불가), 각 항목의 attraction/
+    reason/recommended_arrival_time 등 나머지 데이터는 그대로 유지한 채 순서와
+    order 번호만 새로 매깁니다.
+    """
+    if _client is None:
+        return None, "서버 설정 오류로 수정할 수 없어요."
+    try:
+        existing = _client.table("courses").select("*").eq("id", course_id).limit(1).execute()
+        rows = existing.data or []
+        if not rows or rows[0].get("user_id") != user_id:
+            return None, "해당 코스를 찾을 수 없거나 접근 권한이 없어요."
+        row = rows[0]
+
+        update_payload: dict = {}
+        if title is not None:
+            update_payload["title"] = title
+
+        if stop_order is not None:
+            existing_stops = row.get("stops") or []
+            by_content_id = {s["attraction"]["content_id"]: s for s in existing_stops}
+            if set(by_content_id.keys()) != set(stop_order) or len(stop_order) != len(existing_stops):
+                return None, "순서를 지정한 관광지 목록이 기존 코스와 일치하지 않아요."
+            new_stops = []
+            for i, content_id in enumerate(stop_order, start=1):
+                stop = dict(by_content_id[content_id])
+                stop["order"] = i
+                new_stops.append(stop)
+            update_payload["stops"] = new_stops
+
+        if not update_payload:
+            return row, None
+
+        result = _client.table("courses").update(update_payload).eq("id", course_id).execute()
+        updated_rows = result.data or []
+        return (updated_rows[0] if updated_rows else row), None
+    except Exception as e:
+        print(f"[supabase] 코스 수정 실패: {e}")
+        return None, "수정 중 오류가 발생했어요."
+
+
 def row_to_course_response(row: dict) -> CourseResponse:
     return CourseResponse(
         course_id=row["id"],
