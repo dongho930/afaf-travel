@@ -660,3 +660,23 @@ async def count_visited_places(user_id: str) -> int:
     except Exception as e:
         print(f"[supabase] 방문한 여행지 개수 조회 실패: {e}")
         return 0
+
+
+async def list_visited_places(user_id: str, limit: int = 50) -> list[dict]:
+    """'내 여행' 탭의 '방문한 여행지' 통계 카드를 눌렀을 때 쓰는, 이 사용자가
+    방문 완료로 표시한 여행지 전체를 최신순으로 반환합니다."""
+    if _client is None:
+        return []
+    try:
+        result = (
+            _client.table("visited_places")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("visited_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        print(f"[supabase] 방문한 여행지 목록 조회 실패: {e}")
+        return []

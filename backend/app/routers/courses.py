@@ -14,6 +14,7 @@ from app.models.schemas import (
     TripCreateRequest,
     TripSummary,
     TripUpdateRequest,
+    VisitedPlace,
 )
 from app.services.ai_service import generate_course, generate_course_from_selection, recommend_places
 from app.services.auth import get_optional_user_id
@@ -28,6 +29,7 @@ from app.services.supabase_service import (
     list_saved_courses,
     list_trip_courses,
     list_trips,
+    list_visited_places,
     mark_trip_as_visited,
     row_to_course_response,
     save_course,
@@ -336,6 +338,14 @@ async def my_visited_count(user_id: Optional[str] = Depends(get_optional_user_id
     if not user_id:
         return {"count": 0}
     return {"count": await count_visited_places(user_id)}
+
+
+@trips_router.get("/visited/me/list", response_model=list[VisitedPlace])
+async def my_visited_list(user_id: Optional[str] = Depends(get_optional_user_id)):
+    """'내 여행' 탭의 '방문한 여행지' 통계 카드를 눌렀을 때 쓰는, 내가 방문 완료로 표시한 여행지 전체."""
+    if not user_id:
+        return []
+    return await list_visited_places(user_id)
 
 
 router.include_router(courses_router)

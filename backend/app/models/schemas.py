@@ -204,6 +204,14 @@ class SaveCourseRequest(BaseModel):
     end_date: Optional[str] = Field(default=None, description="새 여행을 만들 때의 종료일 (YYYY-MM-DD)")
 
 
+class VisitedPlace(BaseModel):
+    """'내 여행' 탭의 '방문한 여행지' 목록 항목"""
+    id: str
+    content_id: str
+    place_name: str
+    visited_at: str
+
+
 class SavedCourseSummary(BaseModel):
     """여행 상세 화면 목록에 표시할 저장된 코스 요약 정보"""
     course_id: str
