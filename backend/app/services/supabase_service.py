@@ -660,6 +660,35 @@ async def mark_trip_as_visited(trip_id: str, user_id: str) -> int:
         return 0
 
 
+async def unmark_trip_as_visited(trip_id: str, user_id: str) -> int:
+    """
+    '방문 완료' 버튼을 다시 눌렀을 때(= 방문 완료 취소)용. mark_trip_as_visited로
+    이 여행 기준으로 방문 처리됐던 기록들을 지웁니다 (trip_id로 저장해둔 것만
+    지우므로, 같은 장소를 다른 여행에서 또 방문 완료했다면 그 기록은 남습니다).
+
+    반환값: 이번에 취소된(삭제된) 방문 기록 개수.
+    """
+    if _client is None:
+        return 0
+    try:
+        trip_row = _client.table("trips").select("user_id").eq("id", trip_id).limit(1).execute()
+        trip_rows = trip_row.data or []
+        if not trip_rows or trip_rows[0].get("user_id") != user_id:
+            return 0
+
+        result = (
+            _client.table("visited_places")
+            .delete()
+            .eq("trip_id", trip_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return len(result.data or [])
+    except Exception as e:
+        print(f"[supabase] 여행 방문 완료 취소 실패: {e}")
+        return 0
+
+
 async def count_visited_places(user_id: str) -> int:
     """이 사용자가 방문 완료 처리한 여행지(장소 기준 중복 없이) 총 개수."""
     if _client is None:

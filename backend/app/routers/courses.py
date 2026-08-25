@@ -35,6 +35,7 @@ from app.services.supabase_service import (
     mark_trip_as_visited,
     row_to_course_response,
     save_course,
+    unmark_trip_as_visited,
     update_trip,
     update_visited_place_date,
 )
@@ -313,6 +314,16 @@ async def mark_trip_visited_endpoint(trip_id: str, user_id: Optional[str] = Depe
     if count == 0:
         raise HTTPException(status_code=404, detail="이 여행에 담긴 관광지를 찾지 못했어요.")
     return {"visited_count": count}
+
+
+@trips_router.delete("/{trip_id}/visit")
+async def unmark_trip_visited_endpoint(trip_id: str, user_id: Optional[str] = Depends(get_optional_user_id)):
+    """'방문 완료' 버튼을 다시 누르면(취소) — 이 여행 기준으로 방문 처리됐던 기록을 지웁니다."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="방문 완료를 취소하려면 로그인이 필요해요.")
+
+    count = await unmark_trip_as_visited(trip_id, user_id)
+    return {"unvisited_count": count}
 
 
 @trips_router.get("/{trip_id}/courses", response_model=list[SavedCourseSummary])
