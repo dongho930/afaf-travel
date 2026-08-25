@@ -1,3 +1,4 @@
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -5,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.models.schemas import (
     CourseRequest,
     CourseResponse,
+    CourseStop,
     GenerateFromSelectionRequest,
     PlaceRecommendationRequest,
     PlaceRecommendationResponse,
@@ -15,6 +17,7 @@ from app.models.schemas import (
     TripSummary,
     TripUpdateRequest,
     UpdateVisitedDateRequest,
+    UserType,
     VisitedPlace,
 )
 from app.services.ai_service import generate_course, generate_course_from_selection, recommend_places
@@ -122,6 +125,42 @@ async def get_course_history(
 ):
     """로그인한 사용자의 최근 코스 이력을 조회합니다 (여행 저장 여부와 상관없이 생성된 것 전부)."""
     return await list_recent_courses(limit=limit, user_id=user_id)
+
+
+@courses_router.post("/from-attraction/{content_id}", response_model=CourseResponse)
+async def create_course_from_attraction(
+    content_id: str,
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """
+    관광지 상세 페이지의 '저장' 버튼용. 이 관광지 하나만 담은 1개짜리 코스를
+    만들어서 course_id를 발급합니다. 이후 흐름은 AI플래너 결과 화면의 저장과
+    완전히 동일합니다 — 이 course_id로 /api/courses/{course_id}/save를 불러서
+    기존 여행에 붙이거나 새 여행을 만들면 됩니다.
+    """
+    attraction = await tour_api_client.get_attraction_detail(content_id)
+    if attraction is None:
+        raise HTTPException(status_code=404, detail="관광지를 찾을 수 없어요.")
+
+    course = CourseResponse(
+        course_id=str(uuid.uuid4()),
+        title=attraction.name,
+        summary=f"{attraction.name}을(를) 직접 저장한 코스입니다.",
+        stops=[
+            CourseStop(
+                order=1,
+                attraction=attraction,
+                recommended_arrival_time="09:00",
+                reason="직접 저장한 장소",
+            )
+        ],
+        generated_for=UserType.GENERAL,
+    )
+    # 지역 정보는 주소 앞부분(예: '경기도 수원시')을 그대로 씁니다 — 저장 시
+    # 새 여행을 만들 때 필수는 아니지만, 코스 이력에 표시되면 도움이 됩니다.
+    region = " ".join(attraction.address.split(" ")[:2]) if attraction.address else ""
+    await save_course(course, query_text=attraction.name, region=region, user_id=user_id)
+    return course
 
 
 @courses_router.get("/saved", response_model=list[SavedCourseSummary])
