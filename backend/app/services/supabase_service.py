@@ -680,3 +680,21 @@ async def list_visited_places(user_id: str, limit: int = 50) -> list[dict]:
     except Exception as e:
         print(f"[supabase] 방문한 여행지 목록 조회 실패: {e}")
         return []
+
+
+async def delete_visited_place(visited_id: str, user_id: str) -> bool:
+    """'방문한 여행지' 목록에서 하나를 삭제합니다(방문 취소). 본인 것만 지울 수 있습니다."""
+    if _client is None:
+        return False
+    try:
+        result = (
+            _client.table("visited_places")
+            .delete()
+            .eq("id", visited_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return len(result.data or []) > 0
+    except Exception as e:
+        print(f"[supabase] 방문한 여행지 삭제 실패: {e}")
+        return False

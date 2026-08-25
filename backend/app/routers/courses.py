@@ -24,6 +24,7 @@ from app.services.supabase_service import (
     create_trip,
     delete_course,
     delete_trip,
+    delete_visited_place,
     get_saved_course_detail,
     list_recent_courses,
     list_saved_courses,
@@ -346,6 +347,19 @@ async def my_visited_list(user_id: Optional[str] = Depends(get_optional_user_id)
     if not user_id:
         return []
     return await list_visited_places(user_id)
+
+
+@trips_router.delete("/visited/{visited_id}")
+async def delete_visited_place_endpoint(
+    visited_id: str, user_id: Optional[str] = Depends(get_optional_user_id)
+):
+    """'방문한 여행지' 목록에서 하나를 삭제합니다(방문 취소)."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="삭제하려면 로그인이 필요해요.")
+    ok = await delete_visited_place(visited_id, user_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="삭제할 방문 기록을 찾지 못했어요.")
+    return {"ok": True}
 
 
 router.include_router(courses_router)
