@@ -190,6 +190,9 @@ class TripSummary(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     created_at: Optional[str] = None
+    # 이 여행에서 '방문 완료' 버튼을 누른 적이 있는지 (visited_places에
+    # 이 trip_id로 저장된 행이 하나라도 있으면 True)
+    visited: bool = False
 
 
 class SaveCourseRequest(BaseModel):
@@ -210,6 +213,11 @@ class VisitedPlace(BaseModel):
     content_id: str
     place_name: str
     visited_at: str
+
+
+class UpdateVisitedDateRequest(BaseModel):
+    """방문한 여행지의 방문 날짜 수정 요청"""
+    visited_at: str = Field(..., description="YYYY-MM-DD 형식의 날짜")
 
 
 class SavedCourseSummary(BaseModel):

@@ -14,6 +14,7 @@ from app.models.schemas import (
     TripCreateRequest,
     TripSummary,
     TripUpdateRequest,
+    UpdateVisitedDateRequest,
     VisitedPlace,
 )
 from app.services.ai_service import generate_course, generate_course_from_selection, recommend_places
@@ -35,6 +36,7 @@ from app.services.supabase_service import (
     row_to_course_response,
     save_course,
     update_trip,
+    update_visited_place_date,
 )
 from app.services.tour_api import tour_api_client
 
@@ -251,6 +253,7 @@ async def list_trips_endpoint(user_id: Optional[str] = Depends(get_optional_user
             start_date=row.get("start_date"),
             end_date=row.get("end_date"),
             created_at=row.get("created_at"),
+            visited=row.get("visited", False),
         )
         for row in rows
     ]
@@ -360,6 +363,21 @@ async def delete_visited_place_endpoint(
     if not ok:
         raise HTTPException(status_code=404, detail="삭제할 방문 기록을 찾지 못했어요.")
     return {"ok": True}
+
+
+@trips_router.patch("/visited/{visited_id}", response_model=VisitedPlace)
+async def update_visited_date_endpoint(
+    visited_id: str,
+    request: UpdateVisitedDateRequest,
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """'방문한 여행지' 목록에서 방문 날짜를 수정합니다."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="수정하려면 로그인이 필요해요.")
+    updated = await update_visited_place_date(visited_id, user_id, request.visited_at)
+    if not updated:
+        raise HTTPException(status_code=404, detail="수정할 방문 기록을 찾지 못했어요.")
+    return VisitedPlace(**updated)
 
 
 router.include_router(courses_router)

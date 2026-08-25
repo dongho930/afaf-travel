@@ -167,8 +167,20 @@ async def list_trips(user_id: str) -> list[dict]:
             if tid:
                 counts[tid] = counts.get(tid, 0) + 1
 
+        # 각 여행이 '방문 완료' 처리된 적 있는지(visited_places에 이 trip_id로
+        # 저장된 행이 하나라도 있는지)도 같이 계산해서 붙여줍니다.
+        visited_result = (
+            _client.table("visited_places")
+            .select("trip_id")
+            .eq("user_id", user_id)
+            .not_.is_("trip_id", "null")
+            .execute()
+        )
+        visited_trip_ids = {row.get("trip_id") for row in (visited_result.data or [])}
+
         for trip in trips:
             trip["course_count"] = counts.get(trip["id"], 0)
+            trip["visited"] = trip["id"] in visited_trip_ids
         return trips
     except Exception as e:
         print(f"[supabase] 여행 목록 조회 실패: {e}")
@@ -698,3 +710,22 @@ async def delete_visited_place(visited_id: str, user_id: str) -> bool:
     except Exception as e:
         print(f"[supabase] 방문한 여행지 삭제 실패: {e}")
         return False
+
+
+async def update_visited_place_date(visited_id: str, user_id: str, visited_at: str) -> Optional[dict]:
+    """'방문한 여행지' 목록에서 방문 날짜를 수정합니다. 본인 것만 수정할 수 있습니다."""
+    if _client is None:
+        return None
+    try:
+        result = (
+            _client.table("visited_places")
+            .update({"visited_at": visited_at})
+            .eq("id", visited_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        rows = result.data or []
+        return rows[0] if rows else None
+    except Exception as e:
+        print(f"[supabase] 방문 날짜 수정 실패: {e}")
+        return None
