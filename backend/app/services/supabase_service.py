@@ -604,3 +604,59 @@ async def save_overviews_batch(rows: list[dict]) -> None:
             _client.table(_OVERVIEW_TABLE).upsert(chunk).execute()
     except Exception as e:
         print(f"[supabase] 관광지 소개문 캐시 저장 실패: {e}")
+
+
+async def mark_trip_as_visited(trip_id: str, user_id: str) -> int:
+    """
+    '내 여행' 탭의 '방문 완료' 버튼용. 그 여행(trip) 안의 모든 코스에 담긴
+    관광지들을 전부 방문한 여행지로 표시합니다. 같은 장소가 여러 코스에
+    중복으로 들어있어도, visited_places의 (user_id, content_id) 유니크
+    제약 덕분에 한 번만 기록됩니다.
+
+    반환값: 이번에 방문 처리한(=이 여행에 담긴) 관광지 개수.
+    """
+    if _client is None:
+        return 0
+    try:
+        trip_row = _client.table("trips").select("user_id").eq("id", trip_id).limit(1).execute()
+        trip_rows = trip_row.data or []
+        if not trip_rows or trip_rows[0].get("user_id") != user_id:
+            return 0
+
+        courses_result = (
+            _client.table("courses").select("stops").eq("trip_id", trip_id).eq("user_id", user_id).execute()
+        )
+        places: dict[str, str] = {}  # content_id -> place_name, 중복 제거용
+        for row in courses_result.data or []:
+            for stop in row.get("stops") or []:
+                attraction = stop.get("attraction") or {}
+                content_id = attraction.get("content_id")
+                name = attraction.get("name")
+                if content_id and name:
+                    places[content_id] = name
+        if not places:
+            return 0
+
+        rows = [
+            {"user_id": user_id, "content_id": cid, "place_name": name, "trip_id": trip_id}
+            for cid, name in places.items()
+        ]
+        _client.table("visited_places").upsert(rows, on_conflict="user_id,content_id").execute()
+        return len(places)
+    except Exception as e:
+        print(f"[supabase] 여행 방문 완료 처리 실패: {e}")
+        return 0
+
+
+async def count_visited_places(user_id: str) -> int:
+    """이 사용자가 방문 완료 처리한 여행지(장소 기준 중복 없이) 총 개수."""
+    if _client is None:
+        return 0
+    try:
+        result = (
+            _client.table("visited_places").select("id", count="exact").eq("user_id", user_id).execute()
+        )
+        return result.count or 0
+    except Exception as e:
+        print(f"[supabase] 방문한 여행지 개수 조회 실패: {e}")
+        return 0

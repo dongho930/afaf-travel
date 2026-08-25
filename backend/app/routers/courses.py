@@ -19,6 +19,7 @@ from app.services.ai_service import generate_course, generate_course_from_select
 from app.services.auth import get_optional_user_id
 from app.services.supabase_service import (
     attach_course_to_trip,
+    count_visited_places,
     create_trip,
     delete_course,
     delete_trip,
@@ -27,6 +28,7 @@ from app.services.supabase_service import (
     list_saved_courses,
     list_trip_courses,
     list_trips,
+    mark_trip_as_visited,
     row_to_course_response,
     save_course,
     update_trip,
@@ -295,6 +297,18 @@ async def delete_trip_endpoint(trip_id: str, user_id: Optional[str] = Depends(ge
     return {"ok": True}
 
 
+@trips_router.post("/{trip_id}/visit")
+async def mark_trip_visited_endpoint(trip_id: str, user_id: Optional[str] = Depends(get_optional_user_id)):
+    """'방문 완료' 버튼 — 이 여행 안의 모든 코스에 담긴 관광지들을 방문한 여행지로 표시합니다."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="방문 완료로 표시하려면 로그인이 필요해요.")
+
+    count = await mark_trip_as_visited(trip_id, user_id)
+    if count == 0:
+        raise HTTPException(status_code=404, detail="이 여행에 담긴 관광지를 찾지 못했어요.")
+    return {"visited_count": count}
+
+
 @trips_router.get("/{trip_id}/courses", response_model=list[SavedCourseSummary])
 async def list_trip_courses_endpoint(
     trip_id: str, user_id: Optional[str] = Depends(get_optional_user_id)
@@ -314,6 +328,14 @@ async def list_trip_courses_endpoint(
         )
         for row in rows
     ]
+
+
+@trips_router.get("/visited/me/count")
+async def my_visited_count(user_id: Optional[str] = Depends(get_optional_user_id)):
+    """로그인한 사용자가 방문 완료로 표시한 여행지 개수. 비로그인이면 0."""
+    if not user_id:
+        return {"count": 0}
+    return {"count": await count_visited_places(user_id)}
 
 
 router.include_router(courses_router)
