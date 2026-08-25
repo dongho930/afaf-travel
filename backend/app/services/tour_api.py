@@ -35,6 +35,7 @@ from app.services.sigungu_codes import (
     signgu_name,
 )
 from app.services.supabase_service import (
+    get_cached_accessibility_stats,
     get_cached_attraction_basic,
     get_cached_congestion_rates,
     get_cached_congestion_signgu_cds,
@@ -845,6 +846,24 @@ class TourApiClient:
             # 특정 카테고리 조회가 실패해도 다른 카테고리 결과는 살립니다.
             return []
 
+    async def _accessibility_fallback_candidates(self, category_key: str) -> list[Attraction]:
+        """
+        실시간 표본에 원하는 접근성 유형이 하나도 안 걸렸을 때 쓰는 안전망입니다.
+        접근성 탭(get_accessibility_summary)이 이미 경기도 전체를 훑어서
+        accessibility_stats 캐시에 저장해둔 카테고리별 '주요 여행지' 목록에서
+        진짜 대상지를 가져옵니다. 각 항목은 content_id만 있어서, get_attraction_detail로
+        상세를 채웁니다(캐시 우선이라 대부분 API 호출 없이 빠르게 끝납니다).
+        """
+        stats = await get_cached_accessibility_stats("경기도")
+        if not stats:
+            return []
+        places = stats.get(category_key) or []
+        content_ids = [p.get("content_id") for p in places if p.get("content_id")]
+        if not content_ids:
+            return []
+        attractions = await asyncio.gather(*(self.get_attraction_detail(cid) for cid in content_ids))
+        return [a for a in attractions if a is not None]
+
     async def search_accessible_attractions(
         self,
         region: str,
@@ -997,24 +1016,54 @@ class TourApiClient:
 
         attractions.sort(key=popularity_sort_key)
 
-        results = attractions
         # 접근성 탭(get_accessibility_summary)의 카테고리별 판단 기준과 정확히
         # 동일하게 맞춥니다 — '접근성 탭에서 우수한 곳'과 'AI 코스 생성 1단계
-        # 후보'가 서로 다른 기준으로 갈리지 않도록 하기 위함입니다. 필터링 결과가
-        # 0건이면(그 지역/조건에 딱 맞는 곳이 아직 캐시에 없을 수 있어서) 안전하게
-        # 원래 목록 전체로 되돌립니다.
-        if user_type == "wheelchair":
-            results = [a for a in results if a.accessibility.wheelchair_accessibility_count > 0] or attractions
-        elif user_type == "stroller":
-            results = [a for a in results if a.accessibility.family_accessibility_count > 0] or attractions
-        elif user_type == "senior":
-            results = [a for a in results if a.accessibility.has_rest_area] or attractions
-        elif user_type == "pregnant":
-            results = [a for a in results if a.accessibility.pregnant_accessibility_count > 0] or attractions
-        elif user_type == "visual":
-            results = [a for a in results if a.accessibility.has_visual_accessibility] or attractions
-        elif user_type == "hearing":
-            results = [a for a in results if a.accessibility.has_hearing_accessibility] or attractions
+        # 후보'가 서로 다른 기준으로 갈리지 않도록 하기 위함입니다.
+        #
+        # 이번에 뽑은 표본(카테고리당 6개 안팎, 총 30개 정도)엔 필터링 결과가
+        # 0건 나올 수 있습니다 — 예를 들어 청각장애 편의시설이 있는 곳은 경기도
+        # 전체에 몇 곳 안 돼서, 이 작은 표본에 우연히 하나도 안 걸릴 확률이
+        # 훨씬 높습니다. 이때 예전엔 필터링을 무시하고 전체 목록으로 되돌렸는데,
+        # 그러면 AI에게 '청각장애 편의시설이 없는' 곳들을 후보로 넘기게 되고,
+        # AI가 (정확하게) 그중 아무것도 안 골라서 최종 결과가 0개가 되는
+        # 문제가 있었습니다. 그래서 표본에서 못 찾으면, 접근성 탭이 이미 전체
+        # 지역을 훑어서 캐시해둔 '주요 여행지' 목록에서 진짜 대상지를 가져옵니다.
+        category_key_by_user_type: dict[str, str] = {
+            "wheelchair": "top_wheelchair_places",
+            "stroller": "top_family_places",
+            "senior": "top_senior_places",
+            "pregnant": "top_pregnant_places",
+            "visual": "top_visual_places",
+            "hearing": "top_hearing_places",
+        }
+
+        def by_feature(a: Attraction) -> bool:
+            if user_type == "wheelchair":
+                return a.accessibility.wheelchair_accessibility_count > 0
+            if user_type == "stroller":
+                return a.accessibility.family_accessibility_count > 0
+            if user_type == "senior":
+                return a.accessibility.has_rest_area
+            if user_type == "pregnant":
+                return a.accessibility.pregnant_accessibility_count > 0
+            if user_type == "visual":
+                return a.accessibility.has_visual_accessibility
+            if user_type == "hearing":
+                return a.accessibility.has_hearing_accessibility
+            return True
+
+        if user_type in category_key_by_user_type:
+            results = [a for a in attractions if by_feature(a)]
+            if not results:
+                results = await self._accessibility_fallback_candidates(
+                    category_key_by_user_type[user_type]
+                )
+            if not results:
+                # 캐시에도 진짜 하나도 없으면(데이터 자체가 아직 없는 극단적
+                # 경우) 그래도 빈 화면보다는 원래 표본이라도 보여줍니다.
+                results = attractions
+        else:
+            results = attractions
         results = results[:limit]
 
         # 소개문은 API 호출 비용이 있어서, 최종적으로 화면에 노출되는 목록에
