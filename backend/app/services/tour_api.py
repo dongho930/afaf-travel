@@ -980,18 +980,36 @@ class TourApiClient:
         # 미리 채워둔 DB 캐시만 읽으니, 이 단계는 별도 API 호출이 없습니다(빠름).
         # 정렬에는 더 이상 쓰지 않고(아래 popularity_sort_key는 평점만 봄), 화면에
         # 숫자를 보여주기 위한 용도로만 남겨둡니다.
+        #
+        # 이 아래(혼잡도/평점 조회)는 원래 "DB 조회라 항상 빠르다"고 가정하고
+        # 타임아웃 없이 기다렸는데, 실제로 Supabase 쪽이 느려지거나 응답이
+        # 없어지는 상황에서 요청 전체가 무한정 멈춰버리는 문제가 있었습니다.
+        # 위 편의시설 조회와 동일하게 각각 짧은 시간 제한을 두고, 시간 안에
+        # 못 끝나면 그 정보 없이(카드에 혼잡도/평점만 비어있는 채로) 넘어갑니다.
         signgu_by_content_id: dict[str, int] = {}
         for a in attractions:
             area_signgu = find_area_signgu(a.address)
             if area_signgu:
                 signgu_by_content_id[a.content_id] = area_signgu[1]
         distinct_signgu = sorted(set(signgu_by_content_id.values()))
-        congestion_rows = (
-            await get_cached_congestion_rates(distinct_signgu) if distinct_signgu else {}
-        )
+        try:
+            congestion_rows = (
+                await asyncio.wait_for(get_cached_congestion_rates(distinct_signgu), timeout=5.0)
+                if distinct_signgu
+                else {}
+            )
+        except asyncio.TimeoutError:
+            logger.warning("search_accessible_attractions: 혼잡도 캐시 조회가 5초 안에 끝나지 않아 건너뜁니다.")
+            congestion_rows = {}
 
         # 방문자 리뷰 평균 평점 (외부 API 없이 우리 DB 조회라 부담 없음)
-        rating_rows = await get_average_ratings([a.content_id for a in attractions if a.content_id])
+        try:
+            rating_rows = await asyncio.wait_for(
+                get_average_ratings([a.content_id for a in attractions if a.content_id]), timeout=5.0
+            )
+        except asyncio.TimeoutError:
+            logger.warning("search_accessible_attractions: 평점 조회가 5초 안에 끝나지 않아 건너뜁니다.")
+            rating_rows = {}
 
         # congestion_rate(카드 표시용)와 avg_rating(정렬 기준), 카드에 바로 표시할
         # accessibility_benefits를 이 시점에 각 Attraction에 채워둡니다.

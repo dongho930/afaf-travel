@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Query
 
 from app.models.schemas import AccessibilitySummary, Attraction, NearbyAttraction, RegionOption, UserType
@@ -49,9 +51,19 @@ async def list_attractions(
     ),
 ):
     """무장애 필터링이 적용된 관광지 목록"""
-    return await tour_api_client.search_accessible_attractions(
-        region, user_type.value, limit, sigungu_cd, include_overview
-    )
+    # search_accessible_attractions 내부에 각 단계별(편의시설/혼잡도/평점) 타임아웃이
+    # 있지만, 혹시 모를 다른 지점에서 멈추더라도 화면이 무한 로딩에 빠지지 않도록
+    # 전체 요청에도 상한선을 둡니다. 시간 안에 못 끝나면 빈 목록보다는 명확한
+    # 에러를 주는 게 낫습니다 — 앱에서 "잠시 후 다시 시도해주세요"로 안내할 수 있게.
+    try:
+        return await asyncio.wait_for(
+            tour_api_client.search_accessible_attractions(
+                region, user_type.value, limit, sigungu_cd, include_overview
+            ),
+            timeout=25.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="관광지 목록을 불러오는 데 시간이 너무 오래 걸렸어요. 잠시 후 다시 시도해주세요.")
 
 
 @router.get("/attractions/overviews")
