@@ -23,6 +23,8 @@ user_id가 함께 오면(로그인한 사용자) 그 코스를 해당 사용자 
 """
 from typing import Optional
 
+import datetime
+
 from app.config import get_settings
 from app.models.schemas import CourseResponse, CourseStop
 
@@ -807,3 +809,54 @@ async def update_visited_place_date(visited_id: str, user_id: str, visited_at: s
     except Exception as e:
         print(f"[supabase] 방문 날짜 수정 실패: {e}")
         return None
+
+
+async def get_cached_attraction_list(
+    ldong_regn_cd: str, content_type_id: int, max_age_hours: float = 24.0
+) -> Optional[list[dict]]:
+    """
+    areaBasedList2(관광지 목록) 캐시를 조회합니다. max_age_hours보다 오래됐거나
+    캐시가 아예 없으면 None을 반환해서(=live 재조회 필요), 갱신 로직이 자연스럽게
+    이어지게 합니다.
+    """
+    if _client is None:
+        return None
+    try:
+        result = (
+            _client.table("attraction_list_cache")
+            .select("*")
+            .eq("ldong_regn_cd", ldong_regn_cd)
+            .eq("content_type_id", content_type_id)
+            .limit(1)
+            .execute()
+        )
+        rows = result.data or []
+        if not rows:
+            return None
+        row = rows[0]
+        fetched_at = datetime.datetime.fromisoformat(row["fetched_at"].replace("Z", "+00:00"))
+        age_hours = (datetime.datetime.now(datetime.timezone.utc) - fetched_at).total_seconds() / 3600
+        if age_hours > max_age_hours:
+            return None
+        return row.get("items") or []
+    except Exception as e:
+        print(f"[supabase] 관광지 목록 캐시 조회 실패: {e}")
+        return None
+
+
+async def save_attraction_list_cache(ldong_regn_cd: str, content_type_id: int, items: list[dict]) -> None:
+    """areaBasedList2로 새로 조회한 관광지 목록을 캐시에 upsert합니다."""
+    if _client is None:
+        return
+    try:
+        _client.table("attraction_list_cache").upsert(
+            {
+                "ldong_regn_cd": ldong_regn_cd,
+                "content_type_id": content_type_id,
+                "items": items,
+                "fetched_at": datetime.datetime.utcnow().isoformat(),
+            },
+            on_conflict="ldong_regn_cd,content_type_id",
+        ).execute()
+    except Exception as e:
+        print(f"[supabase] 관광지 목록 캐시 저장 실패: {e}")

@@ -37,11 +37,13 @@ from app.services.sigungu_codes import (
 from app.services.supabase_service import (
     get_cached_accessibility_stats,
     get_cached_attraction_basic,
+    get_cached_attraction_list,
     get_cached_congestion_rates,
     get_cached_congestion_signgu_cds,
     get_cached_overviews,
     get_cached_place_accessibility,
     save_attraction_basic,
+    save_attraction_list_cache,
     save_congestion_rates_batch,
     save_overviews_batch,
     save_place_accessibility_batch,
@@ -828,11 +830,25 @@ class TourApiClient:
         content_type_id: int,
         num_of_rows: int,
     ) -> list[Attraction]:
+        # areaBasedList2(관광지 목록) 자체를 캐싱합니다 — 지금까지 이 조회에
+        # 캐시가 없어서, 화면을 열 때마다(카테고리 5개 기준) 매번 새로 호출하다가
+        # 하루 API 호출 한도를 순식간에 다 써버리는 문제가 있었습니다. 관광지
+        # 목록 자체는 자주 안 바뀌므로 하루 단위로 넉넉하게 캐싱하고, 캐시가
+        # 없을 때만 실제로 API를 부릅니다.
+        cached_items = await get_cached_attraction_list(ldong_regn_cd, content_type_id)
+        if cached_items is not None:
+            attractions = [self._attraction_from_cache_dict(d) for d in cached_items]
+            return attractions[:num_of_rows]
+
         try:
+            # 캐시가 없을 때는 이번에 요청받은 개수만 받아오지 않고, 한 번에
+            # 넉넉히(최소 100개) 받아서 캐싱해둡니다 — 그래야 다음 요청(다른
+            # limit)이 와도 API를 또 안 부르고 캐시에서 바로 잘라 쓸 수 있습니다.
+            fetch_rows = max(100, num_of_rows)
             params = {
                 "lDongRegnCd": ldong_regn_cd,
                 "contentTypeId": content_type_id,
-                "numOfRows": num_of_rows,
+                "numOfRows": fetch_rows,
                 "pageNo": 1,
             }
             resp = await client.get(
@@ -841,7 +857,12 @@ class TourApiClient:
             )
             resp.raise_for_status()
             raw_items = self._extract_items(resp.json())
-            return [self._map_item_to_attraction(item, content_type_id) for item in raw_items]
+            attractions = [self._map_item_to_attraction(item, content_type_id) for item in raw_items]
+
+            await save_attraction_list_cache(
+                ldong_regn_cd, content_type_id, [self._attraction_to_cache_dict(a) for a in attractions]
+            )
+            return attractions[:num_of_rows]
         except Exception as exc:
             # 특정 카테고리 조회가 실패해도 다른 카테고리 결과는 살립니다 — 다만
             # 예전엔 원인을 그냥 삼켜버려서, 5개 카테고리가 전부 실패해 목록이
@@ -855,6 +876,32 @@ class TourApiClient:
                 exc,
             )
             return []
+
+    @staticmethod
+    def _attraction_to_cache_dict(a: Attraction) -> dict:
+        """캐시 저장용 최소 필드만 뽑습니다 (편의시설 등 나머지는 별도 캐시에서 채워짐)."""
+        return {
+            "content_id": a.content_id,
+            "name": a.name,
+            "address": a.address,
+            "latitude": a.latitude,
+            "longitude": a.longitude,
+            "category": a.category,
+            "image_url": a.image_url,
+        }
+
+    @staticmethod
+    def _attraction_from_cache_dict(d: dict) -> Attraction:
+        return Attraction(
+            content_id=d.get("content_id", ""),
+            name=d.get("name", ""),
+            address=d.get("address", ""),
+            latitude=d.get("latitude") or 0,
+            longitude=d.get("longitude") or 0,
+            category=d.get("category", ""),
+            image_url=d.get("image_url"),
+            accessibility=AccessibilityFeatures(),
+        )
 
     async def _accessibility_fallback_candidates(self, category_key: str) -> list[Attraction]:
         """
