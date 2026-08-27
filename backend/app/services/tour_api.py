@@ -842,8 +842,18 @@ class TourApiClient:
             resp.raise_for_status()
             raw_items = self._extract_items(resp.json())
             return [self._map_item_to_attraction(item, content_type_id) for item in raw_items]
-        except Exception:
-            # 특정 카테고리 조회가 실패해도 다른 카테고리 결과는 살립니다.
+        except Exception as exc:
+            # 특정 카테고리 조회가 실패해도 다른 카테고리 결과는 살립니다 — 다만
+            # 예전엔 원인을 그냥 삼켜버려서, 5개 카테고리가 전부 실패해 목록이
+            # 통째로 비어도 로그에 아무 단서가 안 남는 문제가 있었습니다. 이제
+            # 어떤 에러였는지(타임아웃/401/파싱 실패 등) 남겨서 Render 로그에서
+            # 바로 원인을 확인할 수 있게 합니다.
+            logger.warning(
+                "areaBasedList2 조회 실패 (contentTypeId=%s): %s: %s",
+                content_type_id,
+                type(exc).__name__,
+                exc,
+            )
             return []
 
     async def _accessibility_fallback_candidates(self, category_key: str) -> list[Attraction]:
