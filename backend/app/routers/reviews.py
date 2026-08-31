@@ -23,6 +23,7 @@ class ReviewItem(BaseModel):
     avatar_url: Optional[str] = None
     rating: int
     body: str
+    photo_urls: list[str] = []
     created_at: str
 
 
@@ -32,12 +33,16 @@ class MyReviewItem(BaseModel):
     place_name: str
     rating: int
     body: str
+    photo_urls: list[str] = []
     created_at: str
 
 
 class CreateReviewRequest(BaseModel):
     rating: int = Field(ge=1, le=5)
     body: str
+    # 프로필 사진과 같은 방식: 앱이 이미지를 base64로 인코딩해서 보냅니다.
+    # 최대 5장까지만 반영됩니다(review_service._MAX_PHOTOS).
+    photos: list[str] = []
 
 
 @router.get("/me/count")
@@ -68,6 +73,7 @@ async def my_reviews(user_id: Optional[str] = Depends(get_optional_user_id)):
                 place_name=attraction.name if attraction else "알 수 없는 장소",
                 rating=r["rating"],
                 body=r["body"],
+                photo_urls=r.get("photo_urls") or [],
                 created_at=r["created_at"],
             )
         )
@@ -93,7 +99,9 @@ async def submit_review(
     if not user_id:
         raise HTTPException(status_code=401, detail="리뷰를 쓰려면 로그인이 필요해요.")
 
-    ok, result = await create_review(user_id, content_id, request.rating, request.body)
+    ok, result = await create_review(
+        user_id, content_id, request.rating, request.body, request.photos
+    )
     if not ok:
         raise HTTPException(status_code=400, detail=result)
     return result

@@ -1,12 +1,18 @@
 """
-관광지 방문자 리뷰(별점 + 한줄평) 작성/조회.
+관광지 방문자 리뷰(별점 + 한줄평 + 사진) 작성/조회.
 
-place_reviews 테이블에 (content_id, user_id, rating, body)를 저장합니다.
-작성자 이름은 리뷰 테이블에 중복 저장하지 않고, 조회 시 profiles 테이블에서
-user_id로 username을 찾아 붙여줍니다 (Supabase PostgREST 조인 대신 두 번
-조회해서 파이썬에서 합치는 방식 — profiles와의 FK 관계 설정 여부에 의존하지
-않아서 더 안전합니다).
+place_reviews 테이블에 (content_id, user_id, rating, body, photo_urls)를
+저장합니다. 작성자 이름은 리뷰 테이블에 중복 저장하지 않고, 조회 시 profiles
+테이블에서 user_id로 username을 찾아 붙여줍니다 (Supabase PostgREST 조인 대신
+두 번 조회해서 파이썬에서 합치는 방식 — profiles와의 FK 관계 설정 여부에
+의존하지 않아서 더 안전합니다).
+
+리뷰 사진은 프로필 사진 업로드와 같은 방식입니다: 앱이 base64로 인코딩해서
+보내면, 이 서비스가 서비스 키(관리자 권한)로 Supabase Storage(review-photos
+버킷)에 대신 업로드하고, 공개 URL 목록을 photo_urls(jsonb 배열)에 저장합니다.
 """
+import base64
+import time
 from typing import Optional
 
 from app.config import get_settings
@@ -20,14 +26,61 @@ if settings.supabase_url and settings.supabase_service_key:
     _client = create_client(settings.supabase_url, settings.supabase_service_key)
 
 _REVIEWS_TABLE = "place_reviews"
+_PHOTOS_BUCKET = "review-photos"
+_MAX_PHOTOS = 5
+
+
+async def _process_review_photos(
+    user_id: str, content_id: str, photos: list[str]
+) -> list[str]:
+    """
+    리뷰 사진 목록을 처리해서 최종 공개 URL 목록을 반환합니다.
+    각 항목은 둘 중 하나입니다:
+    - 이미 업로드된 기존 사진의 URL(http로 시작) — 리뷰 수정 시 그대로 유지되는 사진, 재업로드하지 않습니다.
+    - 새로 추가하는 사진의 base64 데이터 — review-photos 버킷에 새로 업로드합니다.
+    개별 사진 업로드가 실패해도 나머지는 계속 시도하고, 실패한 사진은 결과에서 빠집니다.
+    """
+    if _client is None or not photos:
+        return []
+
+    urls: list[str] = []
+    timestamp = int(time.time())
+    for idx, photo in enumerate(photos[:_MAX_PHOTOS]):
+        if photo.startswith("http"):
+            urls.append(photo)
+            continue
+        try:
+            # data URL 접두어("data:image/jpeg;base64,...")가 붙어 있으면 떼어냅니다.
+            raw = photo.split(",", 1)[1] if photo.startswith("data:") else photo
+            file_bytes = base64.b64decode(raw)
+            path = f"{user_id}/{content_id}/{timestamp}_{idx}.jpg"
+            _client.storage.from_(_PHOTOS_BUCKET).upload(
+                path, file_bytes, {"content-type": "image/jpeg", "upsert": "true"}
+            )
+            public_url_result = _client.storage.from_(_PHOTOS_BUCKET).get_public_url(path)
+            public_url = (
+                public_url_result
+                if isinstance(public_url_result, str)
+                else public_url_result.get("publicUrl", "")
+            )
+            if public_url:
+                urls.append(public_url)
+        except Exception as e:
+            print(f"[review] 리뷰 사진 업로드 실패({idx}): {e}")
+    return urls
 
 
 async def create_review(
-    user_id: str, content_id: str, rating: int, body: str
+    user_id: str,
+    content_id: str,
+    rating: int,
+    body: str,
+    photos: Optional[list[str]] = None,
 ) -> tuple[bool, Optional[dict] | str]:
     """
     리뷰를 작성합니다. 사용자당 한 장소에 리뷰 하나만 허용합니다 — 이미 쓴 리뷰가
-    있으면 새로 만들지 않고 그 내용을 덮어씁니다(수정).
+    있으면 새로 만들지 않고 그 내용을 덮어씁니다(수정, 사진도 이번에 보낸 목록으로 교체).
+    photos의 각 항목은 새로 추가하는 사진(base64)이거나 유지할 기존 사진(URL)입니다.
     성공 시 (True, 저장된 행), 실패 시 (False, 사용자에게 보여줄 메시지)를 반환합니다.
     """
     if _client is None:
@@ -37,6 +90,8 @@ async def create_review(
     if not body.strip():
         return False, "리뷰 내용을 입력해주세요."
     try:
+        photo_urls = await _process_review_photos(user_id, content_id, photos or [])
+
         existing = (
             _client.table(_REVIEWS_TABLE)
             .select("id")
@@ -51,6 +106,7 @@ async def create_review(
             "user_id": user_id,
             "rating": rating,
             "body": body.strip(),
+            "photo_urls": photo_urls,
         }
         if rows:
             result = (
