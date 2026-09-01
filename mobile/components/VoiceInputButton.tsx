@@ -1,5 +1,6 @@
 import React from "react";
-import { Alert, Pressable, StyleSheet, Text } from "react-native";
+import { Pressable, StyleSheet, Text } from "react-native";
+import { Alert } from "../services/crossPlatformAlert";
 import {
   ExpoSpeechRecognitionModule,
   useSpeechRecognitionEvent,

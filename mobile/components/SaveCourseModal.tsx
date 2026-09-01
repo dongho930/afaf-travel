@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   Pressable,
@@ -11,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Alert } from "../services/crossPlatformAlert";
 import { api } from "../services/api";
 import { useTheme } from "../services/ThemeContext";
 import { ThemeColors } from "../constants/theme";

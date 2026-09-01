@@ -4,7 +4,6 @@ import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Pressable,
   StyleSheet,
@@ -13,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Alert } from "../services/crossPlatformAlert";
 import { api } from "../services/api";
 import { useAuth } from "../services/AuthContext";
 import { useTheme } from "../services/ThemeContext";

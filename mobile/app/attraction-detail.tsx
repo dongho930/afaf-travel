@@ -5,7 +5,6 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Linking,
   Modal,
@@ -17,6 +16,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Alert } from "../services/crossPlatformAlert";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AccessibilityIcons } from "../components/AccessibilityIcons";
 import { SaveCourseModal, SaveCourseParams } from "../components/SaveCourseModal";

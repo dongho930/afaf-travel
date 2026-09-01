@@ -2,7 +2,6 @@ import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Image,
   Pressable,
@@ -10,6 +9,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { Alert } from "../services/crossPlatformAlert";
 
 import { AccessibilityIcons } from "../components/AccessibilityIcons";
 import { ThemeColors } from "../constants/theme";

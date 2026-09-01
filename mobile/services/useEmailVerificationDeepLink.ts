@@ -1,7 +1,7 @@
 import * as Linking from "expo-linking";
 import { useEffect, useRef } from "react";
 import { useRouter } from "expo-router";
-import { Alert } from "react-native";
+import { Alert } from "./crossPlatformAlert";
 import { supabase } from "./supabaseClient";
 
 /**

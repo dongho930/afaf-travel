@@ -1,6 +1,7 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert } from "../services/crossPlatformAlert";
 import { ThemeColors } from "../constants/theme";
 import { useAuth } from "../services/AuthContext";
 import { useTheme } from "../services/ThemeContext";

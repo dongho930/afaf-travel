@@ -2,7 +2,6 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   StyleSheet,
@@ -11,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Alert } from "../services/crossPlatformAlert";
 import { api } from "../services/api";
 import { useCourseContext } from "../services/CourseContext";
 import { useTheme } from "../services/ThemeContext";
