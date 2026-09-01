@@ -224,6 +224,19 @@ export default function AttractionDetailScreen() {
     if (!attraction) return;
     setFindingRoute(mode);
     try {
+      setDirectionsModalVisible(false);
+
+      if (Platform.OS === "web") {
+        // 웹(PC)에서는 브라우저 위치 정확도가 낮아서(GPS 없이 Wi-Fi/IP 기반
+        // 추정이라 실제 위치와 꽤 차이날 수 있음) 자동으로 내 위치를 출발지로
+        // 잡지 않습니다. 대신 도착지만 채운 카카오맵 페이지를 열어서,
+        // 출발지와 이동수단은 사용자가 그 페이지에서 직접 입력하게 합니다.
+        const to = `${encodeURIComponent(attraction.name)},${attraction.latitude},${attraction.longitude}`;
+        const webUrl = `https://map.kakao.com/link/to/${to}`;
+        await Linking.openURL(webUrl);
+        return;
+      }
+
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") {
         Alert.alert("위치 권한이 필요해요", "내 위치에서 길을 찾으려면 위치 권한을 허용해주세요.");
@@ -232,27 +245,6 @@ export default function AttractionDetailScreen() {
       const position = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.BestForNavigation,
       });
-
-      setDirectionsModalVisible(false);
-
-      if (Platform.OS === "web") {
-        // 웹(PC 브라우저)에서는 kakaomap:// 앱 스킴을 열 수 없어서(빈 화면만
-        // 뜨고 아무 반응 없음), PC/모바일웹 카카오맵으로 자동 연결되는 공식
-        // 웹 길찾기 URL을 대신 씁니다. 이동수단 값 표기가 앱 스킴과 달라서
-        // 매핑해줍니다.
-        const webModeMap: Record<TravelMode, string> = {
-          car: "car",
-          publictransit: "traffic",
-          foot: "walk",
-          bicycle: "bicycle",
-        };
-        const from = `내위치,${position.coords.latitude},${position.coords.longitude}`;
-        const to = `${encodeURIComponent(attraction.name)},${attraction.latitude},${attraction.longitude}`;
-        const webUrl = `https://map.kakao.com/link/by/${webModeMap[mode]}/${from}/${to}`;
-        await Linking.openURL(webUrl);
-        return;
-      }
-
       const sp = `${position.coords.latitude},${position.coords.longitude}`;
       const ep = `${attraction.latitude},${attraction.longitude}`;
 
