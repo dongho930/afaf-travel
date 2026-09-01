@@ -8,6 +8,7 @@ import {
   Image,
   Linking,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -229,6 +230,27 @@ export default function AttractionDetailScreen() {
         return;
       }
       const position = await Location.getCurrentPositionAsync({});
+
+      setDirectionsModalVisible(false);
+
+      if (Platform.OS === "web") {
+        // 웹(PC 브라우저)에서는 kakaomap:// 앱 스킴을 열 수 없어서(빈 화면만
+        // 뜨고 아무 반응 없음), PC/모바일웹 카카오맵으로 자동 연결되는 공식
+        // 웹 길찾기 URL을 대신 씁니다. 이동수단 값 표기가 앱 스킴과 달라서
+        // 매핑해줍니다.
+        const webModeMap: Record<TravelMode, string> = {
+          car: "car",
+          publictransit: "traffic",
+          foot: "walk",
+          bicycle: "bicycle",
+        };
+        const from = `내위치,${position.coords.latitude},${position.coords.longitude}`;
+        const to = `${encodeURIComponent(attraction.name)},${attraction.latitude},${attraction.longitude}`;
+        const webUrl = `https://map.kakao.com/link/by/${webModeMap[mode]}/${from}/${to}`;
+        await Linking.openURL(webUrl);
+        return;
+      }
+
       const sp = `${position.coords.latitude},${position.coords.longitude}`;
       const ep = `${attraction.latitude},${attraction.longitude}`;
 
@@ -240,7 +262,6 @@ export default function AttractionDetailScreen() {
         ? appUrl
         : `https://m.map.kakao.com/scheme/route?sp=${sp}&ep=${ep}&by=${mode}`;
 
-      setDirectionsModalVisible(false);
       await Linking.openURL(url);
     } catch (err) {
       Alert.alert("길찾기 실패", "현재 위치를 가져오지 못했어요. 잠시 후 다시 시도해주세요.\n" + String(err));
