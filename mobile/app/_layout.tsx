@@ -46,7 +46,6 @@ function ThemedApp() {
               }}
             >
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen name="+not-found" options={{ headerShown: false }} />
               <Stack.Screen name="select" options={{ title: "장소 선택하기" }} />
               <Stack.Screen name="results" options={{ title: "추천 코스" }} />
               <Stack.Screen name="map" options={{ title: "지도로 보기" }} />
