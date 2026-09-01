@@ -413,8 +413,10 @@ function makeStyles(colors: ThemeColors) {
     marginHorizontal: 16,
   },
   navButtonText: { color: colors.onPrimary, fontWeight: "700", fontSize: 15 },
-  modalBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
+  modalBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end", alignItems: "center" },
   modalSheet: {
+    width: "100%",
+    maxWidth: 640, // 웹에서 넓은 화면일 때 앱 폭(WebFrame)에 맞춰 시트도 가운데 정렬되게
     backgroundColor: colors.surfaceAlt,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,

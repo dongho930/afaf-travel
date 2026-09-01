@@ -557,8 +557,10 @@ function makeStyles(colors: ThemeColors) {
   },
   directionsButtonText: { fontSize: 15, fontWeight: "700", color: colors.primary },
 
-  modalBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
+  modalBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end", alignItems: "center" },
   modalSheet: {
+    width: "100%",
+    maxWidth: 640, // 웹에서 넓은 화면일 때 앱 폭(WebFrame)에 맞춰 시트도 가운데 정렬되게
     backgroundColor: colors.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,

@@ -136,8 +136,10 @@ export function DateRangePickerModal({ visible, initialStartDate, initialEndDate
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
+  backdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end", alignItems: "center" },
   sheet: {
+    width: "100%",
+    maxWidth: 640, // 웹에서 넓은 화면일 때 앱 폭(WebFrame)에 맞춰 시트도 가운데 정렬되게
     backgroundColor: colors.surfaceAlt,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
