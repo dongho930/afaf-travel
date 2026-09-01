@@ -264,6 +264,19 @@ export default function AttractionDetailScreen() {
     }
   };
 
+  const handleOpenDirections = async () => {
+    if (!attraction) return;
+    if (Platform.OS === "web") {
+      // 웹에서는 이동수단 선택 팝업을 거치지 않고, 바로 도착지만 채운
+      // 카카오맵 페이지를 엽니다 (이동수단을 골라도 결과가 다 같아서 팝업이
+      // 불필요합니다. 출발지/이동수단은 그 페이지에서 직접 고르면 됩니다).
+      const to = `${encodeURIComponent(attraction.name)},${attraction.latitude},${attraction.longitude}`;
+      await Linking.openURL(`https://map.kakao.com/link/to/${to}`);
+      return;
+    }
+    setDirectionsModalVisible(true);
+  };
+
   const handleSelectTransitBooking = async (option: (typeof TRANSIT_BOOKING_OPTIONS)[number]) => {
     setTransitModalVisible(false);
     try {
@@ -321,7 +334,7 @@ export default function AttractionDetailScreen() {
       <Text style={styles.address}>📍 {attraction.address}</Text>
 
       <View style={styles.actionButtonRow}>
-        <Pressable style={styles.directionsButton} onPress={() => setDirectionsModalVisible(true)}>
+        <Pressable style={styles.directionsButton} onPress={handleOpenDirections}>
           <Text style={styles.directionsButtonText}>🗺️ 길찾기</Text>
         </Pressable>
         <Pressable style={styles.directionsButton} onPress={() => setTransitModalVisible(true)}>
