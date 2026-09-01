@@ -1,18 +1,25 @@
 import Constants from "expo-constants";
 import { supabase } from "./supabaseClient";
 import {
+  AccessibilityReport,
   AccessibilitySummary,
   Attraction,
+  AttractionSearchResult,
   CourseCategory,
   CourseResponse,
+  MyReportItem,
+  MyReviewItem,
+  NearbyAttraction,
   PlaceCandidate,
   RegionOption,
+  ReportCategory,
   Review,
   SavedCourseDetail,
   SavedCourseSummary,
   TripSummary,
   UserProfile,
   UserType,
+  VisitedPlace,
 } from "../types";
 
 const API_BASE_URL: string =
@@ -175,11 +182,21 @@ export const api = {
   deleteCourse: (courseId: string) =>
     request<{ ok: boolean }>(`/api/courses/${courseId}`, { method: "DELETE" }),
 
+  // 코스 제목 수정 및/또는 관광지 순서 변경 (stopOrder: 새 순서대로 나열한 content_id 목록)
+  updateCourse: (courseId: string, params: { title?: string; stopOrder?: string[] }) =>
+    request<CourseResponse>(`/api/courses/${courseId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title: params.title, stop_order: params.stopOrder }),
+    }),
+
   // 저장된 코스 하나를 다시 불러오기 (지도/결과 화면 재진입용)
   getSavedCourse: (courseId: string) => request<SavedCourseDetail>(`/api/courses/saved/${courseId}`),
 
   // 내 여행 목록 (마이페이지)
   listTrips: () => request<TripSummary[]>("/api/trips"),
+
+  // 저장된 코스 전체 (여행 구분 없이, 내 여행 탭 '저장한 경로' 카드용)
+  getSavedCourses: () => request<SavedCourseSummary[]>("/api/courses/saved"),
 
   // 새 여행을 미리 만들어두기 (보통은 저장 시 한 번에 만들지만 필요하면 따로도 가능)
   createTrip: (name: string, category: CourseCategory, startDate?: string | null, endDate?: string | null) =>
@@ -206,6 +223,31 @@ export const api = {
   // 여행 삭제 (그 안의 저장된 코스도 함께 삭제됨)
   deleteTrip: (tripId: string) => request<{ ok: boolean }>(`/api/trips/${tripId}`, { method: "DELETE" }),
 
+  // '방문 완료' — 그 여행 안의 모든 관광지를 방문한 여행지로 표시
+  markTripVisited: (tripId: string) =>
+    request<{ visited_count: number }>(`/api/trips/${tripId}/visit`, { method: "POST" }),
+
+  // '방문 완료' 취소 — 그 여행 기준으로 방문 처리됐던 기록을 지움
+  unmarkTripVisited: (tripId: string) =>
+    request<{ unvisited_count: number }>(`/api/trips/${tripId}/visit`, { method: "DELETE" }),
+
+  // 내가 방문 완료로 표시한 여행지 총 개수
+  getMyVisitedCount: () => request<{ count: number }>("/api/trips/visited/me/count"),
+
+  // 내가 방문 완료로 표시한 여행지 전체 목록
+  getMyVisitedPlaces: () => request<VisitedPlace[]>("/api/trips/visited/me/list"),
+
+  // 방문한 여행지 삭제(방문 취소)
+  deleteVisitedPlace: (visitedId: string) =>
+    request<{ ok: boolean }>(`/api/trips/visited/${visitedId}`, { method: "DELETE" }),
+
+  // 방문한 여행지의 방문 날짜 수정 (YYYY-MM-DD)
+  updateVisitedDate: (visitedId: string, visitedAt: string) =>
+    request<VisitedPlace>(`/api/trips/visited/${visitedId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ visited_at: visitedAt }),
+    }),
+
   // 특정 여행에 저장된 코스 목록
   listTripCourses: (tripId: string) => request<SavedCourseSummary[]>(`/api/trips/${tripId}/courses`),
 
@@ -217,17 +259,64 @@ export const api = {
   getAttractionDetail: (contentId: string) =>
     request<Attraction>(`/api/tourism/attractions/${encodeURIComponent(contentId)}`),
 
+  // 관광지 상세 페이지의 '저장' 버튼 1단계 — 이 관광지 하나만 담은 코스를
+  // 만들어 course_id를 발급받습니다. 그 다음 saveCourse()로 여행에 붙입니다.
+  createCourseFromAttraction: (contentId: string) =>
+    request<CourseResponse>(`/api/courses/from-attraction/${encodeURIComponent(contentId)}`, {
+      method: "POST",
+    }),
+
+  // 근처(기본 반경 2km) 가볼 만한 곳 — 개수 제한 없이 거리순 전체
+  getNearbyAttractions: (contentId: string, radiusKm: number = 2) =>
+    request<NearbyAttraction[]>(
+      `/api/tourism/attractions/${encodeURIComponent(contentId)}/nearby?radius_km=${radiusKm}`
+    ),
+
   // 특정 관광지의 방문자 리뷰 목록 (최신순, 로그인 불필요)
   getReviews: (contentId: string) =>
     request<Review[]>(`/api/reviews/${encodeURIComponent(contentId)}`),
 
-  // 리뷰 작성 (로그인 필요, 이미 쓴 적 있으면 수정됨)
-  submitReview: (contentId: string, rating: number, body: string) =>
+  // 리뷰 작성 (로그인 필요, 이미 쓴 적 있으면 수정됨). photos는 base64 인코딩된 이미지 배열(최대 5장)
+  submitReview: (contentId: string, rating: number, body: string, photos: string[] = []) =>
     request<Review>(`/api/reviews/${encodeURIComponent(contentId)}`, {
       method: "POST",
-      body: JSON.stringify({ rating, body }),
+      body: JSON.stringify({ rating, body, photos }),
     }),
 
   // 내가 지금까지 작성한 리뷰 개수 (내 여행 탭 표시용, 비로그인이면 0)
   getMyReviewCount: () => request<{ count: number }>("/api/reviews/me/count"),
+
+  // 내가 작성한 리뷰 전체 (내 여행 탭 '리뷰 작성' 카드용)
+  getMyReviews: () => request<MyReviewItem[]>("/api/reviews/me/list"),
+
+  // 여행지 이름 검색(자동완성) — 접근성 제보 작성 시 사용
+  searchAttractionsByName: (q: string) =>
+    request<AttractionSearchResult[]>(`/api/reports/search?q=${encodeURIComponent(q)}`),
+
+  // 특정 카테고리(휠체어/시각/청각/고령자/영유아가족/임산부)의 접근성 제보 목록
+  getAccessibilityReports: (category: ReportCategory, limit: number = 20) =>
+    request<AccessibilityReport[]>(`/api/reports/${category}?limit=${limit}`),
+
+  // 접근성 제보 작성 (로그인 필요, 같은 장소에 여러 번 가능)
+  submitAccessibilityReport: (params: {
+    contentId: string;
+    placeName: string;
+    category: ReportCategory;
+    body: string;
+  }) =>
+    request<AccessibilityReport>("/api/reports", {
+      method: "POST",
+      body: JSON.stringify({
+        content_id: params.contentId,
+        place_name: params.placeName,
+        category: params.category,
+        body: params.body,
+      }),
+    }),
+
+  // 내가 지금까지 작성한 접근성 제보 개수
+  getMyReportCount: () => request<{ count: number }>("/api/reports/me/count"),
+
+  // 내가 작성한 접근성 제보 전체 (내 여행 탭 '접근성 제보' 카드용)
+  getMyReports: () => request<MyReportItem[]>("/api/reports/me/list"),
 };

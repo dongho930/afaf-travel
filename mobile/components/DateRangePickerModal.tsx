@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Calendar, DateData } from "react-native-calendars";
+import { ThemeColors } from "../constants/theme";
+import { useTheme } from "../services/ThemeContext";
 
 interface Props {
   visible: boolean;
@@ -10,15 +12,14 @@ interface Props {
   onConfirm: (startDate: string | null, endDate: string | null) => void;
 }
 
-const GREEN = "#2E7D5B";
-const LIGHT_GREEN = "#EAF3EE";
-
 /**
  * 여행 시작일~종료일을 달력에서 범위로 선택하는 모달입니다.
  * 첫 번째 탭으로 시작일을, 두 번째 탭으로 종료일을 지정합니다
  * (종료일이 시작일보다 빠르면 시작일을 새로 다시 잡습니다).
  */
 export function DateRangePickerModal({ visible, initialStartDate, initialEndDate, onClose, onConfirm }: Props) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
   const [startDate, setStartDate] = useState<string | null>(initialStartDate ?? null);
   const [endDate, setEndDate] = useState<string | null>(initialEndDate ?? null);
 
@@ -51,7 +52,7 @@ export function DateRangePickerModal({ visible, initialStartDate, initialEndDate
   const markedDates = useMemo(() => {
     if (!startDate) return {};
     if (!endDate) {
-      return { [startDate]: { startingDay: true, endingDay: true, color: GREEN, textColor: "#FFFFFF" } };
+      return { [startDate]: { startingDay: true, endingDay: true, color: colors.primary, textColor: colors.onPrimary } };
     }
     const marks: Record<string, any> = {};
     let cursor = startDate;
@@ -61,15 +62,15 @@ export function DateRangePickerModal({ visible, initialStartDate, initialEndDate
       marks[cursor] = {
         startingDay: isStart,
         endingDay: isEnd,
-        color: isStart || isEnd ? GREEN : LIGHT_GREEN,
-        textColor: isStart || isEnd ? "#FFFFFF" : "#1A1A1A",
+        color: isStart || isEnd ? colors.primary : colors.primaryLight,
+        textColor: isStart || isEnd ? colors.onPrimary : colors.text,
       };
       const next = new Date(cursor);
       next.setDate(next.getDate() + 1);
       cursor = next.toISOString().slice(0, 10);
     }
     return marks;
-  }, [startDate, endDate]);
+  }, [startDate, endDate, colors]);
 
   const handleConfirm = () => {
     onConfirm(startDate, endDate);
@@ -105,9 +106,14 @@ export function DateRangePickerModal({ visible, initialStartDate, initialEndDate
             markedDates={markedDates}
             onDayPress={handleDayPress}
             theme={{
-              todayTextColor: GREEN,
-              arrowColor: GREEN,
-              selectedDayBackgroundColor: GREEN,
+              calendarBackground: colors.surfaceAlt,
+              dayTextColor: colors.text,
+              monthTextColor: colors.text,
+              textDisabledColor: colors.textTertiary,
+              todayTextColor: colors.primary,
+              arrowColor: colors.primary,
+              selectedDayBackgroundColor: colors.primary,
+              selectedDayTextColor: colors.onPrimary,
               textDayFontSize: 14,
               textMonthFontSize: 15,
               textMonthFontWeight: "700",
@@ -128,35 +134,37 @@ export function DateRangePickerModal({ visible, initialStartDate, initialEndDate
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: "#00000055", justifyContent: "flex-end" },
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: "#F7F9F8",
+    backgroundColor: colors.surfaceAlt,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 20,
   },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
-  title: { fontSize: 17, fontWeight: "700", color: "#1A1A1A" },
-  close: { fontSize: 14, color: GREEN, fontWeight: "600" },
-  hint: { fontSize: 13, color: "#5C5C5C", marginBottom: 12 },
+  title: { fontSize: 17, fontWeight: "700", color: colors.text },
+  close: { fontSize: 14, color: colors.primary, fontWeight: "600" },
+  hint: { fontSize: 13, color: colors.textSecondary, marginBottom: 12 },
   buttonRow: { flexDirection: "row", gap: 10, marginTop: 16 },
   clearButton: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#E2E8E4",
+    borderColor: colors.border,
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.surface,
   },
-  clearButtonText: { color: "#5C5C5C", fontWeight: "700", fontSize: 15 },
+  clearButtonText: { color: colors.textSecondary, fontWeight: "700", fontSize: 15 },
   confirmButton: {
     flex: 2,
-    backgroundColor: GREEN,
+    backgroundColor: colors.primary,
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: "center",
   },
-  confirmButtonText: { color: "#FFFFFF", fontWeight: "700", fontSize: 15 },
-});
+  confirmButtonText: { color: colors.onPrimary, fontWeight: "700", fontSize: 15 },
+  });
+}

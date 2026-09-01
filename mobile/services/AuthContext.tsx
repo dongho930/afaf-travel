@@ -30,6 +30,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  // 이메일 인증 기능은 현재 꺼둔 상태입니다 — Supabase 프로젝트의 "Confirm email"
+  // 설정도 꺼져 있어야(Authentication > Providers > Email > Confirm email) 가입
+  // 즉시 로그인이 가능합니다. 나중에 이메일 인증을 다시 켜려면, emailRedirectTo
+  // 옵션과 verify-email 관련 화면 이동 로직을 되살리면 됩니다.
   const signUp = async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signUp({ email, password });
     return { error: error?.message ?? null, userId: data.user?.id ?? null };

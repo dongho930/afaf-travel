@@ -11,12 +11,16 @@ import {
 } from "react-native";
 import { api } from "../services/api";
 import { useAuth } from "../services/AuthContext";
+import { useTheme } from "../services/ThemeContext";
+import { ThemeColors } from "../constants/theme";
 
 const USERNAME_PATTERN = /^[a-zA-Z0-9_.]{2,20}$/;
 
 export default function SignupScreen() {
   const router = useRouter();
   const { signUp } = useAuth();
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -74,11 +78,9 @@ export default function SignupScreen() {
         return;
       }
 
-      Alert.alert(
-        "가입 완료",
-        "이메일 인증이 필요할 수 있어요. 메일함을 확인해주세요.",
-        [{ text: "확인", onPress: () => router.replace("/login") }]
-      );
+      Alert.alert("가입 완료", "회원가입이 완료됐어요. 로그인해주세요.", [
+        { text: "확인", onPress: () => router.replace("/login") },
+      ]);
     } finally {
       setIsSubmitting(false);
     }
@@ -92,6 +94,7 @@ export default function SignupScreen() {
       <TextInput
         style={styles.input}
         placeholder="아이디 (영문/숫자, 2~20자)"
+        placeholderTextColor={colors.textTertiary}
         autoCapitalize="none"
         autoCorrect={false}
         value={username}
@@ -100,6 +103,7 @@ export default function SignupScreen() {
       <TextInput
         style={styles.input}
         placeholder="이메일"
+        placeholderTextColor={colors.textTertiary}
         autoCapitalize="none"
         autoCorrect={false}
         keyboardType="email-address"
@@ -109,6 +113,7 @@ export default function SignupScreen() {
       <TextInput
         style={styles.input}
         placeholder="비밀번호 (6자 이상)"
+        placeholderTextColor={colors.textTertiary}
         secureTextEntry
         autoCapitalize="none"
         autoCorrect={false}
@@ -118,6 +123,7 @@ export default function SignupScreen() {
       <TextInput
         style={styles.input}
         placeholder="비밀번호 확인"
+        placeholderTextColor={colors.textTertiary}
         secureTextEntry
         autoCapitalize="none"
         autoCorrect={false}
@@ -130,7 +136,7 @@ export default function SignupScreen() {
         onPress={handleSignup}
         disabled={isSubmitting}
       >
-        {isSubmitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>회원가입</Text>}
+        {isSubmitting ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={styles.buttonText}>회원가입</Text>}
       </Pressable>
 
       <Pressable onPress={() => router.push("/login")} style={styles.linkButton}>
@@ -140,29 +146,32 @@ export default function SignupScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, padding: 24, justifyContent: "center" },
-  title: { fontSize: 24, fontWeight: "700", color: "#1A1A1A", marginBottom: 6 },
-  subtitle: { fontSize: 13, color: "#8A8A8A", marginBottom: 24, lineHeight: 18 },
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+  container: { flex: 1, padding: 24, justifyContent: "center", backgroundColor: colors.background },
+  title: { fontSize: 24, fontWeight: "700", color: colors.text, marginBottom: 6 },
+  subtitle: { fontSize: 13, color: colors.textTertiary, marginBottom: 24, lineHeight: 18 },
   input: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.surface,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#E2E8E4",
+    borderColor: colors.border,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 15,
+    color: colors.text,
     marginBottom: 12,
   },
   button: {
-    backgroundColor: "#2E7D5B",
+    backgroundColor: colors.primary,
     borderRadius: 14,
     paddingVertical: 15,
     alignItems: "center",
     marginTop: 8,
   },
   buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: "#FFFFFF", fontSize: 16, fontWeight: "700" },
+  buttonText: { color: colors.onPrimary, fontSize: 16, fontWeight: "700" },
   linkButton: { marginTop: 18, alignItems: "center" },
-  linkText: { color: "#2E7D5B", fontSize: 14, fontWeight: "600" },
-});
+  linkText: { color: colors.primary, fontSize: 14, fontWeight: "600" },
+  });
+}

@@ -14,7 +14,9 @@ import {
 } from "react-native";
 import { WebView, WebViewMessageEvent } from "react-native-webview";
 import { AttractionCard } from "../components/AttractionCard";
+import { ThemeColors } from "../constants/theme";
 import { useCourseContext } from "../services/CourseContext";
+import { useTheme } from "../services/ThemeContext";
 import { CourseStop } from "../types";
 
 const API_BASE_URL: string =
@@ -107,6 +109,8 @@ function formatDistance(m: number | null): string {
  */
 export default function MapScreen() {
   const { course } = useCourseContext();
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
   const [routePath, setRoutePath] = useState<LatLng[]>([]);
   const [legSummaries, setLegSummaries] = useState<LegSummary[]>([]);
   const [loadingRoute, setLoadingRoute] = useState(false);
@@ -299,7 +303,7 @@ export default function MapScreen() {
           사용자가 직선이 잠깐이라도 보이는 일이 없게 합니다. */}
       {!routeDrawn && (
         <View style={styles.fullOverlay}>
-          <ActivityIndicator size="large" color="#2E7D5B" />
+          <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.overlayText}>실제 경로를 준비하고 있어요...</Text>
         </View>
       )}
@@ -367,7 +371,7 @@ export default function MapScreen() {
                 <Text style={styles.modalClose}>닫기</Text>
               </TouchableOpacity>
             </View>
-            <ScrollView>{selectedStop && <AttractionCard stop={selectedStop} />}</ScrollView>
+            <ScrollView>{selectedStop && <AttractionCard stop={selectedStop} userType={course.generated_for} />}</ScrollView>
           </View>
         </View>
       </Modal>
@@ -375,42 +379,43 @@ export default function MapScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
-  emptyText: { fontSize: 14, color: "#5C5C5C", textAlign: "center", lineHeight: 20 },
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: colors.background },
+  emptyText: { fontSize: 14, color: colors.textSecondary, textAlign: "center", lineHeight: 20 },
   fullOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#F7F9F8",
+    backgroundColor: colors.surfaceAlt,
     alignItems: "center",
     justifyContent: "center",
     gap: 10,
   },
-  overlayText: { fontSize: 14, color: "#5C5C5C" },
+  overlayText: { fontSize: 14, color: colors.textSecondary },
   bottomArea: { position: "absolute", bottom: 16, left: 0, right: 0 },
   legScroll: { paddingHorizontal: 16, gap: 10, paddingBottom: 10 },
   legCard: {
-    backgroundColor: "#FFFFFFF2",
+    backgroundColor: colors.surface,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#E2E8E4",
+    borderColor: colors.border,
     paddingVertical: 10,
     paddingHorizontal: 14,
     minWidth: 160,
   },
-  legRoute: { fontSize: 12, color: "#8A8A8A", marginBottom: 4 },
-  legMode: { fontSize: 14, fontWeight: "700", color: "#1A1A1A" },
-  legDetail: { fontSize: 12, color: "#5C5C5C", marginTop: 2 },
+  legRoute: { fontSize: 12, color: colors.textTertiary, marginBottom: 4 },
+  legMode: { fontSize: 14, fontWeight: "700", color: colors.text },
+  legDetail: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   navButton: {
-    backgroundColor: "#2E7D5B",
+    backgroundColor: colors.primary,
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: "center",
     marginHorizontal: 16,
   },
-  navButtonText: { color: "#FFFFFF", fontWeight: "700", fontSize: 15 },
-  modalBackdrop: { flex: 1, backgroundColor: "#00000055", justifyContent: "flex-end" },
+  navButtonText: { color: colors.onPrimary, fontWeight: "700", fontSize: 15 },
+  modalBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
   modalSheet: {
-    backgroundColor: "#F7F9F8",
+    backgroundColor: colors.surfaceAlt,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: "75%",
@@ -422,6 +427,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 12,
   },
-  modalTitle: { fontSize: 16, fontWeight: "700", color: "#1A1A1A" },
-  modalClose: { fontSize: 14, color: "#2E7D5B", fontWeight: "600" },
-});
+  modalTitle: { fontSize: 16, fontWeight: "700", color: colors.text },
+  modalClose: { fontSize: 14, color: colors.primary, fontWeight: "600" },
+  });
+}

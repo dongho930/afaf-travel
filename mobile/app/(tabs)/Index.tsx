@@ -3,6 +3,7 @@ import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Image,
+  ImageBackground,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,20 +13,31 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { AccessibilityIcons } from "../../components/AccessibilityIcons";
+import { AppLogo } from "../../components/AppLogo";
+import { ThemeColors } from "../../constants/theme";
 import { api } from "../../services/api";
 import { useAuth } from "../../services/AuthContext";
 import { useCourseContext } from "../../services/CourseContext";
+import { useTheme } from "../../services/ThemeContext";
 import { Attraction, RegionOption, UserProfile } from "../../types";
 
 const REGION_CHIPS = ["전체", "수원", "용인", "성남", "고양", "안양"];
+const CATEGORY_CHIPS = ["전체", "관광지", "문화시설", "레포츠", "숙박", "음식점"];
+// 인기 여행지 목록에서 아예 제외할 카테고리 (필터 칩으로도 고를 수 없고, '전체'를
+// 선택해도 안 보입니다). 나중에 다시 보이게 하려면 이 배열을 비우면 됩니다.
+const EXCLUDED_CATEGORIES = ["축제/공연/행사", "여행코스", "쇼핑"];
 
 export default function HomeScreen() {
   const router = useRouter();
   const { session } = useAuth();
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
   const { setPendingQueryText } = useCourseContext();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [searchText, setSearchText] = useState("");
   const [selectedRegion, setSelectedRegion] = useState("전체");
+  const [selectedCategory, setSelectedCategory] = useState("전체");
   const [wheelchairOnly, setWheelchairOnly] = useState(false);
 
   const [totalAccessibleCount, setTotalAccessibleCount] = useState<number | null>(null);
@@ -33,6 +45,7 @@ export default function HomeScreen() {
   const [regionOptions, setRegionOptions] = useState<RegionOption[]>([]);
   const [popularPlaces, setPopularPlaces] = useState<Attraction[]>([]);
   const [loadingPlaces, setLoadingPlaces] = useState(true);
+  const [heroImageUrl, setHeroImageUrl] = useState<string | null>(null);
   const PLACES_PAGE_SIZE = 6;
   const [visiblePlacesCount, setVisiblePlacesCount] = useState(PLACES_PAGE_SIZE);
   // '더보기'를 빠르게 여러 번 눌러도 안전하게 순서대로 진행되도록, 화면이 아직
@@ -90,8 +103,19 @@ export default function HomeScreen() {
     api
       .listAttractions("경기도", wheelchairOnly ? "wheelchair" : "general", matchedRegion?.code ?? null, 50, false)
       .then((places) => {
-        setPopularPlaces(places);
-        const firstIds = places.slice(0, PLACES_PAGE_SIZE).map((p) => p.content_id);
+        // 축제/공연/행사, 여행코스, 쇼핑은 인기 여행지 목록에서 아예 제외합니다.
+        const filtered = places.filter((p) => !EXCLUDED_CATEGORIES.includes(p.category));
+        setPopularPlaces(filtered);
+        // 사진이 있는 관광지 중 하나를 무작위로 골라 상단 배너 배경으로 씁니다.
+        // 새로고침(필터/지역 변경으로 목록을 다시 받아올 때)마다 다시 뽑히니
+        // 매번 다른 사진이 나옵니다.
+        const withImage = filtered.filter((p) => !!p.image_url);
+        setHeroImageUrl(
+          withImage.length > 0
+            ? withImage[Math.floor(Math.random() * withImage.length)].image_url ?? null
+            : null
+        );
+        const firstIds = filtered.slice(0, PLACES_PAGE_SIZE).map((p) => p.content_id);
         if (firstIds.length > 0) {
           api
             .getOverviews(firstIds)
@@ -138,16 +162,22 @@ export default function HomeScreen() {
     router.push("/(tabs)/planner");
   };
 
+  // 카테고리 필터는 서버에 다시 요청하지 않고, 이미 받아온 목록(최대 50개) 안에서
+  // 화면단에서만 걸러 보여줍니다. '더보기'는 여전히 원본 목록(popularPlaces) 기준
+  // 순서대로 더 불러오므로, 필터에 안 걸리는 항목이 섞여 있어도 계속 누르다 보면
+  // 해당 카테고리 항목이 점점 더 드러납니다.
+  const filteredPlaces =
+    selectedCategory === "전체" ? popularPlaces : popularPlaces.filter((p) => p.category === selectedCategory);
+
   const stats = [
     { icon: "♿", value: totalAccessibleCount != null ? String(totalAccessibleCount) : "-", label: "무장애 여행지" },
     { icon: "📍", value: supportedRegionCount != null ? String(supportedRegionCount) : "-", label: "지원 지역" },
-    { icon: "🚶", value: "4", label: "지원 이동유형" },
   ];
 
   return (
     // edges=["top"]로 화면 상단만 안전영역 처리합니다 — 스크롤을 위로 당겨도
     // 콘텐츠가 상태표시줄(시계/배터리) 영역까지 밀려 올라가지 않게 막아줍니다.
-    <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
       <ScrollView
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
@@ -155,9 +185,10 @@ export default function HomeScreen() {
         overScrollMode="never"
       >
         <View style={styles.header}>
-          <Text style={styles.logo}>
-            경기포올 <Text style={styles.logoSub}>무장애 여행 가이드</Text>
-          </Text>
+          <View style={styles.logoRow}>
+            <AppLogo size={30} />
+            <Text style={styles.logoSub}>당신만을 위한 여행 가이드</Text>
+          </View>
           <TouchableOpacity
             onPress={() => router.push(session ? "/profile" : "/login")}
             accessibilityRole="button"
@@ -173,16 +204,25 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.hero}>
-          <Text style={styles.heroBadge}>✦ AI 추천 경로</Text>
-          <Text style={styles.heroTitle}>나만의 완벽한{"\n"}무장애 여행을 계획하세요</Text>
-          <Text style={styles.heroDesc}>AI가 이동 제약 없이 즐길 수 있는 최적 경로를 추천해드립니다</Text>
+        <ImageBackground
+          source={heroImageUrl ? { uri: heroImageUrl } : undefined}
+          style={styles.hero}
+          imageStyle={styles.heroImage}
+        >
+          {heroImageUrl && <View style={styles.heroOverlay} />}
+          <Text style={[styles.heroBadge, heroImageUrl && styles.heroBadgeOnPhoto]}>✦ AI 추천 경로</Text>
+          <Text style={[styles.heroTitle, heroImageUrl && styles.heroTextOnPhoto]}>
+            나만의 완벽한{"\n"}무장애 여행을 계획하세요
+          </Text>
+          <Text style={[styles.heroDesc, heroImageUrl && styles.heroTextOnPhoto]}>
+            AI가 이동 제약 없이 즐길 수 있는 최적 경로를 추천해드립니다
+          </Text>
 
           <View style={styles.searchRow}>
             <TextInput
               style={styles.searchInput}
               placeholder="어디로 떠나고 싶으세요?"
-              placeholderTextColor="#8A8A8A"
+              placeholderTextColor={colors.textTertiary}
               value={searchText}
               onChangeText={setSearchText}
               onSubmitEditing={goToPlannerWithSearch}
@@ -191,7 +231,7 @@ export default function HomeScreen() {
               <Text style={styles.searchButtonText}>검색</Text>
             </Pressable>
           </View>
-        </View>
+        </ImageBackground>
 
         <View style={styles.statsRow}>
           {stats.map((s) => (
@@ -230,12 +270,24 @@ export default function HomeScreen() {
           ))}
         </ScrollView>
 
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+          {CATEGORY_CHIPS.map((chip) => (
+            <TouchableOpacity
+              key={chip}
+              style={[styles.chip, selectedCategory === chip && styles.chipSelected]}
+              onPress={() => setSelectedCategory(chip)}
+            >
+              <Text style={[styles.chipText, selectedCategory === chip && styles.chipTextSelected]}>{chip}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
         {loadingPlaces ? (
-          <ActivityIndicator style={{ marginTop: 20 }} color="#2E7D5B" />
-        ) : popularPlaces.length === 0 ? (
+          <ActivityIndicator style={{ marginTop: 20 }} color={colors.primary} />
+        ) : filteredPlaces.length === 0 ? (
           <Text style={styles.emptyText}>표시할 여행지를 찾지 못했어요.</Text>
         ) : (
-          popularPlaces.slice(0, visiblePlacesCount).map((place) => (
+          filteredPlaces.slice(0, visiblePlacesCount).map((place) => (
             <TouchableOpacity
               key={place.content_id}
               style={styles.placeCard}
@@ -282,15 +334,7 @@ export default function HomeScreen() {
                     {place.overview}
                   </Text>
                 )}
-                {place.accessibility_benefits?.length > 0 && (
-                  <View style={styles.benefitRow}>
-                    {place.accessibility_benefits.map((benefit) => (
-                      <View key={benefit} style={styles.benefitTag}>
-                        <Text style={styles.benefitTagText}>{benefit}</Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
+                {place.accessibility && <AccessibilityIcons features={place.accessibility} />}
               </View>
             </TouchableOpacity>
           ))
@@ -306,25 +350,36 @@ export default function HomeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { padding: 20, paddingTop: 12, paddingBottom: 40 },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 18 },
-  logo: { fontSize: 18, fontWeight: "800", color: "#1A1A1A" },
-  logoSub: { fontSize: 12, fontWeight: "500", color: "#8A8A8A" },
+  logoRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  logoSub: { fontSize: 12, fontWeight: "500", color: colors.textTertiary },
   avatar: { width: 34, height: 34, borderRadius: 17 },
-  avatarPlaceholder: { backgroundColor: "#EAF3EE", alignItems: "center", justifyContent: "center" },
-  avatarPlaceholderText: { fontSize: 14, fontWeight: "700", color: "#2E7D5B" },
+  avatarPlaceholder: { backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" },
+  avatarPlaceholderText: { fontSize: 14, fontWeight: "700", color: colors.primary },
 
   hero: {
-    backgroundColor: "#EAF3EE",
+    backgroundColor: colors.primaryLight,
     borderRadius: 20,
     padding: 20,
     marginBottom: 18,
+    overflow: "hidden", // ImageBackground의 둥근 모서리가 이미지에도 적용되도록
+  },
+  heroImage: { borderRadius: 20 },
+  heroOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: colors.overlay, // 사진 위 글자 가독성용 어두운 반투명 오버레이
   },
   heroBadge: {
     alignSelf: "flex-start",
-    backgroundColor: "#2E7D5B",
-    color: "#FFFFFF",
+    backgroundColor: colors.primary,
+    color: colors.onPrimary,
     fontSize: 11,
     fontWeight: "700",
     paddingHorizontal: 10,
@@ -332,100 +387,103 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     marginBottom: 10,
   },
-  heroTitle: { fontSize: 21, fontWeight: "800", color: "#1A1A1A", marginBottom: 8, lineHeight: 28 },
-  heroDesc: { fontSize: 13, color: "#5C5C5C", marginBottom: 16, lineHeight: 18 },
+  heroBadgeOnPhoto: { backgroundColor: colors.primary },
+  heroTitle: { fontSize: 21, fontWeight: "800", color: colors.text, marginBottom: 8, lineHeight: 28 },
+  heroDesc: { fontSize: 13, color: colors.textSecondary, marginBottom: 16, lineHeight: 18 },
+  heroTextOnPhoto: { color: "#FFFFFF" }, // 사진 배경일 땐 테마와 상관없이 항상 흰 글자로(가독성용)
   searchRow: { flexDirection: "row", gap: 8 },
   searchInput: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.surface,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#E2E8E4",
+    borderColor: colors.border,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 14,
+    color: colors.text,
   },
   searchButton: {
-    backgroundColor: "#2E7D5B",
+    backgroundColor: colors.primary,
     borderRadius: 12,
     paddingHorizontal: 18,
     justifyContent: "center",
   },
-  searchButtonText: { color: "#FFFFFF", fontWeight: "700", fontSize: 14 },
+  searchButtonText: { color: colors.onPrimary, fontWeight: "700", fontSize: 14 },
 
   statsRow: { flexDirection: "row", gap: 10, marginBottom: 24 },
   statCard: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.surface,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#E2E8E4",
+    borderColor: colors.border,
     padding: 14,
     alignItems: "center",
   },
   statIcon: { fontSize: 18, marginBottom: 6 },
-  statValue: { fontSize: 17, fontWeight: "800", color: "#2E7D5B" },
-  statLabel: { fontSize: 11, color: "#8A8A8A", marginTop: 2, textAlign: "center" },
+  statValue: { fontSize: 17, fontWeight: "800", color: colors.primary },
+  statLabel: { fontSize: 11, color: colors.textTertiary, marginTop: 2, textAlign: "center" },
 
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
-  sectionTitle: { fontSize: 18, fontWeight: "800", color: "#1A1A1A" },
+  sectionTitle: { fontSize: 18, fontWeight: "800", color: colors.text },
   toggleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  toggleLabel: { fontSize: 13, color: "#5C5C5C" },
+  toggleLabel: { fontSize: 13, color: colors.textSecondary },
   toggleTrack: {
     width: 40,
     height: 22,
     borderRadius: 11,
-    backgroundColor: "#E2E8E4",
+    backgroundColor: colors.border,
     padding: 2,
   },
-  toggleTrackOn: { backgroundColor: "#2E7D5B" },
-  toggleThumb: { width: 18, height: 18, borderRadius: 9, backgroundColor: "#FFFFFF" },
+  toggleTrackOn: { backgroundColor: colors.primary },
+  toggleThumb: { width: 18, height: 18, borderRadius: 9, backgroundColor: colors.surface },
   toggleThumbOn: { alignSelf: "flex-end" },
 
   chipRow: { gap: 8, marginBottom: 16 },
   chip: {
     borderWidth: 1,
-    borderColor: "#E2E8E4",
-    backgroundColor: "#FFFFFF",
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     borderRadius: 999,
     paddingHorizontal: 16,
     paddingVertical: 8,
   },
-  chipSelected: { backgroundColor: "#2E7D5B", borderColor: "#2E7D5B" },
-  chipText: { fontSize: 13, color: "#5C5C5C", fontWeight: "600" },
-  chipTextSelected: { color: "#FFFFFF" },
+  chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipText: { fontSize: 13, color: colors.textSecondary, fontWeight: "600" },
+  chipTextSelected: { color: colors.onPrimary },
 
-  emptyText: { fontSize: 13, color: "#8A8A8A", textAlign: "center", marginTop: 20 },
+  emptyText: { fontSize: 13, color: colors.textTertiary, textAlign: "center", marginTop: 20 },
   moreButton: {
     marginTop: 4,
     marginBottom: 8,
     paddingVertical: 13,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#E2E8E4",
+    borderColor: colors.border,
     alignItems: "center",
   },
-  moreButtonText: { fontSize: 14, fontWeight: "700", color: "#2E7D5B" },
+  moreButtonText: { fontSize: 14, fontWeight: "700", color: colors.primary },
 
   placeCard: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.surface,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#E2E8E4",
+    borderColor: colors.border,
     marginBottom: 12,
     overflow: "hidden",
   },
   placeImage: { height: 110, width: "100%" },
   placeImagePlaceholder: {
     height: 110,
-    backgroundColor: "#1A1A1A",
+    backgroundColor: colors.text,
     justifyContent: "flex-start",
     padding: 10,
   },
   placeBadge: {
     alignSelf: "flex-start",
-    backgroundColor: "#2E7D5B",
-    color: "#FFFFFF",
+    backgroundColor: colors.primary,
+    color: colors.onPrimary,
     fontSize: 11,
     fontWeight: "700",
     paddingHorizontal: 8,
@@ -434,31 +492,24 @@ const styles = StyleSheet.create({
   },
   placeInfo: { padding: 14 },
   placeTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  placeName: { fontSize: 15, fontWeight: "700", color: "#1A1A1A", flexShrink: 1 },
-  placeCategory: { fontSize: 12, color: "#2E7D5B", fontWeight: "600", marginTop: 2 },
-  placeAddress: { fontSize: 11, color: "#8A8A8A", marginTop: 3 },
-  placeOverview: { fontSize: 12, color: "#6B6B6B", marginTop: 6, lineHeight: 17 },
+  placeName: { fontSize: 15, fontWeight: "700", color: colors.text, flexShrink: 1 },
+  placeCategory: { fontSize: 12, color: colors.primary, fontWeight: "600", marginTop: 2 },
+  placeAddress: { fontSize: 11, color: colors.textTertiary, marginTop: 3 },
+  placeOverview: { fontSize: 12, color: colors.textSecondary, marginTop: 6, lineHeight: 17 },
   badgeGroup: { flexDirection: "row", gap: 6, marginLeft: 8 },
   ratingBadge: {
-    backgroundColor: "#FFF7E0",
+    backgroundColor: colors.warningLight,
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 999,
   },
-  ratingBadgeText: { fontSize: 11, fontWeight: "700", color: "#B8860B" },
+  ratingBadgeText: { fontSize: 11, fontWeight: "700", color: colors.warningText },
   congestionBadge: {
-    backgroundColor: "#FFF1E6",
+    backgroundColor: colors.warningLight,
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 999,
   },
-  congestionBadgeText: { fontSize: 11, fontWeight: "700", color: "#C2622A" },
-  benefitRow: { flexDirection: "row", flexWrap: "wrap", marginTop: 8, gap: 6 },
-  benefitTag: {
-    backgroundColor: "#EAF3EE",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-  },
-  benefitTagText: { fontSize: 11, fontWeight: "600", color: "#2E7D5B" },
-});
+  congestionBadgeText: { fontSize: 11, fontWeight: "700", color: colors.warningText },
+  });
+}

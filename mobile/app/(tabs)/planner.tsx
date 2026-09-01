@@ -13,9 +13,11 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { ThemeColors } from "../../constants/theme";
 import { api } from "../../services/api";
 import { useCourseContext } from "../../services/CourseContext";
 import { storage } from "../../services/storage";
+import { useTheme } from "../../services/ThemeContext";
 import { RegionOption, UserType, USER_TYPE_LABELS } from "../../types";
 
 const OPTIONS: { type: UserType; emoji: string; desc: string }[] = [
@@ -23,14 +25,19 @@ const OPTIONS: { type: UserType; emoji: string; desc: string }[] = [
   { type: "stroller", emoji: "🧸", desc: "유모차로 이동 가능한 평탄한 동선 우선" },
   { type: "senior", emoji: "🧓", desc: "휴게 공간이 충분한 여유로운 코스" },
   { type: "pregnant", emoji: "🤰", desc: "무리 없는 동선과 휴식 공간 우선" },
+  { type: "visual", emoji: "👁️", desc: "점자블록·오디오가이드 등 시각 안내시설 우선" },
+  { type: "hearing", emoji: "💡", desc: "수화안내·자막가이드 등 청각 안내시설 우선" },
+  { type: "general", emoji: "🙂", desc: "접근성 조건 없이 일반적인 코스 추천" },
 ];
 
 // 이용자 유형마다 실제로 마주하는 이동 제약이 다르므로, 입력 예시도 유형에 맞게 다르게 보여줍니다.
 const EXAMPLE_QUERY_BY_TYPE: Record<UserType, string> = {
-  wheelchair: "휠체어로 갈 수 있는 경사 없는 산책로와 맛집 추천해줘",
+  wheelchair: "지체 장애인도 갈 수 있는 경사 없는 산책로와 맛집 추천해줘",
   stroller: "유모차 밀고 다니기 편한 평지 산책로와 아이랑 갈 만한 맛집 추천해줘",
   senior: "많이 걷지 않아도 되고 중간중간 쉴 곳 많은 코스와 맛집 추천해줘",
   pregnant: "화장실 가깝고 오래 걷지 않아도 되는 편안한 코스와 맛집 추천해줘",
+  visual: "점자블록이나 음성 안내가 있는 곳 위주로 코스와 맛집 추천해줘",
+  hearing: "수화 안내나 자막 가이드가 있는 곳 위주로 코스와 맛집 추천해줘",
   general: "가족과 함께 가기 좋은 산책로와 맛집 추천해줘",
 };
 
@@ -48,6 +55,8 @@ try {
  */
 export default function PlannerScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
   const { userType, setUserType, sigunguCd, sigunguName, setRegion, setRecommendations, setPendingQueryText, pendingQueryText } =
     useCourseContext();
   const [queryText, setQueryText] = useState(pendingQueryText || "");
@@ -115,7 +124,7 @@ export default function PlannerScreen() {
 
   return (
     // edges=["top"]로 화면 상단만 안전영역 처리합니다 (홈 화면과 동일한 방식).
-    <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
       <FlatList
         data={[1]}
         keyExtractor={() => "content"}
@@ -123,9 +132,9 @@ export default function PlannerScreen() {
         renderItem={() => (
           <>
             <Text style={styles.title}>AI 경로 플래너</Text>
-            <Text style={styles.subtitle}>이동 조건을 입력하면 AI가 최적의 무장애 동선을 제안합니다</Text>
+            <Text style={styles.subtitle}>접근성 유형을 선택하고 조건을 입력하면 AI가 최적의 무장애 동선을 제안합니다</Text>
 
-            <Text style={styles.fieldLabel}>이동 보조 유형</Text>
+            <Text style={styles.fieldLabel}>접근성 유형</Text>
             <View style={styles.typeGrid}>
               {OPTIONS.map((opt) => (
                 <Pressable
@@ -144,11 +153,6 @@ export default function PlannerScreen() {
                 </Pressable>
               ))}
             </View>
-            <TouchableOpacity onPress={() => handleSelectType("general")} style={styles.generalLink}>
-              <Text style={styles.generalLinkText}>
-                {userType === "general" ? "✓ " : ""}일반 사용자로 이용하기
-              </Text>
-            </TouchableOpacity>
 
             <Text style={styles.fieldLabel}>지역</Text>
             <TouchableOpacity style={styles.regionButton} onPress={() => setRegionModalVisible(true)}>
@@ -163,6 +167,7 @@ export default function PlannerScreen() {
               style={styles.input}
               multiline
               placeholder="여기에 입력하거나 마이크 버튼을 눌러 말씀해주세요"
+              placeholderTextColor={colors.textTertiary}
               value={queryText}
               onChangeText={setQueryText}
               accessibilityLabel="여행 요청 입력창"
@@ -184,7 +189,7 @@ export default function PlannerScreen() {
               accessibilityLabel="AI 경로 생성하기"
             >
               {isSubmitting ? (
-                <ActivityIndicator color="#FFFFFF" />
+                <ActivityIndicator color={colors.onPrimary} />
               ) : (
                 <Text style={styles.submitText}>✦ AI 경로 생성하기</Text>
               )}
@@ -206,6 +211,7 @@ export default function PlannerScreen() {
             <TextInput
               style={styles.searchInput}
               placeholder="시/군/구 검색 (예: 수원, 분당)"
+              placeholderTextColor={colors.textTertiary}
               value={regionSearch}
               onChangeText={setRegionSearch}
             />
@@ -222,7 +228,7 @@ export default function PlannerScreen() {
             </TouchableOpacity>
 
             {regionLoading ? (
-              <ActivityIndicator style={{ marginTop: 24 }} color="#2E7D5B" />
+              <ActivityIndicator style={{ marginTop: 24 }} color={colors.primary} />
             ) : (
               <FlatList
                 data={filteredRegions}
@@ -249,33 +255,33 @@ export default function PlannerScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { padding: 24, paddingBottom: 60 },
-  title: { fontSize: 22, fontWeight: "800", color: "#1A1A1A", marginBottom: 4 },
-  subtitle: { fontSize: 14, color: "#5C5C5C", marginBottom: 20 },
-  fieldLabel: { fontSize: 14, fontWeight: "700", color: "#1A1A1A", marginBottom: 10, marginTop: 4 },
+  title: { fontSize: 22, fontWeight: "800", color: colors.text, marginBottom: 4 },
+  subtitle: { fontSize: 14, color: colors.textSecondary, marginBottom: 20 },
+  fieldLabel: { fontSize: 14, fontWeight: "700", color: colors.text, marginBottom: 10, marginTop: 4 },
 
-  typeGrid: { gap: 10, marginBottom: 8 },
+  typeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 8 },
   typeCard: {
-    backgroundColor: "#FFFFFF",
+    width: "48%",
+    backgroundColor: colors.surface,
     borderRadius: 14,
     padding: 14,
     borderWidth: 1,
-    borderColor: "#E2E8E4",
+    borderColor: colors.border,
   },
-  typeCardSelected: { backgroundColor: "#EAF3EE", borderColor: "#2E7D5B" },
+  typeCardSelected: { backgroundColor: colors.primaryLight, borderColor: colors.primary },
   typeEmoji: { fontSize: 20, marginBottom: 4 },
-  typeTitle: { fontSize: 15, fontWeight: "700", color: "#1A1A1A" },
-  typeDesc: { fontSize: 12, color: "#5C5C5C", marginTop: 2 },
-  generalLink: { alignSelf: "flex-start", marginBottom: 20, marginTop: 4 },
-  generalLinkText: { fontSize: 13, color: "#2E7D5B", fontWeight: "600" },
+  typeTitle: { fontSize: 15, fontWeight: "700", color: colors.text },
+  typeDesc: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
 
   regionButton: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: "#E2E8E4",
+    borderColor: colors.border,
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 14,
@@ -283,34 +289,35 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   regionButtonIcon: { fontSize: 15 },
-  regionButtonText: { flex: 1, fontSize: 15, fontWeight: "700", color: "#1A1A1A" },
-  regionButtonChevron: { fontSize: 13, color: "#2E7D5B", fontWeight: "600" },
+  regionButtonText: { flex: 1, fontSize: 15, fontWeight: "700", color: colors.text },
+  regionButtonChevron: { fontSize: 13, color: colors.primary, fontWeight: "600" },
 
-  hint: { fontSize: 13, color: "#8A8A8A", marginBottom: 12 },
+  hint: { fontSize: 13, color: colors.textTertiary, marginBottom: 12 },
   input: {
     minHeight: 110,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.surface,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#E2E8E4",
+    borderColor: colors.border,
     padding: 16,
     fontSize: 16,
+    color: colors.text,
     textAlignVertical: "top",
   },
-  voiceNotice: { fontSize: 13, color: "#8A8A8A", marginTop: 16, textAlign: "center", lineHeight: 18 },
+  voiceNotice: { fontSize: 13, color: colors.textTertiary, marginTop: 16, textAlign: "center", lineHeight: 18 },
   submitButton: {
     marginTop: 24,
-    backgroundColor: "#2E7D5B",
+    backgroundColor: colors.primary,
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: "center",
   },
   submitButtonDisabled: { opacity: 0.6 },
-  submitText: { color: "#FFFFFF", fontSize: 16, fontWeight: "700" },
+  submitText: { color: colors.onPrimary, fontSize: 16, fontWeight: "700" },
 
-  modalBackdrop: { flex: 1, backgroundColor: "#00000055", justifyContent: "flex-end" },
+  modalBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
   modalSheet: {
-    backgroundColor: "#F7F9F8",
+    backgroundColor: colors.surfaceAlt,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: "80%",
@@ -318,16 +325,17 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
-  modalTitle: { fontSize: 16, fontWeight: "700", color: "#1A1A1A" },
-  modalClose: { fontSize: 14, color: "#2E7D5B", fontWeight: "600" },
+  modalTitle: { fontSize: 16, fontWeight: "700", color: colors.text },
+  modalClose: { fontSize: 14, color: colors.primary, fontWeight: "600" },
   searchInput: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.surface,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#E2E8E4",
+    borderColor: colors.border,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 14,
+    color: colors.text,
     marginBottom: 8,
   },
   regionOption: {
@@ -337,9 +345,10 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 4,
     borderBottomWidth: 1,
-    borderBottomColor: "#E2E8E4",
+    borderBottomColor: colors.border,
   },
-  regionOptionText: { fontSize: 15, color: "#1A1A1A" },
-  regionOptionCheck: { fontSize: 15, color: "#2E7D5B", fontWeight: "800" },
-  regionEmpty: { textAlign: "center", color: "#8A8A8A", marginTop: 24, fontSize: 13 },
-});
+  regionOptionText: { fontSize: 15, color: colors.text },
+  regionOptionCheck: { fontSize: 15, color: colors.primary, fontWeight: "800" },
+  regionEmpty: { textAlign: "center", color: colors.textTertiary, marginTop: 24, fontSize: 13 },
+  });
+}

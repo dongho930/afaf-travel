@@ -15,11 +15,14 @@ import {
 } from "react-native";
 import { api } from "../services/api";
 import { useAuth } from "../services/AuthContext";
+import { useTheme } from "../services/ThemeContext";
 import { UserProfile } from "../types";
+import { ThemeColors } from "../constants/theme";
 
 /**
  * 첫 화면에서 프로필 사진(아바타)을 누르면 들어오는 화면입니다.
  * 아이디/프로필 사진을 바꿀 수 있고, 비밀번호도 여기서 변경합니다.
+ * '설정' 항목을 누르면 테마(라이트/다크) 설정 화면으로 이동합니다.
  *
  * 프로필 사진은 base64로 인코딩해서 백엔드로 보내고, 백엔드가 서비스 키(관리자
  * 권한)로 Supabase Storage에 대신 업로드합니다 — 클라이언트가 직접 Storage에
@@ -28,6 +31,8 @@ import { UserProfile } from "../types";
 export default function ProfileScreen() {
   const router = useRouter();
   const { session, signOut, changePassword } = useAuth();
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -138,7 +143,7 @@ export default function ProfileScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#2E7D5B" />
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
@@ -156,7 +161,7 @@ export default function ProfileScreen() {
           )}
           <View style={styles.avatarEditBadge}>
             {uploadingAvatar ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
+              <ActivityIndicator size="small" color={colors.onPrimary} />
             ) : (
               <Text style={styles.avatarEditBadgeText}>📷</Text>
             )}
@@ -175,6 +180,7 @@ export default function ProfileScreen() {
               onChangeText={setUsernameDraft}
               autoCapitalize="none"
               autoCorrect={false}
+              placeholderTextColor={colors.textTertiary}
             />
             <TouchableOpacity
               style={[styles.smallButton, isSavingUsername && styles.smallButtonDisabled]}
@@ -182,7 +188,7 @@ export default function ProfileScreen() {
               disabled={isSavingUsername}
             >
               {isSavingUsername ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
+                <ActivityIndicator size="small" color={colors.onPrimary} />
               ) : (
                 <Text style={styles.smallButtonText}>저장</Text>
               )}
@@ -221,6 +227,13 @@ export default function ProfileScreen() {
         </View>
       </View>
 
+      <TouchableOpacity style={styles.section} onPress={() => router.push("/settings")}>
+        <View style={styles.rowBetween}>
+          <Text style={styles.sectionLabel}>설정</Text>
+          <Text style={styles.linkText}>화면 테마 등 →</Text>
+        </View>
+      </TouchableOpacity>
+
       <Pressable style={styles.signOutButton} onPress={signOut}>
         <Text style={styles.signOutButtonText}>로그아웃</Text>
       </Pressable>
@@ -232,6 +245,7 @@ export default function ProfileScreen() {
             <TextInput
               style={styles.input}
               placeholder="새 비밀번호 (6자 이상)"
+              placeholderTextColor={colors.textTertiary}
               secureTextEntry
               autoCapitalize="none"
               autoCorrect={false}
@@ -241,6 +255,7 @@ export default function ProfileScreen() {
             <TextInput
               style={[styles.input, { marginTop: 10 }]}
               placeholder="새 비밀번호 확인"
+              placeholderTextColor={colors.textTertiary}
               secureTextEntry
               autoCapitalize="none"
               autoCorrect={false}
@@ -254,7 +269,7 @@ export default function ProfileScreen() {
                 disabled={isSavingPassword}
               >
                 {isSavingPassword ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
+                  <ActivityIndicator size="small" color={colors.onPrimary} />
                 ) : (
                   <Text style={styles.smallButtonText}>변경하기</Text>
                 )}
@@ -277,89 +292,92 @@ export default function ProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  container: { flex: 1, padding: 24 },
-  avatarSection: { alignItems: "center", marginBottom: 28 },
-  avatar: { width: 96, height: 96, borderRadius: 48, backgroundColor: "#EAF3EE" },
-  avatarPlaceholder: { alignItems: "center", justifyContent: "center" },
-  avatarPlaceholderText: { fontSize: 32, fontWeight: "700", color: "#2E7D5B" },
-  avatarEditBadge: {
-    position: "absolute",
-    bottom: -2,
-    right: -2,
-    backgroundColor: "#2E7D5B",
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#F4F7F5",
-  },
-  avatarEditBadgeText: { fontSize: 13 },
-  avatarHint: { fontSize: 12, color: "#8A8A8A", marginTop: 10 },
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background },
+    container: { flex: 1, padding: 24, backgroundColor: colors.background },
+    avatarSection: { alignItems: "center", marginBottom: 28 },
+    avatar: { width: 96, height: 96, borderRadius: 48, backgroundColor: colors.primaryLight },
+    avatarPlaceholder: { alignItems: "center", justifyContent: "center" },
+    avatarPlaceholderText: { fontSize: 32, fontWeight: "700", color: colors.primary },
+    avatarEditBadge: {
+      position: "absolute",
+      bottom: -2,
+      right: -2,
+      backgroundColor: colors.primary,
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 2,
+      borderColor: colors.background,
+    },
+    avatarEditBadgeText: { fontSize: 13 },
+    avatarHint: { fontSize: 12, color: colors.textTertiary, marginTop: 10 },
 
-  section: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#E2E8E4",
-    padding: 16,
-    marginBottom: 12,
-  },
-  sectionLabel: { fontSize: 12, color: "#8A8A8A", marginBottom: 6, fontWeight: "600" },
-  rowBetween: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  valueText: { fontSize: 16, fontWeight: "700", color: "#1A1A1A" },
-  linkText: { fontSize: 13, color: "#2E7D5B", fontWeight: "700" },
+    section: {
+      backgroundColor: colors.surface,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 16,
+      marginBottom: 12,
+    },
+    sectionLabel: { fontSize: 12, color: colors.textTertiary, marginBottom: 6, fontWeight: "600" },
+    rowBetween: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+    valueText: { fontSize: 16, fontWeight: "700", color: colors.text },
+    linkText: { fontSize: 13, color: colors.primary, fontWeight: "700" },
 
-  editRow: { flexDirection: "row", gap: 8, alignItems: "center", marginTop: 8 },
-  input: {
-    flex: 1,
-    backgroundColor: "#F7F9F8",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#E2E8E4",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-  },
-  smallButton: {
-    backgroundColor: "#2E7D5B",
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  smallButtonDisabled: { opacity: 0.6 },
-  smallButtonText: { color: "#FFFFFF", fontWeight: "700", fontSize: 13 },
-  smallButtonOutline: {
-    borderWidth: 1,
-    borderColor: "#E2E8E4",
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  smallButtonOutlineText: { color: "#5C5C5C", fontWeight: "700", fontSize: 13 },
+    editRow: { flexDirection: "row", gap: 8, alignItems: "center", marginTop: 8 },
+    input: {
+      flex: 1,
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 14,
+      color: colors.text,
+    },
+    smallButton: {
+      backgroundColor: colors.primary,
+      borderRadius: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+    },
+    smallButtonDisabled: { opacity: 0.6 },
+    smallButtonText: { color: colors.onPrimary, fontWeight: "700", fontSize: 13 },
+    smallButtonOutline: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+    },
+    smallButtonOutlineText: { color: colors.textSecondary, fontWeight: "700", fontSize: 13 },
 
-  signOutButton: { marginTop: 12, alignItems: "center", padding: 12 },
-  signOutButtonText: { color: "#C0392B", fontWeight: "700", fontSize: 14 },
+    signOutButton: { marginTop: 12, alignItems: "center", padding: 12 },
+    signOutButtonText: { color: colors.danger, fontWeight: "700", fontSize: 14 },
 
-  passwordModal: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "#00000055",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24,
-  },
-  passwordModalCard: {
-    backgroundColor: "#F7F9F8",
-    borderRadius: 16,
-    padding: 20,
-    width: "100%",
-  },
-  modalTitle: { fontSize: 16, fontWeight: "700", color: "#1A1A1A", marginBottom: 12 },
-});
+    passwordModal: {
+      position: "absolute",
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: colors.overlay,
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 24,
+    },
+    passwordModalCard: {
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: 16,
+      padding: 20,
+      width: "100%",
+    },
+    modalTitle: { fontSize: 16, fontWeight: "700", color: colors.text, marginBottom: 12 },
+  });
+}

@@ -1,9 +1,10 @@
 {
   "expo": {
-    "name": "무장애 여행 플래너",
+    "name": "경기포올",
     "slug": "afaf-travel-planner",
     "version": "0.1.0",
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "scheme": "afaftravel",
     "userInterfaceStyle": "automatic",
     "ios": {
@@ -13,16 +14,26 @@
         "NSMicrophoneUsageDescription": "음성으로 여행 코스를 요청하기 위해 마이크 접근 권한이 필요합니다.",
         "NSSpeechRecognitionUsageDescription": "음성 질의를 텍스트로 변환하기 위해 음성 인식 권한이 필요합니다.",
         "NSLocationWhenInUseUsageDescription": "근처 무장애 관광지를 추천하기 위해 위치 권한이 필요합니다.",
-        "NSPhotoLibraryUsageDescription": "프로필 사진을 설정하기 위해 사진 접근 권한이 필요합니다."
+        "NSPhotoLibraryUsageDescription": "프로필 사진을 설정하기 위해 사진 접근 권한이 필요합니다.",
+        "LSApplicationQueriesSchemes": [
+          "kakaomap"
+        ]
       }
     },
     "android": {
       "package": "kr.afaftravel.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
       "permissions": [
-        "RECORD_AUDIO",
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
       ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-router",
@@ -38,7 +49,9 @@
         {
           "microphonePermission": "음성으로 여행 코스를 요청하기 위해 마이크 접근 권한이 필요합니다.",
           "speechRecognitionPermission": "음성 질의를 텍스트로 변환하기 위해 음성 인식 권한이 필요합니다.",
-          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox"
+          ]
         }
       ],
       [
@@ -47,13 +60,34 @@
           "icon": "./assets/notification-icon.png",
           "color": "#2E7D5B"
         }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 240,
+          "resizeMode": "contain",
+          "backgroundColor": "#FFFFFF"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
       ]
     ],
     "extra": {
       "apiBaseUrl": "https://afaf-travel.onrender.com",
       "kakaoJsKey": "85a79aa42ca8b4e79b45ec7135625d0c",
       "supabaseUrl": "https://muhzjojydvozaqwihdig.supabase.co",
-      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im11aHpqb2p5ZHZvemFxd2loZGlnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY5MzM5ODQsImV4cCI6MjEwMjUwOTk4NH0.k1piW3dNvtdqFN_A3RvDrFtRYaa4IBHXC2l5ilKDRNA"
+      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im11aHpqb2p5ZHZvemFxd2loZGlnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY5MzM5ODQsImV4cCI6MjEwMjUwOTk4NH0.k1piW3dNvtdqFN_A3RvDrFtRYaa4IBHXC2l5ilKDRNA",
+      "router": {},
+      "eas": {
+        "projectId": "a5c3da81-3caf-43e8-969a-274f66e461cd"
+      }
     }
   }
 }

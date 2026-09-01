@@ -4,6 +4,8 @@ import {
   ExpoSpeechRecognitionModule,
   useSpeechRecognitionEvent,
 } from "expo-speech-recognition";
+import { ThemeColors } from "../constants/theme";
+import { useTheme } from "../services/ThemeContext";
 
 /**
  * expo-speech-recognition은 네이티브 모듈이라 Expo Go에는 포함돼 있지 않습니다.
@@ -20,6 +22,8 @@ export function VoiceInputButton({
   onListeningChange: (listening: boolean) => void;
   onResult: (text: string) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
   useSpeechRecognitionEvent("start", () => onListeningChange(true));
   useSpeechRecognitionEvent("end", () => onListeningChange(false));
   useSpeechRecognitionEvent("result", (event) => {
@@ -66,17 +70,19 @@ export function VoiceInputButton({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   micButton: {
     marginTop: 16,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: "#2E7D5B",
+    borderColor: colors.primary,
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: "center",
   },
-  micButtonActive: { backgroundColor: "#FDECEC", borderColor: "#D64545" },
+  micButtonActive: { backgroundColor: colors.dangerLight, borderColor: colors.danger },
   micIcon: { fontSize: 26, marginBottom: 4 },
-  micLabel: { fontSize: 15, fontWeight: "600", color: "#2E7D5B" },
-});
+  micLabel: { fontSize: 15, fontWeight: "600", color: colors.primary },
+  });
+}

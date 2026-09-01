@@ -9,12 +9,16 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { ThemeColors } from "../constants/theme";
 import { api } from "../services/api";
 import { useAuth } from "../services/AuthContext";
+import { useTheme } from "../services/ThemeContext";
 
 export default function LoginScreen() {
   const router = useRouter();
   const { signIn } = useAuth();
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
   const [identifier, setIdentifier] = useState(""); // 이메일 또는 아이디
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -55,6 +59,7 @@ export default function LoginScreen() {
       <TextInput
         style={styles.input}
         placeholder="이메일 또는 아이디"
+        placeholderTextColor={colors.textTertiary}
         autoCapitalize="none"
         autoCorrect={false}
         value={identifier}
@@ -63,6 +68,7 @@ export default function LoginScreen() {
       <TextInput
         style={styles.input}
         placeholder="비밀번호"
+        placeholderTextColor={colors.textTertiary}
         secureTextEntry
         autoCapitalize="none"
         autoCorrect={false}
@@ -75,7 +81,7 @@ export default function LoginScreen() {
         onPress={handleLogin}
         disabled={isSubmitting}
       >
-        {isSubmitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>로그인</Text>}
+        {isSubmitting ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={styles.buttonText}>로그인</Text>}
       </Pressable>
 
       <Pressable onPress={() => router.push("/signup")} style={styles.linkButton}>
@@ -85,29 +91,32 @@ export default function LoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, padding: 24, justifyContent: "center" },
-  title: { fontSize: 24, fontWeight: "700", color: "#1A1A1A", marginBottom: 6 },
-  subtitle: { fontSize: 13, color: "#8A8A8A", marginBottom: 24, lineHeight: 18 },
-  input: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#E2E8E4",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    marginBottom: 12,
-  },
-  button: {
-    backgroundColor: "#2E7D5B",
-    borderRadius: 14,
-    paddingVertical: 15,
-    alignItems: "center",
-    marginTop: 8,
-  },
-  buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: "#FFFFFF", fontSize: 16, fontWeight: "700" },
-  linkButton: { marginTop: 18, alignItems: "center" },
-  linkText: { color: "#2E7D5B", fontSize: 14, fontWeight: "600" },
-});
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: { flex: 1, padding: 24, justifyContent: "center", backgroundColor: colors.background },
+    title: { fontSize: 24, fontWeight: "700", color: colors.text, marginBottom: 6 },
+    subtitle: { fontSize: 13, color: colors.textTertiary, marginBottom: 24, lineHeight: 18 },
+    input: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      fontSize: 15,
+      color: colors.text,
+      marginBottom: 12,
+    },
+    button: {
+      backgroundColor: colors.primary,
+      borderRadius: 14,
+      paddingVertical: 15,
+      alignItems: "center",
+      marginTop: 8,
+    },
+    buttonDisabled: { opacity: 0.6 },
+    buttonText: { color: colors.onPrimary, fontSize: 16, fontWeight: "700" },
+    linkButton: { marginTop: 18, alignItems: "center" },
+    linkText: { color: colors.primary, fontSize: 14, fontWeight: "600" },
+  });
+}

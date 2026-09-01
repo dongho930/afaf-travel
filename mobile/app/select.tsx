@@ -12,10 +12,12 @@ import {
 } from "react-native";
 
 import { AccessibilityIcons } from "../components/AccessibilityIcons";
+import { ThemeColors } from "../constants/theme";
 import { api } from "../services/api";
 import { useCourseContext } from "../services/CourseContext";
 import { storage } from "../services/storage";
-import { PlaceCandidate } from "../types";
+import { useTheme } from "../services/ThemeContext";
+import { PlaceCandidate, UserType } from "../types";
 
 /**
  * /input에서 추천받은 장소 후보(recommendations) 중, 사용자가 실제로 가고 싶은
@@ -24,6 +26,8 @@ import { PlaceCandidate } from "../types";
  */
 export default function SelectPlacesScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
   const { userType, sigunguCd, recommendations, pendingQueryText, setCourse } = useCourseContext();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -86,6 +90,7 @@ export default function SelectPlacesScreen() {
         renderItem={({ item }) => (
           <PlaceOptionCard
             candidate={item}
+            userType={userType}
             selected={selectedIds.has(item.attraction.content_id)}
             onToggle={() => toggle(item.attraction.content_id)}
           />
@@ -102,7 +107,7 @@ export default function SelectPlacesScreen() {
           accessibilityLabel="선택한 장소로 코스 만들기"
         >
           {isSubmitting ? (
-            <ActivityIndicator color="#FFFFFF" />
+            <ActivityIndicator color={colors.onPrimary} />
           ) : (
             <Text style={styles.submitText}>선택한 장소로 코스 만들기</Text>
           )}
@@ -114,13 +119,18 @@ export default function SelectPlacesScreen() {
 
 function PlaceOptionCard({
   candidate,
+  userType,
   selected,
   onToggle,
 }: {
   candidate: PlaceCandidate;
+  userType: UserType;
   selected: boolean;
   onToggle: () => void;
 }) {
+  const router = useRouter();
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
   const { attraction, reason } = candidate;
   return (
     <Pressable
@@ -140,29 +150,59 @@ function PlaceOptionCard({
 
       <View style={styles.body}>
         <Text style={styles.name}>{attraction.name}</Text>
+        {(typeof attraction.avg_rating === "number" || typeof attraction.congestion_rate === "number") && (
+          <View style={styles.badgeGroup}>
+            {typeof attraction.avg_rating === "number" && (
+              <View style={styles.ratingBadge}>
+                <Text style={styles.ratingBadgeText}>
+                  ★ {attraction.avg_rating.toFixed(1)} ({attraction.review_count})
+                </Text>
+              </View>
+            )}
+            {typeof attraction.congestion_rate === "number" && (
+              <View style={styles.congestionRateBadge}>
+                <Text style={styles.congestionRateBadgeText}>
+                  혼잡도 {Math.round(attraction.congestion_rate)}%
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
         <Text style={styles.category}>{attraction.category}</Text>
         <Text style={styles.address}>{attraction.address}</Text>
         <Text style={styles.reason}>{reason}</Text>
-        <AccessibilityIcons features={attraction.accessibility} />
+        <AccessibilityIcons features={attraction.accessibility} userType={userType} />
+        <Pressable
+          style={styles.detailButton}
+          onPress={() =>
+            router.push({
+              pathname: "/attraction-detail",
+              params: { contentId: attraction.content_id, name: attraction.name },
+            })
+          }
+        >
+          <Text style={styles.detailButtonText}>상세 페이지 보기 →</Text>
+        </Pressable>
       </View>
     </Pressable>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20 },
-  title: { fontSize: 21, fontWeight: "700", color: "#1A1A1A", marginBottom: 4 },
-  subtitle: { fontSize: 13, color: "#5C5C5C", marginBottom: 16, lineHeight: 18 },
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+  container: { flex: 1, padding: 20, backgroundColor: colors.background },
+  title: { fontSize: 21, fontWeight: "700", color: colors.text, marginBottom: 4 },
+  subtitle: { fontSize: 13, color: colors.textSecondary, marginBottom: 16, lineHeight: 18 },
   card: {
     flexDirection: "row",
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.surface,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#E2E8E4",
+    borderColor: colors.border,
     marginBottom: 14,
     overflow: "hidden",
   },
-  cardSelected: { borderColor: "#2E7D5B", borderWidth: 2, backgroundColor: "#EAF3EE" },
+  cardSelected: { borderColor: colors.primary, borderWidth: 2, backgroundColor: colors.primaryLight },
   checkbox: {
     position: "absolute",
     top: 10,
@@ -171,40 +211,48 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.surface,
     borderWidth: 1.5,
-    borderColor: "#2E7D5B",
+    borderColor: colors.primary,
     alignItems: "center",
     justifyContent: "center",
   },
-  checkboxMark: { color: "#2E7D5B", fontWeight: "800", fontSize: 14 },
+  checkboxMark: { color: colors.primary, fontWeight: "800", fontSize: 14 },
   image: { width: 96, height: "100%", minHeight: 110 },
-  body: { flex: 1, padding: 14 },
-  name: { fontSize: 16, fontWeight: "700", color: "#1A1A1A" },
-  category: { fontSize: 12, color: "#2E7D5B", fontWeight: "600", marginTop: 2 },
-  address: { fontSize: 12, color: "#8A8A8A", marginTop: 4 },
-  reason: { fontSize: 13, color: "#5C5C5C", marginTop: 6, lineHeight: 18 },
+  body: { flex: 1, padding: 14, paddingRight: 40 },
+  name: { fontSize: 16, fontWeight: "700", color: colors.text },
+  badgeGroup: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 },
+  ratingBadge: { backgroundColor: colors.warningLight, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
+  ratingBadgeText: { fontSize: 11, fontWeight: "700", color: colors.warningText },
+  congestionRateBadge: { backgroundColor: colors.warningLight, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
+  congestionRateBadgeText: { fontSize: 11, fontWeight: "700", color: colors.warningText },
+  category: { fontSize: 12, color: colors.primary, fontWeight: "600", marginTop: 6 },
+  address: { fontSize: 12, color: colors.textTertiary, marginTop: 4 },
+  reason: { fontSize: 13, color: colors.textSecondary, marginTop: 6, lineHeight: 18 },
+  detailButton: { alignSelf: "flex-start", marginTop: 10 },
+  detailButtonText: { fontSize: 12, fontWeight: "700", color: colors.primary },
   footer: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: "#F7F9F8",
+    backgroundColor: colors.surfaceAlt,
     padding: 20,
     borderTopWidth: 1,
-    borderTopColor: "#E2E8E4",
+    borderTopColor: colors.border,
   },
-  selectionCount: { fontSize: 13, color: "#5C5C5C", marginBottom: 8, textAlign: "center" },
+  selectionCount: { fontSize: 13, color: colors.textSecondary, marginBottom: 8, textAlign: "center" },
   submitButton: {
-    backgroundColor: "#2E7D5B",
+    backgroundColor: colors.primary,
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: "center",
   },
   submitButtonDisabled: { opacity: 0.6 },
-  submitText: { color: "#FFFFFF", fontSize: 16, fontWeight: "700" },
-  empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
-  emptyText: { fontSize: 15, color: "#8A8A8A", marginBottom: 16, textAlign: "center", lineHeight: 20 },
-  emptyButton: { backgroundColor: "#2E7D5B", borderRadius: 12, paddingHorizontal: 20, paddingVertical: 12 },
-  emptyButtonText: { color: "#FFFFFF", fontWeight: "700" },
-});
+  submitText: { color: colors.onPrimary, fontSize: 16, fontWeight: "700" },
+  empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: colors.background },
+  emptyText: { fontSize: 15, color: colors.textTertiary, marginBottom: 16, textAlign: "center", lineHeight: 20 },
+  emptyButton: { backgroundColor: colors.primary, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 12 },
+  emptyButtonText: { color: colors.onPrimary, fontWeight: "700" },
+  });
+}

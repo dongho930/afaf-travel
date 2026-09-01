@@ -1,4 +1,4 @@
-export type UserType = "wheelchair" | "stroller" | "senior" | "pregnant" | "general";
+export type UserType = "wheelchair" | "stroller" | "senior" | "pregnant" | "visual" | "hearing" | "general";
 
 export interface AccessibilityFeatures {
   has_ramp: boolean;
@@ -7,8 +7,31 @@ export interface AccessibilityFeatures {
   has_wheelchair_rental: boolean;
   has_stroller_accessible_path: boolean;
   has_rest_area: boolean;
+  has_parking: boolean;
+  has_exit: boolean;
   has_visual_accessibility: boolean;
   has_hearing_accessibility: boolean;
+  // 시각장애 세부 항목(has_visual_accessibility를 구성하는 7개 항목 각각)
+  has_braille_block: boolean;
+  has_help_dog: boolean;
+  has_guide_human: boolean;
+  has_audio_guide: boolean;
+  has_big_print: boolean;
+  has_braille_promotion: boolean;
+  has_guide_system: boolean;
+  // 청각장애 세부 항목(has_hearing_accessibility를 구성하는 3개 항목 각각)
+  has_sign_guide: boolean;
+  has_video_guide: boolean;
+  has_hearing_room: boolean;
+  // 영유아가족/임산부 세부 항목
+  has_lactation_room: boolean;
+  has_baby_spare_chair: boolean;
+  // 접근성 탭 점수 계산과 동일한 개수 필드
+  wheelchair_accessibility_count: number;
+  visual_accessibility_count: number;
+  hearing_accessibility_count: number;
+  family_accessibility_count: number;
+  pregnant_accessibility_count: number;
 }
 
 export interface CongestionForecast {
@@ -41,8 +64,10 @@ export interface Review {
   content_id: string;
   user_id: string;
   username: string;
+  avatar_url?: string | null;
   rating: number;
   body: string;
+  photo_urls: string[];
   created_at: string;
 }
 
@@ -72,16 +97,18 @@ export interface CourseResponse {
 }
 
 export const USER_TYPE_LABELS: Record<UserType, string> = {
-  wheelchair: "휠체어 이용자",
+  wheelchair: "지체 장애인",
   stroller: "유모차 동반 가족",
   senior: "고령자",
   pregnant: "임산부",
+  visual: "시각 장애인",
+  hearing: "청각 장애인",
   general: "일반",
 };
 
-export type CourseCategory = "가족" | "커플" | "친구" | "혼자" | "기타";
+export type CourseCategory = string;
 
-export const COURSE_CATEGORIES: CourseCategory[] = ["가족", "커플", "친구", "혼자", "기타"];
+export const COURSE_CATEGORIES: string[] = ["가족", "커플", "친구", "혼자", "기타"];
 
 export interface TripSummary {
   trip_id: string;
@@ -91,6 +118,7 @@ export interface TripSummary {
   start_date?: string | null;
   end_date?: string | null;
   created_at?: string | null;
+  visited: boolean;
 }
 
 export interface SavedCourseSummary {
@@ -139,4 +167,59 @@ export interface AccessibilitySummary {
   top_hearing_places: AccessibilityPlaceScore[];
   top_family_places: AccessibilityPlaceScore[];
   top_pregnant_places: AccessibilityPlaceScore[];
+}
+
+export type ReportCategory = "wheelchair" | "visual" | "hearing" | "senior" | "family" | "pregnant";
+
+export interface AccessibilityReport {
+  id: string;
+  content_id: string;
+  place_name: string;
+  category: ReportCategory;
+  body: string;
+  user_id: string;
+  username: string;
+  avatar_url?: string | null;
+  created_at: string;
+}
+
+export interface AttractionSearchResult {
+  content_id: string;
+  name: string;
+  address: string;
+  category: string;
+}
+
+export interface MyReviewItem {
+  id: string;
+  content_id: string;
+  place_name: string;
+  rating: number;
+  body: string;
+  photo_urls: string[];
+  created_at: string;
+}
+
+export interface MyReportItem {
+  id: string;
+  content_id: string;
+  place_name: string;
+  category: ReportCategory;
+  body: string;
+  created_at: string;
+}
+
+export interface NearbyAttraction {
+  content_id: string;
+  name: string;
+  image_url?: string | null;
+  category: string;
+  distance_km: number;
+}
+
+export interface VisitedPlace {
+  id: string;
+  content_id: string;
+  place_name: string;
+  visited_at: string;
 }
