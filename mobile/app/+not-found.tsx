@@ -1,27 +1,30 @@
 import { router, usePathname } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Platform, StyleSheet, Text, View } from "react-native";
 
 /**
  * 정상적인 404(진짜 없는 경로로 들어온 경우)는 그대로 보여주지만, 웹에서 새로고침
  * 직후 루트("/")로 들어왔는데도 초기 라우팅이 꼬여서 이 화면으로 떨어지는 경우가
- * 있어서, 그 경우에만 자동으로 홈으로 한 번 더 이동시킵니다. (앱 내부에서
- * 화면을 옮기는 것 자체는 정상 동작하는 게 확인됐어서, 같은 방식으로 코드가
- * 대신 한 번 눌러주는 셈입니다.)
+ * 있어서, 그 경우에만 자동으로 홈으로 한 번 더 이동시킵니다. ("/"가 아니라
+ * "/(tabs)"로 이동해야 실제로 통과됩니다 — Sitemap에서 수동으로 확인된 방식과
+ * 동일합니다.) 한 번 시도해서도 안 풀리면 무한 루프에 빠지지 않도록 딱 한 번만
+ * 시도합니다.
  */
 export default function NotFound() {
   const pathname = usePathname();
   const [redirecting, setRedirecting] = useState(false);
+  const triedRef = useRef(false);
 
   useEffect(() => {
+    if (triedRef.current) return;
     const isWeb = Platform.OS === "web";
     const landedOnRoot =
       isWeb && typeof window !== "undefined" && window.location.pathname === "/";
     if (landedOnRoot) {
+      triedRef.current = true;
       setRedirecting(true);
-      // 다음 tick에 이동시켜서, 라우터 초기화가 끝난 뒤 이동하도록 합니다.
       const timer = setTimeout(() => {
-        router.replace("/");
+        router.replace("/(tabs)");
       }, 0);
       return () => clearTimeout(timer);
     }
