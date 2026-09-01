@@ -229,7 +229,9 @@ export default function AttractionDetailScreen() {
         Alert.alert("위치 권한이 필요해요", "내 위치에서 길을 찾으려면 위치 권한을 허용해주세요.");
         return;
       }
-      const position = await Location.getCurrentPositionAsync({});
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.BestForNavigation,
+      });
 
       setDirectionsModalVisible(false);
 
