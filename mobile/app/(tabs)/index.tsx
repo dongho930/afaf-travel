@@ -162,6 +162,33 @@ export default function HomeScreen() {
     router.push("/(tabs)/planner");
   };
 
+  // 카테고리 탭을 바꾸면, 그 카테고리에서 화면에 처음 보이는 항목들이
+  // (전체 기준으로 미리 불러온 첫 6개와는 다른 항목일 수 있어서) 아직 소개문을
+  // 못 받아온 상태일 수 있습니다. 그래서 탭이 바뀔 때마다 그 시점에 보이는
+  // 항목들 중 소개문이 없는 것만 새로 불러옵니다.
+  useEffect(() => {
+    visiblePlacesCountRef.current = PLACES_PAGE_SIZE;
+    setVisiblePlacesCount(PLACES_PAGE_SIZE);
+
+    const filtered =
+      selectedCategory === "전체" ? popularPlaces : popularPlaces.filter((p) => p.category === selectedCategory);
+    const idsNeedingOverview = filtered
+      .slice(0, PLACES_PAGE_SIZE)
+      .filter((p) => !p.overview)
+      .map((p) => p.content_id);
+    if (idsNeedingOverview.length > 0) {
+      api
+        .getOverviews(idsNeedingOverview)
+        .then((overviews) => {
+          setPopularPlaces((prev) =>
+            prev.map((p) => (overviews[p.content_id] ? { ...p, overview: overviews[p.content_id] } : p))
+          );
+        })
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCategory]);
+
   // 카테고리 필터는 서버에 다시 요청하지 않고, 이미 받아온 목록(최대 50개) 안에서
   // 화면단에서만 걸러 보여줍니다. '더보기'는 여전히 원본 목록(popularPlaces) 기준
   // 순서대로 더 불러오므로, 필터에 안 걸리는 항목이 섞여 있어도 계속 누르다 보면
