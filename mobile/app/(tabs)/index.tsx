@@ -132,14 +132,20 @@ export default function HomeScreen() {
   }, [wheelchairOnly, selectedRegion, regionOptions]);
 
   const handleShowMorePlaces = () => {
-    // ref가 항상 최신 값이라, 리렌더링을 기다리지 않고도 정확한 시작 지점을 씁니다.
+    // '더보기'도 카테고리 필터가 적용된 목록(filteredPlaces) 기준으로 다음
+    // 항목들을 계산해야 합니다. 필터링 전(원본 50개) 기준으로 계산하면, 화면에
+    // 실제로 새로 나타나는 카드(필터링된 목록 기준)와 소개문을 요청하는 카드
+    // (필터링 전 목록 기준)가 서로 어긋나서 — 필터가 좁을수록 화면엔 보이는데
+    // 소개문은 영영 요청조차 안 되는 카드가 생겼습니다.
+    const filtered =
+      selectedCategory === "전체" ? popularPlaces : popularPlaces.filter((p) => p.category === selectedCategory);
     const start = visiblePlacesCountRef.current;
-    const nextCount = Math.min(start + PLACES_PAGE_SIZE, popularPlaces.length);
-    if (nextCount <= start) return; // 이미 끝까지 다 보여준 상태면 아무것도 안 함
+    const nextCount = Math.min(start + PLACES_PAGE_SIZE, filtered.length);
+    if (nextCount <= start) return; // 이미 이 카테고리를 끝까지 다 보여준 상태면 아무것도 안 함
     visiblePlacesCountRef.current = nextCount;
     setVisiblePlacesCount(nextCount);
 
-    const newlyRevealedIds = popularPlaces
+    const newlyRevealedIds = filtered
       .slice(start, nextCount)
       .filter((p) => !p.overview)
       .map((p) => p.content_id);
