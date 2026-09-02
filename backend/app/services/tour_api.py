@@ -841,23 +841,13 @@ class TourApiClient:
             return attractions[:num_of_rows]
 
         try:
-            # 캐시가 없을 때는 이번에 요청받은 개수만 받아오지 않고, 한 번에
-            # 넉넉히(최소 100개) 받아서 캐싱해둡니다 — 그래야 다음 요청(다른
-            # limit)이 와도 API를 또 안 부르고 캐시에서 바로 잘라 쓸 수 있습니다.
-            fetch_rows = max(100, num_of_rows)
-            params = {
-                "lDongRegnCd": ldong_regn_cd,
-                "contentTypeId": content_type_id,
-                "numOfRows": fetch_rows,
-                "pageNo": 1,
-            }
-            resp = await client.get(
-                f"{settings.tour_api_base_url}/KorWithService2/areaBasedList2",
-                params=self._common_params(params),
-            )
-            resp.raise_for_status()
-            raw_items = self._extract_items(resp.json())
-            attractions = [self._map_item_to_attraction(item, content_type_id) for item in raw_items]
+            # 캐시가 없을 때는 이번에 요청받은 개수만 받아오지 않고, 전수조사용
+            # _fetch_all_by_content_type로 그 카테고리 전체(페이지 끝까지)를 받아서
+            # 캐싱해둡니다 — 그래야 나중에 '전체 보기'처럼 큰 limit이 와도 API를
+            # 또 안 부르고 캐시에서 바로 잘라 쓸 수 있습니다. 목록 조회 자체는
+            # 개별 상세 조회(detailCommon2/detailWithTour2)와 달리 페이지 몇 번
+            # 부르는 정도라 일일 트래픽 한도에 미치는 영향이 작습니다.
+            attractions = await self._fetch_all_by_content_type(client, ldong_regn_cd, content_type_id)
 
             await save_attraction_list_cache(
                 ldong_regn_cd, content_type_id, [self._attraction_to_cache_dict(a) for a in attractions]

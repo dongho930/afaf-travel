@@ -101,7 +101,7 @@ export default function HomeScreen() {
     // 그 시점에 새로 보이는 6개씩만 채워서, 한 번에 50개를 다 채우려다 뒤쪽이
     // 6초 제한에 밀리는 문제를 피합니다.
     api
-      .listAttractions("경기도", wheelchairOnly ? "wheelchair" : "general", matchedRegion?.code ?? null, 50, false)
+      .listAttractions("경기도", wheelchairOnly ? "wheelchair" : "general", matchedRegion?.code ?? null, 1500, false)
       .then((places) => {
         // 축제/공연/행사, 여행코스, 쇼핑은 인기 여행지 목록에서 아예 제외합니다.
         const filtered = places.filter((p) => !EXCLUDED_CATEGORIES.includes(p.category));
@@ -373,7 +373,7 @@ export default function HomeScreen() {
           ))
         )}
 
-        {!loadingPlaces && visiblePlacesCount < popularPlaces.length && (
+        {!loadingPlaces && visiblePlacesCount < filteredPlaces.length && (
           <TouchableOpacity style={styles.moreButton} onPress={handleShowMorePlaces}>
             <Text style={styles.moreButtonText}>더보기</Text>
           </TouchableOpacity>
