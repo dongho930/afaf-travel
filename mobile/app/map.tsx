@@ -1,4 +1,5 @@
 import Constants from "expo-constants";
+import { BusIcon, CarIcon, type Icon, PersonSimpleWalkIcon } from "phosphor-react-native";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -14,7 +15,9 @@ import {
 } from "react-native";
 import { WebView, WebViewMessageEvent } from "react-native-webview";
 import { AttractionCard } from "../components/AttractionCard";
+import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
+import { radius, spacing } from "../constants/tokens";
 import { useCourseContext } from "../services/CourseContext";
 import { useTheme } from "../services/ThemeContext";
 import { CourseStop } from "../types";
@@ -30,10 +33,10 @@ const MODE_LABEL: Record<RouteMode, string> = {
   transit: "대중교통",
   car: "자동차",
 };
-const MODE_ICON: Record<RouteMode, string> = {
-  walk: "🚶",
-  transit: "🚌",
-  car: "🚗",
+const MODE_ICON: Record<RouteMode, Icon> = {
+  walk: PersonSimpleWalkIcon,
+  transit: BusIcon,
+  car: CarIcon,
 };
 
 interface LegSummary {
@@ -322,9 +325,13 @@ export default function MapScreen() {
                 </Text>
                 {leg.mode ? (
                   <>
-                    <Text style={styles.legMode}>
-                      {MODE_ICON[leg.mode]} {MODE_LABEL[leg.mode]} 추천
-                    </Text>
+                    <View style={styles.legModeRow}>
+                      {(() => {
+                        const ModeIcon = MODE_ICON[leg.mode];
+                        return <ModeIcon size={13} color={colors.text} weight="bold" />;
+                      })()}
+                      <Text style={styles.legMode}>{MODE_LABEL[leg.mode]} 추천</Text>
+                    </View>
                     <Text style={styles.legDetail}>
                       {formatDuration(leg.durationSec)}
                       {leg.distanceM != null ? ` · ${formatDistance(leg.distanceM)}` : ""}
@@ -352,7 +359,8 @@ export default function MapScreen() {
               });
             }}
           >
-            <Text style={styles.navButtonText}>🚶 카카오맵 앱으로 길찾기</Text>
+            <PersonSimpleWalkIcon size={16} color={colors.onPrimary} weight="bold" />
+            <Text style={styles.navButtonText}>카카오맵 앱으로 길찾기</Text>
           </Pressable>
         </View>
       )}
@@ -381,55 +389,59 @@ export default function MapScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: colors.background },
-  emptyText: { fontSize: 14, color: colors.textSecondary, textAlign: "center", lineHeight: 20 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, backgroundColor: colors.background },
+  emptyText: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary, textAlign: "center", lineHeight: 20 },
   fullOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: colors.surfaceAlt,
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
+    gap: spacing.sm + 2,
   },
-  overlayText: { fontSize: 14, color: colors.textSecondary },
-  bottomArea: { position: "absolute", bottom: 16, left: 0, right: 0 },
-  legScroll: { paddingHorizontal: 16, gap: 10, paddingBottom: 10 },
+  overlayText: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary },
+  bottomArea: { position: "absolute", bottom: spacing.lg, left: 0, right: 0 },
+  legScroll: { paddingHorizontal: spacing.lg, gap: spacing.sm + 2, paddingBottom: spacing.sm + 2 },
   legCard: {
     backgroundColor: colors.surface,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.md + 2,
     minWidth: 160,
   },
-  legRoute: { fontSize: 12, color: colors.textTertiary, marginBottom: 4 },
-  legMode: { fontSize: 14, fontWeight: "700", color: colors.text },
-  legDetail: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  legRoute: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary, marginBottom: spacing.xs },
+  legModeRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  legMode: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.text },
+  legDetail: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: 2 },
   navButton: {
+    flexDirection: "row",
     backgroundColor: colors.primary,
-    borderRadius: 14,
-    paddingVertical: 14,
+    borderRadius: radius.lg - 2,
+    paddingVertical: spacing.md + 2,
     alignItems: "center",
-    marginHorizontal: 16,
+    justifyContent: "center",
+    gap: spacing.xs + 2,
+    marginHorizontal: spacing.lg,
   },
-  navButtonText: { color: colors.onPrimary, fontWeight: "700", fontSize: 15 },
+  navButtonText: { color: colors.onPrimary, fontFamily: fontFamily.bold, fontSize: 15 },
   modalBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end", alignItems: "center" },
   modalSheet: {
     width: "100%",
     maxWidth: 640, // 웹에서 넓은 화면일 때 앱 폭(WebFrame)에 맞춰 시트도 가운데 정렬되게
     backgroundColor: colors.surfaceAlt,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
     maxHeight: "75%",
-    padding: 16,
+    padding: spacing.lg,
   },
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
-  modalTitle: { fontSize: 16, fontWeight: "700", color: colors.text },
-  modalClose: { fontSize: 14, color: colors.primary, fontWeight: "600" },
+  modalTitle: { fontSize: 16, fontFamily: fontFamily.bold, color: colors.text },
+  modalClose: { fontSize: 14, color: colors.primary, fontFamily: fontFamily.semiBold },
   });
 }

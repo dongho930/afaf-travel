@@ -1,9 +1,10 @@
 import { useRouter } from "expo-router";
+import { CheckIcon } from "phosphor-react-native";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  Image,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -12,7 +13,11 @@ import {
 import { Alert } from "../services/crossPlatformAlert";
 
 import { AccessibilityIcons } from "../components/AccessibilityIcons";
+import { PhotoCardHeader } from "../components/PhotoCardHeader";
+import { getCongestionDisplay } from "../constants/congestion";
+import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
+import { radius, spacing } from "../constants/tokens";
 import { api } from "../services/api";
 import { useCourseContext } from "../services/CourseContext";
 import { storage } from "../services/storage";
@@ -140,36 +145,23 @@ function PlaceOptionCard({
       accessibilityState={{ checked: selected }}
       accessibilityLabel={`${attraction.name}, ${selected ? "선택됨" : "선택 안 됨"}`}
     >
-      <View style={styles.checkbox}>
-        {selected && <Text style={styles.checkboxMark}>✓</Text>}
-      </View>
-
-      {attraction.image_url && (
-        <Image source={{ uri: attraction.image_url }} style={styles.image} />
-      )}
+      <PhotoCardHeader
+        imageUrl={attraction.image_url}
+        height={180}
+        title={attraction.name}
+        subtitle={attraction.address}
+        rating={attraction.avg_rating}
+        reviewCount={attraction.review_count}
+        congestion={getCongestionDisplay(attraction, colors)}
+        topLeft={
+          <View style={[styles.checkbox, selected && styles.checkboxSelected]}>
+            {selected && <CheckIcon size={14} color="#FFFFFF" weight="bold" />}
+          </View>
+        }
+      />
 
       <View style={styles.body}>
-        <Text style={styles.name}>{attraction.name}</Text>
-        {(typeof attraction.avg_rating === "number" || typeof attraction.congestion_rate === "number") && (
-          <View style={styles.badgeGroup}>
-            {typeof attraction.avg_rating === "number" && (
-              <View style={styles.ratingBadge}>
-                <Text style={styles.ratingBadgeText}>
-                  ★ {attraction.avg_rating.toFixed(1)} ({attraction.review_count})
-                </Text>
-              </View>
-            )}
-            {typeof attraction.congestion_rate === "number" && (
-              <View style={styles.congestionRateBadge}>
-                <Text style={styles.congestionRateBadgeText}>
-                  혼잡도 {Math.round(attraction.congestion_rate)}%
-                </Text>
-              </View>
-            )}
-          </View>
-        )}
         <Text style={styles.category}>{attraction.category}</Text>
-        <Text style={styles.address}>{attraction.address}</Text>
         <Text style={styles.reason}>{reason}</Text>
         <AccessibilityIcons features={attraction.accessibility} userType={userType} />
         <Pressable
@@ -190,69 +182,65 @@ function PlaceOptionCard({
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { flex: 1, padding: 20, backgroundColor: colors.background },
-  title: { fontSize: 21, fontWeight: "700", color: colors.text, marginBottom: 4 },
-  subtitle: { fontSize: 13, color: colors.textSecondary, marginBottom: 16, lineHeight: 18 },
+  container: { flex: 1, padding: spacing.xl - 4, backgroundColor: colors.background },
+  title: { fontSize: 21, fontFamily: fontFamily.bold, color: colors.text, marginBottom: spacing.xs },
+  subtitle: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginBottom: spacing.lg, lineHeight: 18 },
   card: {
-    flexDirection: "row",
     backgroundColor: colors.surface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: 14,
+    borderRadius: radius.xl,
+    marginBottom: spacing.lg,
     overflow: "hidden",
+    ...Platform.select({
+      web: { boxShadow: "0 6px 20px rgba(0,0,0,0.08)" } as any,
+      default: {
+        shadowColor: colors.shadow,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.1,
+        shadowRadius: 16,
+        elevation: 3,
+      },
+    }),
   },
-  cardSelected: { borderColor: colors.primary, borderWidth: 2, backgroundColor: colors.primaryLight },
+  // 선택된 카드만 예외적으로 테두리를 둘러 "선택됨" 상태를 분명히 보여줍니다.
+  cardSelected: { borderWidth: 2, borderColor: colors.primary },
   checkbox: {
-    position: "absolute",
-    top: 10,
-    right: 10,
-    zIndex: 1,
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: colors.surface,
+    backgroundColor: "rgba(0,0,0,0.35)",
     borderWidth: 1.5,
-    borderColor: colors.primary,
+    borderColor: "rgba(255,255,255,0.7)",
     alignItems: "center",
     justifyContent: "center",
   },
-  checkboxMark: { color: colors.primary, fontWeight: "800", fontSize: 14 },
-  image: { width: 96, height: "100%", minHeight: 110 },
-  body: { flex: 1, padding: 14, paddingRight: 40 },
-  name: { fontSize: 16, fontWeight: "700", color: colors.text },
-  badgeGroup: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 },
-  ratingBadge: { backgroundColor: colors.warningLight, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
-  ratingBadgeText: { fontSize: 11, fontWeight: "700", color: colors.warningText },
-  congestionRateBadge: { backgroundColor: colors.warningLight, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
-  congestionRateBadgeText: { fontSize: 11, fontWeight: "700", color: colors.warningText },
-  category: { fontSize: 12, color: colors.primary, fontWeight: "600", marginTop: 6 },
-  address: { fontSize: 12, color: colors.textTertiary, marginTop: 4 },
-  reason: { fontSize: 13, color: colors.textSecondary, marginTop: 6, lineHeight: 18 },
-  detailButton: { alignSelf: "flex-start", marginTop: 10 },
-  detailButtonText: { fontSize: 12, fontWeight: "700", color: colors.primary },
+  checkboxSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  body: { padding: spacing.md + 2 },
+  category: { fontSize: 12, color: colors.primary, fontFamily: fontFamily.semiBold },
+  reason: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: spacing.xs + 2, lineHeight: 18 },
+  detailButton: { alignSelf: "flex-start", marginTop: spacing.sm + 2 },
+  detailButtonText: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.primary },
   footer: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
     backgroundColor: colors.surfaceAlt,
-    padding: 20,
+    padding: spacing.xl - 4,
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
-  selectionCount: { fontSize: 13, color: colors.textSecondary, marginBottom: 8, textAlign: "center" },
+  selectionCount: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginBottom: spacing.sm, textAlign: "center" },
   submitButton: {
     backgroundColor: colors.primary,
-    borderRadius: 14,
-    paddingVertical: 16,
+    borderRadius: radius.lg - 2,
+    paddingVertical: spacing.lg,
     alignItems: "center",
   },
   submitButtonDisabled: { opacity: 0.6 },
-  submitText: { color: colors.onPrimary, fontSize: 16, fontWeight: "700" },
-  empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: colors.background },
-  emptyText: { fontSize: 15, color: colors.textTertiary, marginBottom: 16, textAlign: "center", lineHeight: 20 },
-  emptyButton: { backgroundColor: colors.primary, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 12 },
-  emptyButtonText: { color: colors.onPrimary, fontWeight: "700" },
+  submitText: { color: colors.onPrimary, fontSize: 16, fontFamily: fontFamily.bold },
+  empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, backgroundColor: colors.background },
+  emptyText: { fontSize: 15, fontFamily: fontFamily.regular, color: colors.textTertiary, marginBottom: spacing.lg, textAlign: "center", lineHeight: 20 },
+  emptyButton: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.xl - 4, paddingVertical: spacing.md },
+  emptyButtonText: { color: colors.onPrimary, fontFamily: fontFamily.bold },
   });
 }

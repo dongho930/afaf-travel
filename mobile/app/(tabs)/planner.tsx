@@ -1,4 +1,5 @@
 import { useRouter } from "expo-router";
+import { CheckIcon, MapPinIcon, MicrophoneIcon, SparkleIcon, type Icon } from "phosphor-react-native";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -13,21 +14,24 @@ import {
 } from "react-native";
 import { Alert } from "../../services/crossPlatformAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
+import { radius, spacing } from "../../constants/tokens";
+import { userTypeIcon } from "../../constants/userTypeIcons";
 import { api } from "../../services/api";
 import { useCourseContext } from "../../services/CourseContext";
 import { storage } from "../../services/storage";
 import { useTheme } from "../../services/ThemeContext";
 import { RegionOption, UserType, USER_TYPE_LABELS } from "../../types";
 
-const OPTIONS: { type: UserType; emoji: string; desc: string }[] = [
-  { type: "wheelchair", emoji: "♿", desc: "경사로·엘리베이터 등 이동 편의시설 우선" },
-  { type: "stroller", emoji: "🧸", desc: "유모차로 이동 가능한 평탄한 동선 우선" },
-  { type: "senior", emoji: "🧓", desc: "휴게 공간이 충분한 여유로운 코스" },
-  { type: "pregnant", emoji: "🤰", desc: "무리 없는 동선과 휴식 공간 우선" },
-  { type: "visual", emoji: "👁️", desc: "점자블록·오디오가이드 등 시각 안내시설 우선" },
-  { type: "hearing", emoji: "💡", desc: "수화안내·자막가이드 등 청각 안내시설 우선" },
-  { type: "general", emoji: "🙂", desc: "접근성 조건 없이 일반적인 코스 추천" },
+const OPTIONS: { type: UserType; icon: Icon; desc: string }[] = [
+  { type: "wheelchair", icon: userTypeIcon.wheelchair, desc: "경사로·엘리베이터 등 이동 편의시설 우선" },
+  { type: "stroller", icon: userTypeIcon.stroller, desc: "유모차로 이동 가능한 평탄한 동선 우선" },
+  { type: "senior", icon: userTypeIcon.senior, desc: "휴게 공간이 충분한 여유로운 코스" },
+  { type: "pregnant", icon: userTypeIcon.pregnant, desc: "무리 없는 동선과 휴식 공간 우선" },
+  { type: "visual", icon: userTypeIcon.visual, desc: "점자블록·오디오가이드 등 시각 안내시설 우선" },
+  { type: "hearing", icon: userTypeIcon.hearing, desc: "수화안내·자막가이드 등 청각 안내시설 우선" },
+  { type: "general", icon: userTypeIcon.general, desc: "접근성 조건 없이 일반적인 코스 추천" },
 ];
 
 // 이용자 유형마다 실제로 마주하는 이동 제약이 다르므로, 입력 예시도 유형에 맞게 다르게 보여줍니다.
@@ -63,6 +67,8 @@ export default function PlannerScreen() {
   const [isListening, setIsListening] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const exampleQuery = EXAMPLE_QUERY_BY_TYPE[userType];
+
+  const selectedOption = OPTIONS.find((o) => o.type === userType);
 
   const [regionModalVisible, setRegionModalVisible] = useState(false);
   const [regionOptions, setRegionOptions] = useState<RegionOption[]>([]);
@@ -136,30 +142,40 @@ export default function PlannerScreen() {
 
             <Text style={styles.fieldLabel}>접근성 유형</Text>
             <View style={styles.typeGrid}>
-              {OPTIONS.map((opt) => (
-                <Pressable
-                  key={opt.type}
-                  style={({ pressed }) => [
-                    styles.typeCard,
-                    (userType === opt.type || pressed) && styles.typeCardSelected,
-                  ]}
-                  onPress={() => handleSelectType(opt.type)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${USER_TYPE_LABELS[opt.type]}, ${opt.desc}`}
-                >
-                  <Text style={styles.typeEmoji}>{opt.emoji}</Text>
-                  <Text style={styles.typeTitle}>{USER_TYPE_LABELS[opt.type]}</Text>
-                  <Text style={styles.typeDesc}>{opt.desc}</Text>
-                </Pressable>
-              ))}
+              {OPTIONS.map((opt) => {
+                const TypeIcon = opt.icon;
+                const isSelected = userType === opt.type;
+                return (
+                  <Pressable
+                    key={opt.type}
+                    style={styles.typeTab}
+                    onPress={() => handleSelectType(opt.type)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${USER_TYPE_LABELS[opt.type]}, ${opt.desc}`}
+                  >
+                    <TypeIcon size={24} color={isSelected ? colors.primary : colors.textTertiary} weight="bold" />
+                    <Text style={[styles.typeLabel, isSelected && styles.typeLabelActive]}>
+                      {USER_TYPE_LABELS[opt.type]}
+                    </Text>
+                    <View style={[styles.typeDot, isSelected && styles.typeDotActive]} />
+                  </Pressable>
+                );
+              })}
             </View>
 
             <Text style={styles.fieldLabel}>지역</Text>
             <TouchableOpacity style={styles.regionButton} onPress={() => setRegionModalVisible(true)}>
-              <Text style={styles.regionButtonIcon}>📍</Text>
+              <MapPinIcon size={15} color={colors.text} weight="bold" />
               <Text style={styles.regionButtonText}>{sigunguName ?? "경기도 전체"}</Text>
               <Text style={styles.regionButtonChevron}>변경</Text>
             </TouchableOpacity>
+
+            {selectedOption && (
+              <View style={styles.typeDescRow}>
+                <selectedOption.icon size={14} color={colors.primary} weight="bold" />
+                <Text style={styles.typeDescText}>{selectedOption.desc}</Text>
+              </View>
+            )}
 
             <Text style={styles.fieldLabel}>어떤 여행을 원하세요?</Text>
             <Text style={styles.hint}>예: "{exampleQuery}"</Text>
@@ -176,9 +192,12 @@ export default function PlannerScreen() {
             {VoiceInputButton ? (
               <VoiceInputButton isListening={isListening} onListeningChange={setIsListening} onResult={setQueryText} />
             ) : (
-              <Text style={styles.voiceNotice}>
-                🎙️ 음성 입력은 iOS/Android 개발 빌드(dev client)에서 활성화됩니다. 지금은 텍스트로 입력해주세요.
-              </Text>
+              <View style={styles.voiceNoticeRow}>
+                <MicrophoneIcon size={14} color={colors.textTertiary} weight="bold" />
+                <Text style={styles.voiceNotice}>
+                  음성 입력은 iOS/Android 개발 빌드(dev client)에서 활성화됩니다. 지금은 텍스트로 입력해주세요.
+                </Text>
+              </View>
             )}
 
             <Pressable
@@ -191,7 +210,10 @@ export default function PlannerScreen() {
               {isSubmitting ? (
                 <ActivityIndicator color={colors.onPrimary} />
               ) : (
-                <Text style={styles.submitText}>✦ AI 경로 생성하기</Text>
+                <View style={styles.submitContentRow}>
+                  <SparkleIcon size={16} color={colors.onPrimary} weight="fill" />
+                  <Text style={styles.submitText}>AI 경로 생성하기</Text>
+                </View>
               )}
             </Pressable>
           </>
@@ -224,7 +246,7 @@ export default function PlannerScreen() {
               }}
             >
               <Text style={styles.regionOptionText}>경기도 전체</Text>
-              {sigunguCd === null && <Text style={styles.regionOptionCheck}>✓</Text>}
+              {sigunguCd === null && <CheckIcon size={15} color={colors.primary} weight="bold" />}
             </TouchableOpacity>
 
             {regionLoading ? (
@@ -242,7 +264,7 @@ export default function PlannerScreen() {
                     }}
                   >
                     <Text style={styles.regionOptionText}>{item.name}</Text>
-                    {sigunguCd === item.code && <Text style={styles.regionOptionCheck}>✓</Text>}
+                    {sigunguCd === item.code && <CheckIcon size={15} color={colors.primary} weight="bold" />}
                   </TouchableOpacity>
                 )}
                 ListEmptyComponent={<Text style={styles.regionEmpty}>검색 결과가 없어요.</Text>}
@@ -257,24 +279,17 @@ export default function PlannerScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { padding: 24, paddingBottom: 60 },
-  title: { fontSize: 22, fontWeight: "800", color: colors.text, marginBottom: 4 },
-  subtitle: { fontSize: 14, color: colors.textSecondary, marginBottom: 20 },
-  fieldLabel: { fontSize: 14, fontWeight: "700", color: colors.text, marginBottom: 10, marginTop: 4 },
+  container: { padding: spacing.xl, paddingBottom: spacing.xxl + spacing.xl + 4 },
+  title: { fontSize: 22, fontFamily: fontFamily.extraBold, color: colors.text, marginBottom: spacing.xs },
+  subtitle: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary, marginBottom: spacing.xl },
+  fieldLabel: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.text, marginBottom: spacing.sm + 2, marginTop: spacing.xs },
 
-  typeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 8 },
-  typeCard: {
-    width: "48%",
-    backgroundColor: colors.surface,
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  typeCardSelected: { backgroundColor: colors.primaryLight, borderColor: colors.primary },
-  typeEmoji: { fontSize: 20, marginBottom: 4 },
-  typeTitle: { fontSize: 15, fontWeight: "700", color: colors.text },
-  typeDesc: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  typeGrid: { flexDirection: "row", flexWrap: "wrap", rowGap: spacing.lg, marginBottom: spacing.lg },
+  typeTab: { width: "25%", alignItems: "center", gap: spacing.xs + 2 },
+  typeLabel: { fontSize: 11.5, fontFamily: fontFamily.regular, color: colors.textTertiary, textAlign: "center" },
+  typeLabelActive: { color: colors.primary, fontFamily: fontFamily.bold },
+  typeDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: "transparent", marginTop: -4 },
+  typeDotActive: { backgroundColor: colors.primary },
 
   regionButton: {
     flexDirection: "row",
@@ -282,75 +297,84 @@ function makeStyles(colors: ThemeColors) {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    marginBottom: 20,
-    gap: 8,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md + 2,
+    marginBottom: spacing.md,
+    gap: spacing.sm,
   },
-  regionButtonIcon: { fontSize: 15 },
-  regionButtonText: { flex: 1, fontSize: 15, fontWeight: "700", color: colors.text },
-  regionButtonChevron: { fontSize: 13, color: colors.primary, fontWeight: "600" },
+  regionButtonText: { flex: 1, fontSize: 15, fontFamily: fontFamily.bold, color: colors.text },
+  regionButtonChevron: { fontSize: 13, color: colors.primary, fontFamily: fontFamily.semiBold },
+  typeDescRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs + 2,
+    marginBottom: spacing.xl - 4,
+  },
+  typeDescText: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, flexShrink: 1 },
 
-  hint: { fontSize: 13, color: colors.textTertiary, marginBottom: 12 },
+  hint: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textTertiary, marginBottom: spacing.md },
   input: {
     minHeight: 110,
     backgroundColor: colors.surface,
-    borderRadius: 14,
+    borderRadius: radius.lg - 2,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 16,
+    padding: spacing.lg,
     fontSize: 16,
+    fontFamily: fontFamily.regular,
     color: colors.text,
     textAlignVertical: "top",
   },
-  voiceNotice: { fontSize: 13, color: colors.textTertiary, marginTop: 16, textAlign: "center", lineHeight: 18 },
+  voiceNoticeRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2, marginTop: spacing.lg, justifyContent: "center" },
+  voiceNotice: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textTertiary, textAlign: "center", lineHeight: 18, flexShrink: 1 },
   submitButton: {
-    marginTop: 24,
+    marginTop: spacing.xl - 4,
     backgroundColor: colors.primary,
-    borderRadius: 14,
-    paddingVertical: 16,
+    borderRadius: radius.lg - 2,
+    paddingVertical: spacing.lg,
     alignItems: "center",
   },
   submitButtonDisabled: { opacity: 0.6 },
-  submitText: { color: colors.onPrimary, fontSize: 16, fontWeight: "700" },
+  submitContentRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2 },
+  submitText: { color: colors.onPrimary, fontSize: 16, fontFamily: fontFamily.bold },
 
   modalBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end", alignItems: "center" },
   modalSheet: {
     width: "100%",
     maxWidth: 640, // 웹에서 넓은 화면일 때 앱 폭(WebFrame)에 맞춰 시트도 가운데 정렬되게
     backgroundColor: colors.surfaceAlt,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
     maxHeight: "80%",
     minHeight: "50%",
-    padding: 16,
+    padding: spacing.lg,
   },
-  modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
-  modalTitle: { fontSize: 16, fontWeight: "700", color: colors.text },
-  modalClose: { fontSize: 14, color: colors.primary, fontWeight: "600" },
+  modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.md },
+  modalTitle: { fontSize: 16, fontFamily: fontFamily.bold, color: colors.text },
+  modalClose: { fontSize: 14, color: colors.primary, fontFamily: fontFamily.semiBold },
   searchInput: {
     backgroundColor: colors.surface,
-    borderRadius: 10,
+    borderRadius: radius.sm + 2,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
     fontSize: 14,
+    fontFamily: fontFamily.regular,
     color: colors.text,
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
   regionOption: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: 14,
-    paddingHorizontal: 4,
+    paddingVertical: spacing.md + 2,
+    paddingHorizontal: spacing.xs,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  regionOptionText: { fontSize: 15, color: colors.text },
-  regionOptionCheck: { fontSize: 15, color: colors.primary, fontWeight: "800" },
-  regionEmpty: { textAlign: "center", color: colors.textTertiary, marginTop: 24, fontSize: 13 },
+  regionOptionText: { fontSize: 15, fontFamily: fontFamily.regular, color: colors.text },
+  regionEmpty: { textAlign: "center", color: colors.textTertiary, marginTop: spacing.xl - 4, fontSize: 13, fontFamily: fontFamily.regular },
   });
 }

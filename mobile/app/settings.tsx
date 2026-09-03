@@ -1,12 +1,15 @@
+import { CheckIcon, MoonIcon, SunIcon, type Icon } from "phosphor-react-native";
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
+import { radius, spacing } from "../constants/tokens";
 import { useTheme } from "../services/ThemeContext";
 import { ThemeMode } from "../constants/theme";
 
-const OPTIONS: { mode: ThemeMode; icon: string; label: string; desc: string }[] = [
-  { mode: "light", icon: "☀️", label: "밝은", desc: "밝은 배경의 기본 화면" },
-  { mode: "dark", icon: "🌙", label: "어두운", desc: "어두운 배경으로 눈부심 줄이기" },
+const OPTIONS: { mode: ThemeMode; icon: Icon; label: string; desc: string }[] = [
+  { mode: "light", icon: SunIcon, label: "밝은", desc: "밝은 배경의 기본 화면" },
+  { mode: "dark", icon: MoonIcon, label: "어두운", desc: "어두운 배경으로 눈부심 줄이기" },
 ];
 
 /**
@@ -24,24 +27,27 @@ export default function SettingsScreen() {
       <Text style={styles.sectionDesc}>앱 전체에 적용됩니다</Text>
 
       <View style={styles.optionRow}>
-        {OPTIONS.map((opt) => (
-          <TouchableOpacity
-            key={opt.mode}
-            style={[styles.optionCard, theme === opt.mode && styles.optionCardSelected]}
-            onPress={() => setTheme(opt.mode)}
-            accessibilityRole="button"
-            accessibilityLabel={`${opt.label} 테마, ${opt.desc}`}
-          >
-            <Text style={styles.optionIcon}>{opt.icon}</Text>
-            <Text style={styles.optionLabel}>{opt.label}</Text>
-            <Text style={styles.optionDesc}>{opt.desc}</Text>
-            {theme === opt.mode && (
-              <View style={styles.checkBadge}>
-                <Text style={styles.checkBadgeText}>✓</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        ))}
+        {OPTIONS.map((opt) => {
+          const OptionIcon = opt.icon;
+          return (
+            <TouchableOpacity
+              key={opt.mode}
+              style={[styles.optionCard, theme === opt.mode && styles.optionCardSelected]}
+              onPress={() => setTheme(opt.mode)}
+              accessibilityRole="button"
+              accessibilityLabel={`${opt.label} 테마, ${opt.desc}`}
+            >
+              <OptionIcon size={28} color={colors.primary} weight="bold" />
+              <Text style={styles.optionLabel}>{opt.label}</Text>
+              <Text style={styles.optionDesc}>{opt.desc}</Text>
+              {theme === opt.mode && (
+                <View style={styles.checkBadge}>
+                  <CheckIcon size={12} color={colors.onPrimary} weight="bold" />
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
       </View>
     </View>
   );
@@ -49,27 +55,27 @@ export default function SettingsScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background, padding: 24 },
-    sectionTitle: { fontSize: 16, fontWeight: "800", color: colors.text, marginBottom: 4 },
-    sectionDesc: { fontSize: 13, color: colors.textTertiary, marginBottom: 16 },
-    optionRow: { flexDirection: "row", gap: 12 },
+    container: { flex: 1, backgroundColor: colors.background, padding: spacing.xl },
+    sectionTitle: { fontSize: 16, fontFamily: fontFamily.extraBold, color: colors.text, marginBottom: spacing.xs },
+    sectionDesc: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textTertiary, marginBottom: spacing.lg },
+    optionRow: { flexDirection: "row", gap: spacing.md },
     optionCard: {
       flex: 1,
       backgroundColor: colors.surface,
-      borderRadius: 16,
+      borderRadius: radius.lg,
       borderWidth: 1,
       borderColor: colors.border,
-      padding: 18,
+      padding: spacing.lg + 2,
       alignItems: "center",
+      gap: spacing.sm,
     },
     optionCardSelected: { borderColor: colors.primary, backgroundColor: colors.primaryLight, borderWidth: 2 },
-    optionIcon: { fontSize: 28, marginBottom: 8 },
-    optionLabel: { fontSize: 15, fontWeight: "700", color: colors.text, marginBottom: 4 },
-    optionDesc: { fontSize: 12, color: colors.textSecondary, textAlign: "center" },
+    optionLabel: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.text },
+    optionDesc: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textSecondary, textAlign: "center" },
     checkBadge: {
       position: "absolute",
-      top: 10,
-      right: 10,
+      top: spacing.sm + 2,
+      right: spacing.sm + 2,
       width: 22,
       height: 22,
       borderRadius: 11,
@@ -77,6 +83,5 @@ function makeStyles(colors: ThemeColors) {
       alignItems: "center",
       justifyContent: "center",
     },
-    checkBadgeText: { color: colors.onPrimary, fontSize: 12, fontWeight: "800" },
   });
 }

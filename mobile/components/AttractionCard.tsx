@@ -1,84 +1,78 @@
 import { useRouter } from "expo-router";
+import { ClockIcon, FirstAidKitIcon } from "phosphor-react-native";
 import React from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { getCongestionDisplay } from "../constants/congestion";
+import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
+import { radius, spacing } from "../constants/tokens";
 import { useTheme } from "../services/ThemeContext";
 import { CourseStop, UserType } from "../types";
 import { AccessibilityIcons } from "./AccessibilityIcons";
+import { PhotoCardHeader } from "./PhotoCardHeader";
 
-export function AttractionCard({ stop, userType }: { stop: CourseStop; userType?: UserType }) {
+export function AttractionCard({
+  stop,
+  userType,
+  actions,
+}: {
+  stop: CourseStop;
+  userType?: UserType;
+  // 사진 위가 아니라 사진 아래 본문(추천 방문 시간 옆)에 넣을 보조 액션 —
+  // 예: 결과 화면(results.tsx)에서 웹 전용 순서 위/아래 버튼.
+  actions?: React.ReactNode;
+}) {
   const router = useRouter();
   const { colors } = useTheme();
   const styles = makeStyles(colors);
-  const CONGESTION_LABEL: Record<string, { label: string; color: string }> = {
-    low: { label: "여유", color: colors.primary },
-    medium: { label: "보통", color: colors.warning },
-    high: { label: "혼잡", color: colors.danger },
-  };
   const { attraction } = stop;
-  const currentCongestion = attraction.congestion_forecast[0];
-  const congestionInfo = currentCongestion
-    ? CONGESTION_LABEL[currentCongestion.congestion_level]
-    : null;
 
   return (
-    <View style={styles.card}>
-      <View style={styles.orderBadge}>
-        <Text style={styles.orderText}>{stop.order}</Text>
-      </View>
-
-      {attraction.image_url && (
-        <Image source={{ uri: attraction.image_url }} style={styles.image} />
-      )}
-
-      <View style={[styles.body, !attraction.image_url && styles.bodyNoImage]}>
-        <View style={styles.headerRow}>
-          <Text style={styles.name}>{attraction.name}</Text>
-          <View style={styles.badgeGroup}>
-            {typeof attraction.avg_rating === "number" && (
-              <View style={styles.ratingBadge}>
-                <Text style={styles.ratingBadgeText}>
-                  ★ {attraction.avg_rating.toFixed(1)} ({attraction.review_count})
-                </Text>
-              </View>
-            )}
-            {typeof attraction.congestion_rate === "number" && (
-              <View style={styles.congestionRateBadge}>
-                <Text style={styles.congestionRateBadgeText}>
-                  혼잡도 {Math.round(attraction.congestion_rate)}%
-                </Text>
-              </View>
-            )}
-            {congestionInfo && (
-              <View style={[styles.congestionBadge, { backgroundColor: congestionInfo.color }]}>
-                <Text style={styles.congestionText}>{congestionInfo.label}</Text>
-              </View>
-            )}
+    <Pressable
+      style={styles.card}
+      onPress={() =>
+        router.push({
+          pathname: "/attraction-detail",
+          params: { contentId: attraction.content_id, name: attraction.name },
+        })
+      }
+    >
+      <PhotoCardHeader
+        imageUrl={attraction.image_url}
+        title={attraction.name}
+        subtitle={attraction.address}
+        rating={attraction.avg_rating}
+        reviewCount={attraction.review_count}
+        congestion={getCongestionDisplay(attraction, colors)}
+        topLeft={
+          <View style={styles.orderBadge}>
+            <Text style={styles.orderText}>{stop.order}</Text>
           </View>
+        }
+      />
+
+      <View style={styles.body}>
+        <View style={styles.bodyHeaderRow}>
+          <View style={styles.timeRow}>
+            <ClockIcon size={13} color={colors.text} weight="bold" />
+            <Text style={styles.time}>추천 방문 시간: {stop.recommended_arrival_time}</Text>
+          </View>
+          {actions}
         </View>
-        <Text style={styles.address}>{attraction.address}</Text>
-        <Text style={styles.time}>🕐 추천 방문 시간: {stop.recommended_arrival_time}</Text>
         <Text style={styles.reason}>{stop.reason}</Text>
 
         <AccessibilityIcons features={attraction.accessibility} userType={userType} />
 
         {attraction.nearby_medical_info && (
-          <Text style={styles.medical}>🏥 {attraction.nearby_medical_info}</Text>
+          <View style={styles.medicalRow}>
+            <FirstAidKitIcon size={13} color={colors.textSecondary} weight="bold" />
+            <Text style={styles.medical}>{attraction.nearby_medical_info}</Text>
+          </View>
         )}
 
-        <Pressable
-          style={styles.detailButton}
-          onPress={() =>
-            router.push({
-              pathname: "/attraction-detail",
-              params: { contentId: attraction.content_id, name: attraction.name },
-            })
-          }
-        >
-          <Text style={styles.detailButtonText}>상세 페이지 보기 →</Text>
-        </Pressable>
+        <Text style={styles.detailButtonText}>상세 페이지 보기 →</Text>
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -86,17 +80,22 @@ function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: 14,
+    borderRadius: radius.xl,
+    marginBottom: spacing.lg,
     overflow: "hidden",
+    // 테두리 대신 배경색을 살짝 반영한 그림자로 카드를 떠 있게 합니다.
+    ...Platform.select({
+      web: { boxShadow: "0 6px 20px rgba(0,0,0,0.08)" } as any,
+      default: {
+        shadowColor: colors.shadow,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.1,
+        shadowRadius: 16,
+        elevation: 3,
+      },
+    }),
   },
   orderBadge: {
-    position: "absolute",
-    top: 10,
-    left: 10,
-    zIndex: 1,
     backgroundColor: colors.primary,
     width: 28,
     height: 28,
@@ -104,24 +103,20 @@ function makeStyles(colors: ThemeColors) {
     alignItems: "center",
     justifyContent: "center",
   },
-  orderText: { color: colors.onPrimary, fontWeight: "700", fontSize: 13 },
-  image: { width: "100%", height: 140 },
-  body: { padding: 16 },
-  bodyNoImage: { paddingTop: 40 }, // 사진이 없으면 순번 배지가 body 위에 바로 겹치니, 배지 높이만큼 위쪽 여백을 줌
-  headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  name: { fontSize: 17, fontWeight: "700", color: colors.text, flexShrink: 1 },
-  badgeGroup: { flexDirection: "row", gap: 6, marginLeft: 8 },
-  ratingBadge: { backgroundColor: colors.warningLight, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
-  ratingBadgeText: { fontSize: 11, fontWeight: "700", color: colors.warningText },
-  congestionRateBadge: { backgroundColor: colors.warningLight, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
-  congestionRateBadgeText: { fontSize: 11, fontWeight: "700", color: colors.warningText },
-  congestionBadge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
-  congestionText: { color: "#FFFFFF", fontSize: 11, fontWeight: "700" },
-  address: { fontSize: 13, color: colors.textTertiary, marginTop: 4 },
-  time: { fontSize: 13, color: colors.text, marginTop: 8, fontWeight: "600" },
-  reason: { fontSize: 13, color: colors.textSecondary, marginTop: 4, lineHeight: 18 },
-  medical: { fontSize: 12, color: colors.textSecondary, marginTop: 8 },
-  detailButton: { alignSelf: "flex-start", marginTop: 10 },
-  detailButtonText: { fontSize: 12, fontWeight: "700", color: colors.primary },
+  orderText: { color: colors.onPrimary, fontFamily: fontFamily.bold, fontSize: 13 },
+
+  body: { padding: spacing.lg },
+  bodyHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+  timeRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  time: { fontSize: 13, fontFamily: fontFamily.semiBold, color: colors.text },
+  reason: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: spacing.xs, lineHeight: 18 },
+  medicalRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs, marginTop: spacing.sm },
+  medical: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textSecondary, flexShrink: 1 },
+  detailButtonText: {
+    fontSize: 12,
+    fontFamily: fontFamily.bold,
+    color: colors.primary,
+    marginTop: spacing.sm + 2,
+  },
   });
 }

@@ -1,4 +1,6 @@
+import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import React from "react";
 import { View } from "react-native";
@@ -6,9 +8,14 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { BottomTabBar } from "../components/BottomTabBar";
 import { WebFrame } from "../components/WebFrame";
+import { fontFamily, fontsToLoad } from "../constants/fonts";
 import { AuthProvider } from "../services/AuthContext";
 import { CourseProvider } from "../services/CourseContext";
 import { ThemeProvider, useTheme } from "../services/ThemeContext";
+
+// 폰트(Pretendard)를 다 불러오기 전까지 스플래시 화면을 유지합니다 — 그래야
+// 시스템 기본 폰트로 잠깐 그려졌다가 커스텀 폰트로 바뀌는 깜빡임이 없습니다.
+SplashScreen.preventAutoHideAsync();
 // import { useEmailVerificationDeepLink } from "../services/useEmailVerificationDeepLink"; // 이메일 인증 기능을 다시 켤 때 주석 해제
 
 /**
@@ -40,7 +47,7 @@ function ThemedApp() {
             <Stack
               screenOptions={{
                 headerStyle: { backgroundColor: colors.background },
-                headerTitleStyle: { fontSize: 17, fontWeight: "600", color: colors.text },
+                headerTitleStyle: { fontSize: 17, fontFamily: fontFamily.semiBold, color: colors.text },
                 headerTintColor: colors.text,
                 contentStyle: { backgroundColor: colors.background },
               }}
@@ -67,8 +74,20 @@ function ThemedApp() {
 }
 
 export default function RootLayout() {
+  const [fontsLoaded] = useFonts(fontsToLoad);
+
+  const onLayoutRootView = React.useCallback(() => {
+    if (fontsLoaded) {
+      SplashScreen.hideAsync();
+    }
+  }, [fontsLoaded]);
+
+  if (!fontsLoaded) {
+    return null;
+  }
+
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1 }} onLayout={onLayoutRootView}>
       <SafeAreaProvider>
         <ThemeProvider>
           <AuthProvider>

@@ -1,9 +1,11 @@
 import { useFocusEffect, useRouter } from "expo-router";
+import { MapPinIcon, SparkleIcon, WheelchairIcon, type Icon } from "phosphor-react-native";
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Image,
   ImageBackground,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,7 +17,11 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AccessibilityIcons } from "../../components/AccessibilityIcons";
 import { AppLogo } from "../../components/AppLogo";
+import { PhotoCardHeader } from "../../components/PhotoCardHeader";
+import { getCongestionDisplay } from "../../constants/congestion";
+import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
+import { radius, spacing } from "../../constants/tokens";
 import { api } from "../../services/api";
 import { useAuth } from "../../services/AuthContext";
 import { useCourseContext } from "../../services/CourseContext";
@@ -169,9 +175,9 @@ export default function HomeScreen() {
   const filteredPlaces =
     selectedCategory === "전체" ? popularPlaces : popularPlaces.filter((p) => p.category === selectedCategory);
 
-  const stats = [
-    { icon: "♿", value: totalAccessibleCount != null ? String(totalAccessibleCount) : "-", label: "무장애 여행지" },
-    { icon: "📍", value: supportedRegionCount != null ? String(supportedRegionCount) : "-", label: "지원 지역" },
+  const stats: { icon: Icon; value: string; label: string }[] = [
+    { icon: WheelchairIcon, value: totalAccessibleCount != null ? String(totalAccessibleCount) : "-", label: "무장애 여행지" },
+    { icon: MapPinIcon, value: supportedRegionCount != null ? String(supportedRegionCount) : "-", label: "지원 지역" },
   ];
 
   return (
@@ -210,7 +216,10 @@ export default function HomeScreen() {
           imageStyle={styles.heroImage}
         >
           {heroImageUrl && <View style={styles.heroOverlay} />}
-          <Text style={[styles.heroBadge, heroImageUrl && styles.heroBadgeOnPhoto]}>✦ AI 추천 경로</Text>
+          <View style={[styles.heroBadge, heroImageUrl && styles.heroBadgeOnPhoto]}>
+            <SparkleIcon size={11} color={colors.onPrimary} weight="fill" />
+            <Text style={styles.heroBadgeText}>AI 추천 경로</Text>
+          </View>
           <Text style={[styles.heroTitle, heroImageUrl && styles.heroTextOnPhoto]}>
             나만의 완벽한{"\n"}무장애 여행을 계획하세요
           </Text>
@@ -234,13 +243,16 @@ export default function HomeScreen() {
         </ImageBackground>
 
         <View style={styles.statsRow}>
-          {stats.map((s) => (
-            <View key={s.label} style={styles.statCard}>
-              <Text style={styles.statIcon}>{s.icon}</Text>
-              <Text style={styles.statValue}>{s.value}</Text>
-              <Text style={styles.statLabel}>{s.label}</Text>
-            </View>
-          ))}
+          {stats.map((s) => {
+            const StatIcon = s.icon;
+            return (
+              <View key={s.label} style={styles.statCard}>
+                <StatIcon size={26} color={colors.primary} weight="bold" />
+                <Text style={styles.statValue}>{s.value}</Text>
+                <Text style={styles.statLabel}>{s.label}</Text>
+              </View>
+            );
+          })}
         </View>
 
         <View style={styles.sectionHeader}>
@@ -298,37 +310,17 @@ export default function HomeScreen() {
                 })
               }
             >
-              {place.image_url ? (
-                <Image source={{ uri: place.image_url }} style={styles.placeImage} />
-              ) : (
-                <View style={styles.placeImagePlaceholder}>
-                  <Text style={styles.placeBadge}>✦ AI 추천</Text>
-                </View>
-              )}
+              <PhotoCardHeader
+                imageUrl={place.image_url}
+                height={180}
+                title={place.name}
+                subtitle={place.address}
+                rating={place.avg_rating}
+                reviewCount={place.review_count}
+                congestion={getCongestionDisplay(place, colors)}
+              />
               <View style={styles.placeInfo}>
-                <View style={styles.placeTitleRow}>
-                  <Text style={styles.placeName}>{place.name}</Text>
-                  <View style={styles.badgeGroup}>
-                    {typeof place.avg_rating === "number" && (
-                      <View style={styles.ratingBadge}>
-                        <Text style={styles.ratingBadgeText}>
-                          ★ {place.avg_rating.toFixed(1)} ({place.review_count})
-                        </Text>
-                      </View>
-                    )}
-                    {typeof place.congestion_rate === "number" && (
-                      <View style={styles.congestionBadge}>
-                        <Text style={styles.congestionBadgeText}>
-                          혼잡도 {Math.round(place.congestion_rate)}%
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
                 <Text style={styles.placeCategory}>{place.category}</Text>
-                <Text style={styles.placeAddress} numberOfLines={1}>
-                  📍 {place.address}
-                </Text>
                 {!!place.overview && (
                   <Text style={styles.placeOverview} numberOfLines={2}>
                     {place.overview}
@@ -352,22 +344,22 @@ export default function HomeScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { padding: 20, paddingTop: 12, paddingBottom: 40 },
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 18 },
-  logoRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  logoSub: { fontSize: 12, fontWeight: "500", color: colors.textTertiary },
+  container: { padding: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.xxl + spacing.lg },
+  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.xl - 2 },
+  logoRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  logoSub: { fontSize: 12, fontFamily: fontFamily.medium, color: colors.textTertiary },
   avatar: { width: 34, height: 34, borderRadius: 17 },
   avatarPlaceholder: { backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" },
-  avatarPlaceholderText: { fontSize: 14, fontWeight: "700", color: colors.primary },
+  avatarPlaceholderText: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.primary },
 
   hero: {
     backgroundColor: colors.primaryLight,
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 18,
+    borderRadius: radius.xl,
+    padding: spacing.xl - 4,
+    marginBottom: spacing.xl - 6,
     overflow: "hidden", // ImageBackground의 둥근 모서리가 이미지에도 적용되도록
   },
-  heroImage: { borderRadius: 20 },
+  heroImage: { borderRadius: radius.xl },
   heroOverlay: {
     position: "absolute",
     top: 0,
@@ -377,58 +369,51 @@ function makeStyles(colors: ThemeColors) {
     backgroundColor: colors.overlay, // 사진 위 글자 가독성용 어두운 반투명 오버레이
   },
   heroBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
     alignSelf: "flex-start",
     backgroundColor: colors.primary,
-    color: colors.onPrimary,
-    fontSize: 11,
-    fontWeight: "700",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    marginBottom: 10,
+    paddingHorizontal: spacing.md - 2,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
+    marginBottom: spacing.sm + 2,
   },
+  heroBadgeText: { color: colors.onPrimary, fontSize: 11, fontFamily: fontFamily.bold },
   heroBadgeOnPhoto: { backgroundColor: colors.primary },
-  heroTitle: { fontSize: 21, fontWeight: "800", color: colors.text, marginBottom: 8, lineHeight: 28 },
-  heroDesc: { fontSize: 13, color: colors.textSecondary, marginBottom: 16, lineHeight: 18 },
+  heroTitle: { fontSize: 21, fontFamily: fontFamily.extraBold, color: colors.text, marginBottom: spacing.sm, lineHeight: 28 },
+  heroDesc: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginBottom: spacing.lg, lineHeight: 18 },
   heroTextOnPhoto: { color: "#FFFFFF" }, // 사진 배경일 땐 테마와 상관없이 항상 흰 글자로(가독성용)
-  searchRow: { flexDirection: "row", gap: 8 },
+  searchRow: { flexDirection: "row", gap: spacing.sm },
   searchInput: {
     flex: 1,
     backgroundColor: colors.surface,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: spacing.md + 2,
+    paddingVertical: spacing.md,
     fontSize: 14,
+    fontFamily: fontFamily.regular,
     color: colors.text,
   },
   searchButton: {
     backgroundColor: colors.primary,
-    borderRadius: 12,
-    paddingHorizontal: 18,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.lg + 2,
     justifyContent: "center",
   },
-  searchButtonText: { color: colors.onPrimary, fontWeight: "700", fontSize: 14 },
+  searchButtonText: { color: colors.onPrimary, fontFamily: fontFamily.bold, fontSize: 14 },
 
-  statsRow: { flexDirection: "row", gap: 10, marginBottom: 24 },
-  statCard: {
-    flex: 1,
-    backgroundColor: colors.surface,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 14,
-    alignItems: "center",
-  },
-  statIcon: { fontSize: 18, marginBottom: 6 },
-  statValue: { fontSize: 17, fontWeight: "800", color: colors.primary },
-  statLabel: { fontSize: 11, color: colors.textTertiary, marginTop: 2, textAlign: "center" },
+  statsRow: { flexDirection: "row", gap: spacing.xl, marginBottom: spacing.xl, paddingHorizontal: spacing.md },
+  statCard: { flex: 1, alignItems: "center", gap: spacing.xs + 2 },
+  statValue: { fontSize: 20, fontFamily: fontFamily.extraBold, color: colors.text, fontVariant: ["tabular-nums"] },
+  statLabel: { fontSize: 12, fontFamily: fontFamily.medium, color: colors.textTertiary, textAlign: "center" },
 
-  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
-  sectionTitle: { fontSize: 18, fontWeight: "800", color: colors.text },
-  toggleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  toggleLabel: { fontSize: 13, color: colors.textSecondary },
+  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.md },
+  sectionTitle: { fontSize: 18, fontFamily: fontFamily.extraBold, color: colors.text },
+  toggleRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  toggleLabel: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary },
   toggleTrack: {
     width: 40,
     height: 22,
@@ -440,76 +425,49 @@ function makeStyles(colors: ThemeColors) {
   toggleThumb: { width: 18, height: 18, borderRadius: 9, backgroundColor: colors.surface },
   toggleThumbOn: { alignSelf: "flex-end" },
 
-  chipRow: { gap: 8, marginBottom: 16 },
+  chipRow: { gap: spacing.sm, marginBottom: spacing.lg },
   chip: {
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
-    borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
   },
   chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
-  chipText: { fontSize: 13, color: colors.textSecondary, fontWeight: "600" },
+  chipText: { fontSize: 13, fontFamily: fontFamily.semiBold, color: colors.textSecondary },
   chipTextSelected: { color: colors.onPrimary },
 
-  emptyText: { fontSize: 13, color: colors.textTertiary, textAlign: "center", marginTop: 20 },
+  emptyText: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textTertiary, textAlign: "center", marginTop: spacing.xl - 4 },
   moreButton: {
-    marginTop: 4,
-    marginBottom: 8,
-    paddingVertical: 13,
-    borderRadius: 12,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+    paddingVertical: spacing.md + 1,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
     alignItems: "center",
   },
-  moreButtonText: { fontSize: 14, fontWeight: "700", color: colors.primary },
+  moreButtonText: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.primary },
 
   placeCard: {
     backgroundColor: colors.surface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: 12,
+    borderRadius: radius.xl,
+    marginBottom: spacing.lg,
     overflow: "hidden",
+    ...Platform.select({
+      web: { boxShadow: "0 6px 20px rgba(0,0,0,0.08)" } as any,
+      default: {
+        shadowColor: colors.shadow,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.1,
+        shadowRadius: 16,
+        elevation: 3,
+      },
+    }),
   },
-  placeImage: { height: 110, width: "100%" },
-  placeImagePlaceholder: {
-    height: 110,
-    backgroundColor: colors.text,
-    justifyContent: "flex-start",
-    padding: 10,
-  },
-  placeBadge: {
-    alignSelf: "flex-start",
-    backgroundColor: colors.primary,
-    color: colors.onPrimary,
-    fontSize: 11,
-    fontWeight: "700",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-  },
-  placeInfo: { padding: 14 },
-  placeTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  placeName: { fontSize: 15, fontWeight: "700", color: colors.text, flexShrink: 1 },
-  placeCategory: { fontSize: 12, color: colors.primary, fontWeight: "600", marginTop: 2 },
-  placeAddress: { fontSize: 11, color: colors.textTertiary, marginTop: 3 },
-  placeOverview: { fontSize: 12, color: colors.textSecondary, marginTop: 6, lineHeight: 17 },
-  badgeGroup: { flexDirection: "row", gap: 6, marginLeft: 8 },
-  ratingBadge: {
-    backgroundColor: colors.warningLight,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-  },
-  ratingBadgeText: { fontSize: 11, fontWeight: "700", color: colors.warningText },
-  congestionBadge: {
-    backgroundColor: colors.warningLight,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-  },
-  congestionBadgeText: { fontSize: 11, fontWeight: "700", color: colors.warningText },
+  placeInfo: { padding: spacing.md + 2 },
+  placeCategory: { fontSize: 12, fontFamily: fontFamily.semiBold, color: colors.primary },
+  placeOverview: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: spacing.xs + 2, lineHeight: 17 },
   });
 }

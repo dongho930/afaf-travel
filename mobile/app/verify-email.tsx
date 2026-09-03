@@ -1,8 +1,11 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { EnvelopeSimpleIcon } from "phosphor-react-native";
 import React, { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { Alert } from "../services/crossPlatformAlert";
+import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
+import { radius, spacing } from "../constants/tokens";
 import { useAuth } from "../services/AuthContext";
 import { useTheme } from "../services/ThemeContext";
 
@@ -38,7 +41,7 @@ export default function VerifyEmailScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.icon}>📧</Text>
+      <EnvelopeSimpleIcon size={48} color={colors.primary} weight="bold" />
       <Text style={styles.title}>메일함을 확인해주세요</Text>
       <Text style={styles.desc}>
         {email ? `${email}으로` : "가입하신 이메일로"} 인증 메일을 보냈어요.{"\n"}
@@ -66,23 +69,22 @@ export default function VerifyEmailScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    container: { flex: 1, padding: 24, alignItems: "center", justifyContent: "center", backgroundColor: colors.background },
-    icon: { fontSize: 48, marginBottom: 16 },
-    title: { fontSize: 20, fontWeight: "800", color: colors.text, marginBottom: 10, textAlign: "center" },
-    desc: { fontSize: 14, color: colors.textSecondary, textAlign: "center", lineHeight: 21, marginBottom: 32 },
+    container: { flex: 1, padding: spacing.xl, alignItems: "center", justifyContent: "center", backgroundColor: colors.background, gap: 0 },
+    title: { fontSize: 20, fontFamily: fontFamily.extraBold, color: colors.text, marginTop: spacing.lg, marginBottom: spacing.sm + 2, textAlign: "center" },
+    desc: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary, textAlign: "center", lineHeight: 21, marginBottom: spacing.xxl },
     resendButton: {
       borderWidth: 1,
       borderColor: colors.primary,
-      borderRadius: 14,
-      paddingVertical: 14,
-      paddingHorizontal: 20,
+      borderRadius: radius.lg - 2,
+      paddingVertical: spacing.md + 2,
+      paddingHorizontal: spacing.xl - 4,
       alignItems: "center",
-      marginBottom: 12,
+      marginBottom: spacing.md,
       alignSelf: "stretch",
     },
     resendButtonDisabled: { opacity: 0.6 },
-    resendButtonText: { color: colors.primary, fontWeight: "700", fontSize: 14 },
-    loginButton: { paddingVertical: 12, alignItems: "center" },
-    loginButtonText: { color: colors.textTertiary, fontWeight: "600", fontSize: 13 },
+    resendButtonText: { color: colors.primary, fontFamily: fontFamily.bold, fontSize: 14 },
+    loginButton: { paddingVertical: spacing.md, alignItems: "center" },
+    loginButtonText: { color: colors.textTertiary, fontFamily: fontFamily.semiBold, fontSize: 13 },
   });
 }

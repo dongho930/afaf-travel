@@ -1,6 +1,7 @@
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
+import { CameraIcon } from "phosphor-react-native";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -17,7 +18,9 @@ import { api } from "../services/api";
 import { useAuth } from "../services/AuthContext";
 import { useTheme } from "../services/ThemeContext";
 import { UserProfile } from "../types";
+import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
+import { radius, spacing } from "../constants/tokens";
 
 /**
  * 첫 화면에서 프로필 사진(아바타)을 누르면 들어오는 화면입니다.
@@ -163,7 +166,7 @@ export default function ProfileScreen() {
             {uploadingAvatar ? (
               <ActivityIndicator size="small" color={colors.onPrimary} />
             ) : (
-              <Text style={styles.avatarEditBadgeText}>📷</Text>
+              <CameraIcon size={13} color={colors.onPrimary} weight="bold" />
             )}
           </View>
         </TouchableOpacity>
@@ -253,7 +256,7 @@ export default function ProfileScreen() {
               onChangeText={setNewPassword}
             />
             <TextInput
-              style={[styles.input, { marginTop: 10 }]}
+              style={[styles.input, { marginTop: spacing.sm + 2 }]}
               placeholder="새 비밀번호 확인"
               placeholderTextColor={colors.textTertiary}
               secureTextEntry
@@ -295,11 +298,11 @@ export default function ProfileScreen() {
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
     center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background },
-    container: { flex: 1, padding: 24, backgroundColor: colors.background },
-    avatarSection: { alignItems: "center", marginBottom: 28 },
+    container: { flex: 1, padding: spacing.xl, backgroundColor: colors.background },
+    avatarSection: { alignItems: "center", marginBottom: spacing.xl + 4 },
     avatar: { width: 96, height: 96, borderRadius: 48, backgroundColor: colors.primaryLight },
     avatarPlaceholder: { alignItems: "center", justifyContent: "center" },
-    avatarPlaceholderText: { fontSize: 32, fontWeight: "700", color: colors.primary },
+    avatarPlaceholderText: { fontSize: 32, fontFamily: fontFamily.bold, color: colors.primary },
     avatarEditBadge: {
       position: "absolute",
       bottom: -2,
@@ -313,53 +316,53 @@ function makeStyles(colors: ThemeColors) {
       borderWidth: 2,
       borderColor: colors.background,
     },
-    avatarEditBadgeText: { fontSize: 13 },
-    avatarHint: { fontSize: 12, color: colors.textTertiary, marginTop: 10 },
+    avatarHint: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary, marginTop: spacing.sm + 2 },
 
     section: {
       backgroundColor: colors.surface,
-      borderRadius: 14,
+      borderRadius: radius.lg - 2,
       borderWidth: 1,
       borderColor: colors.border,
-      padding: 16,
-      marginBottom: 12,
+      padding: spacing.lg,
+      marginBottom: spacing.md,
     },
-    sectionLabel: { fontSize: 12, color: colors.textTertiary, marginBottom: 6, fontWeight: "600" },
+    sectionLabel: { fontSize: 12, fontFamily: fontFamily.semiBold, color: colors.textTertiary, marginBottom: spacing.xs + 2 },
     rowBetween: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-    valueText: { fontSize: 16, fontWeight: "700", color: colors.text },
-    linkText: { fontSize: 13, color: colors.primary, fontWeight: "700" },
+    valueText: { fontSize: 16, fontFamily: fontFamily.bold, color: colors.text },
+    linkText: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.primary },
 
-    editRow: { flexDirection: "row", gap: 8, alignItems: "center", marginTop: 8 },
+    editRow: { flexDirection: "row", gap: spacing.sm, alignItems: "center", marginTop: spacing.sm },
     input: {
       flex: 1,
       backgroundColor: colors.surfaceAlt,
-      borderRadius: 10,
+      borderRadius: radius.sm + 2,
       borderWidth: 1,
       borderColor: colors.border,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm + 2,
       fontSize: 14,
+      fontFamily: fontFamily.regular,
       color: colors.text,
     },
     smallButton: {
       backgroundColor: colors.primary,
-      borderRadius: 10,
-      paddingHorizontal: 14,
-      paddingVertical: 10,
+      borderRadius: radius.sm + 2,
+      paddingHorizontal: spacing.md + 2,
+      paddingVertical: spacing.sm + 2,
     },
     smallButtonDisabled: { opacity: 0.6 },
-    smallButtonText: { color: colors.onPrimary, fontWeight: "700", fontSize: 13 },
+    smallButtonText: { color: colors.onPrimary, fontFamily: fontFamily.bold, fontSize: 13 },
     smallButtonOutline: {
       borderWidth: 1,
       borderColor: colors.border,
-      borderRadius: 10,
-      paddingHorizontal: 14,
-      paddingVertical: 10,
+      borderRadius: radius.sm + 2,
+      paddingHorizontal: spacing.md + 2,
+      paddingVertical: spacing.sm + 2,
     },
-    smallButtonOutlineText: { color: colors.textSecondary, fontWeight: "700", fontSize: 13 },
+    smallButtonOutlineText: { color: colors.textSecondary, fontFamily: fontFamily.bold, fontSize: 13 },
 
-    signOutButton: { marginTop: 12, alignItems: "center", padding: 12 },
-    signOutButtonText: { color: colors.danger, fontWeight: "700", fontSize: 14 },
+    signOutButton: { marginTop: spacing.md, alignItems: "center", padding: spacing.md },
+    signOutButtonText: { color: colors.danger, fontFamily: fontFamily.bold, fontSize: 14 },
 
     passwordModal: {
       position: "absolute",
@@ -370,14 +373,14 @@ function makeStyles(colors: ThemeColors) {
       backgroundColor: colors.overlay,
       alignItems: "center",
       justifyContent: "center",
-      padding: 24,
+      padding: spacing.xl,
     },
     passwordModalCard: {
       backgroundColor: colors.surfaceAlt,
-      borderRadius: 16,
-      padding: 20,
+      borderRadius: radius.lg,
+      padding: spacing.lg + 4,
       width: "100%",
     },
-    modalTitle: { fontSize: 16, fontWeight: "700", color: colors.text, marginBottom: 12 },
+    modalTitle: { fontSize: 16, fontFamily: fontFamily.bold, color: colors.text, marginBottom: spacing.md },
   });
 }

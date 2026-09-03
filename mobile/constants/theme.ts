@@ -71,7 +71,7 @@ export const darkColors: ThemeColors = {
   primary: "#4FA487",
   primaryLight: "#1E332B",
   primaryDark: "#7FCBAE",
-  onPrimary: "#FFFFFF",
+  onPrimary: "#12161A", // 다크 모드의 primary(민트그린)는 밝아서, 흰 글자보다 짙은 글자가 대비(WCAG AA)를 지킵니다 (약 6:1)
 
   danger: "#E17C6E",
   dangerLight: "#3A2422",

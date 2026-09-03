@@ -1,3 +1,4 @@
+import { MicrophoneIcon, StopCircleIcon } from "phosphor-react-native";
 import React from "react";
 import { Pressable, StyleSheet, Text } from "react-native";
 import { Alert } from "../services/crossPlatformAlert";
@@ -5,7 +6,9 @@ import {
   ExpoSpeechRecognitionModule,
   useSpeechRecognitionEvent,
 } from "expo-speech-recognition";
+import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
+import { radius, spacing } from "../constants/tokens";
 import { useTheme } from "../services/ThemeContext";
 
 /**
@@ -63,7 +66,11 @@ export function VoiceInputButton({
       accessibilityRole="button"
       accessibilityLabel={isListening ? "음성 입력 중지" : "음성으로 입력하기"}
     >
-      <Text style={styles.micIcon}>{isListening ? "🛑" : "🎙️"}</Text>
+      {isListening ? (
+        <StopCircleIcon size={26} color={colors.danger} weight="bold" />
+      ) : (
+        <MicrophoneIcon size={26} color={colors.primary} weight="bold" />
+      )}
       <Text style={styles.micLabel}>
         {isListening ? "듣는 중... 눌러서 중지" : "눌러서 음성으로 말하기"}
       </Text>
@@ -74,16 +81,16 @@ export function VoiceInputButton({
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
   micButton: {
-    marginTop: 16,
+    marginTop: spacing.lg,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.primary,
-    borderRadius: 14,
-    paddingVertical: 16,
+    borderRadius: radius.lg - 2,
+    paddingVertical: spacing.lg,
     alignItems: "center",
+    gap: spacing.xs + 2,
   },
   micButtonActive: { backgroundColor: colors.dangerLight, borderColor: colors.danger },
-  micIcon: { fontSize: 26, marginBottom: 4 },
-  micLabel: { fontSize: 15, fontWeight: "600", color: colors.primary },
+  micLabel: { fontSize: 15, fontFamily: fontFamily.semiBold, color: colors.primary },
   });
 }

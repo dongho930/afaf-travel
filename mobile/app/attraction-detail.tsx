@@ -2,6 +2,19 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import {
+  AirplaneIcon,
+  BusIcon,
+  CameraIcon,
+  ChatCircleTextIcon,
+  FloppyDiskIcon,
+  type Icon,
+  MapPinIcon,
+  MapTrifoldIcon,
+  StarIcon,
+  TrainIcon,
+  XIcon,
+} from "phosphor-react-native";
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
@@ -21,7 +34,9 @@ import { Alert } from "../services/crossPlatformAlert";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AccessibilityIcons } from "../components/AccessibilityIcons";
 import { SaveCourseModal, SaveCourseParams } from "../components/SaveCourseModal";
+import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
+import { radius, spacing } from "../constants/tokens";
 import {
   BICYCLE_ICON_BASE64,
   CAR_ICON_BASE64,
@@ -48,10 +63,10 @@ const TRAVEL_MODES: { mode: TravelMode; icon: string; label: string }[] = [
 // 그대로 열어드리는 선까지만 지원합니다. 사용자가 화면에서 직접 입력해야 해요.
 type TransitBookingType = "train" | "bus" | "flight";
 
-const TRANSIT_BOOKING_OPTIONS: { type: TransitBookingType; icon: string; label: string; url: string }[] = [
-  { type: "train", icon: "🚄", label: "기차 (코레일+)", url: "https://korailtalk.co.kr" },
-  { type: "bus", icon: "🚌", label: "고속·시외버스", url: "https://www.bustago.or.kr" },
-  { type: "flight", icon: "✈️", label: "항공", url: "https://www.skyscanner.co.kr" },
+const TRANSIT_BOOKING_OPTIONS: { type: TransitBookingType; icon: Icon; label: string; url: string }[] = [
+  { type: "train", icon: TrainIcon, label: "기차 (코레일+)", url: "https://korailtalk.co.kr" },
+  { type: "bus", icon: BusIcon, label: "고속·시외버스", url: "https://www.bustago.or.kr" },
+  { type: "flight", icon: AirplaneIcon, label: "항공", url: "https://www.skyscanner.co.kr" },
 ];
 
 const MAX_REVIEW_PHOTOS = 5;
@@ -316,8 +331,9 @@ export default function AttractionDetailScreen() {
         <View style={styles.badgeGroup}>
           {typeof attraction.avg_rating === "number" && (
             <View style={styles.ratingBadge}>
+              <StarIcon size={12} color={colors.warningText} weight="fill" />
               <Text style={styles.ratingBadgeText}>
-                ★ {attraction.avg_rating.toFixed(1)} ({attraction.review_count})
+                {attraction.avg_rating.toFixed(1)} ({attraction.review_count})
               </Text>
             </View>
           )}
@@ -331,17 +347,23 @@ export default function AttractionDetailScreen() {
         </View>
       </View>
       <Text style={styles.category}>{attraction.category}</Text>
-      <Text style={styles.address}>📍 {attraction.address}</Text>
+      <View style={styles.addressRow}>
+        <MapPinIcon size={13} color={colors.textSecondary} weight="bold" />
+        <Text style={styles.address}>{attraction.address}</Text>
+      </View>
 
       <View style={styles.actionButtonRow}>
         <Pressable style={styles.directionsButton} onPress={handleOpenDirections}>
-          <Text style={styles.directionsButtonText}>🗺️ 길찾기</Text>
+          <MapTrifoldIcon size={16} color={colors.primary} weight="bold" />
+          <Text style={styles.directionsButtonText}>길찾기</Text>
         </Pressable>
         <Pressable style={styles.directionsButton} onPress={() => setTransitModalVisible(true)}>
-          <Text style={styles.directionsButtonText}>🚄 교통편 예약</Text>
+          <TrainIcon size={16} color={colors.primary} weight="bold" />
+          <Text style={styles.directionsButtonText}>교통편 예약</Text>
         </Pressable>
         <Pressable style={styles.directionsButton} onPress={openSaveModal}>
-          <Text style={styles.directionsButtonText}>💾 저장</Text>
+          <FloppyDiskIcon size={16} color={colors.primary} weight="bold" />
+          <Text style={styles.directionsButtonText}>저장</Text>
         </Pressable>
       </View>
 
@@ -351,7 +373,10 @@ export default function AttractionDetailScreen() {
 
       {nearby.length > 0 && (
         <View style={styles.nearbySection}>
-          <Text style={styles.nearbySectionTitle}>📍 근처 가볼 만한 곳</Text>
+          <View style={styles.nearbySectionTitleRow}>
+            <MapPinIcon size={14} color={colors.text} weight="bold" />
+            <Text style={styles.nearbySectionTitle}>근처 가볼 만한 곳</Text>
+          </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nearbyRow}>
             {nearby.map((n) => (
               <Pressable
@@ -368,7 +393,7 @@ export default function AttractionDetailScreen() {
                   <Image source={{ uri: n.image_url }} style={styles.nearbyImage} />
                 ) : (
                   <View style={[styles.nearbyImage, styles.nearbyImagePlaceholder]}>
-                    <Text style={styles.nearbyImagePlaceholderText}>📍</Text>
+                    <MapPinIcon size={24} color={colors.primary} weight="bold" />
                   </View>
                 )}
                 <Text style={styles.nearbyName} numberOfLines={1}>
@@ -385,7 +410,10 @@ export default function AttractionDetailScreen() {
 
       <View style={styles.divider} />
 
-      <Text style={styles.sectionTitle}>💬 방문자 리뷰 ({reviews.length})</Text>
+      <View style={styles.sectionTitleRow}>
+        <ChatCircleTextIcon size={16} color={colors.text} weight="bold" />
+        <Text style={styles.sectionTitle}>방문자 리뷰 ({reviews.length})</Text>
+      </View>
 
       <View style={styles.reviewForm}>
         <Text style={styles.reviewFormLabel}>
@@ -394,7 +422,7 @@ export default function AttractionDetailScreen() {
         <View style={styles.starRow}>
           {[1, 2, 3, 4, 5].map((n) => (
             <TouchableOpacity key={n} onPress={() => setRatingInput(n)} hitSlop={6}>
-              <Text style={[styles.star, n <= ratingInput && styles.starFilled]}>★</Text>
+              <StarIcon size={26} color={n <= ratingInput ? "#F0A93B" : colors.border} weight={n <= ratingInput ? "fill" : "regular"} />
             </TouchableOpacity>
           ))}
         </View>
@@ -419,7 +447,7 @@ export default function AttractionDetailScreen() {
                 onPress={() => handleRemoveReviewPhoto(p.uri)}
                 hitSlop={6}
               >
-                <Text style={styles.photoRemoveButtonText}>✕</Text>
+                <XIcon size={11} color={colors.surface} weight="bold" />
               </TouchableOpacity>
             </View>
           ))}
@@ -433,7 +461,7 @@ export default function AttractionDetailScreen() {
                 <ActivityIndicator color={colors.primary} />
               ) : (
                 <>
-                  <Text style={styles.photoAddButtonIcon}>📷</Text>
+                  <CameraIcon size={16} color={colors.textTertiary} weight="bold" />
                   <Text style={styles.photoAddButtonText}>사진 추가</Text>
                 </>
               )}
@@ -472,7 +500,11 @@ export default function AttractionDetailScreen() {
                 )}
                 <Text style={styles.reviewAuthor}>{r.username}</Text>
               </View>
-              <Text style={styles.reviewStars}>{"★".repeat(r.rating)}{"☆".repeat(5 - r.rating)}</Text>
+              <View style={styles.reviewStarsRow}>
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <StarIcon key={i} size={12} color="#F0A93B" weight={i < r.rating ? "fill" : "regular"} />
+                ))}
+              </View>
             </View>
             <Text style={styles.reviewBody}>{r.body}</Text>
             {r.photo_urls && r.photo_urls.length > 0 && (
@@ -535,18 +567,21 @@ export default function AttractionDetailScreen() {
           </Text>
 
           <View style={styles.travelModeRow}>
-            {TRANSIT_BOOKING_OPTIONS.map((opt) => (
-              <TouchableOpacity
-                key={opt.type}
-                style={styles.travelModeButton}
-                onPress={() => handleSelectTransitBooking(opt)}
-              >
-                <View style={styles.travelModeCircle}>
-                  <Text style={styles.transitModeIcon}>{opt.icon}</Text>
-                </View>
-                <Text style={styles.travelModeLabel}>{opt.label}</Text>
-              </TouchableOpacity>
-            ))}
+            {TRANSIT_BOOKING_OPTIONS.map((opt) => {
+              const OptIcon = opt.icon;
+              return (
+                <TouchableOpacity
+                  key={opt.type}
+                  style={styles.travelModeButton}
+                  onPress={() => handleSelectTransitBooking(opt)}
+                >
+                  <View style={styles.travelModeCircle}>
+                    <OptIcon size={26} color={colors.onPrimary} weight="bold" />
+                  </View>
+                  <Text style={styles.travelModeLabel}>{opt.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </Pressable>
       </Pressable>
@@ -564,41 +599,45 @@ export default function AttractionDetailScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: colors.background },
-  emptyText: { fontSize: 15, color: colors.textTertiary, textAlign: "center" },
-  container: { padding: 20, paddingBottom: 60, backgroundColor: colors.background },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, backgroundColor: colors.background },
+  emptyText: { fontSize: 15, fontFamily: fontFamily.regular, color: colors.textTertiary, textAlign: "center" },
+  container: { padding: spacing.xl - 4, paddingBottom: spacing.xxl + spacing.xl, backgroundColor: colors.background },
 
-  heroImage: { width: "100%", height: 200, borderRadius: 16, marginBottom: 16, backgroundColor: colors.primaryLight },
+  heroImage: { width: "100%", height: 200, borderRadius: radius.lg, marginBottom: spacing.lg, backgroundColor: colors.primaryLight },
 
   titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  title: { fontSize: 22, fontWeight: "800", color: colors.text, flexShrink: 1 },
-  category: { fontSize: 13, color: colors.primary, fontWeight: "600", marginTop: 4 },
-  address: { fontSize: 13, color: colors.textSecondary, marginTop: 6 },
+  title: { fontSize: 22, fontFamily: fontFamily.extraBold, color: colors.text, flexShrink: 1 },
+  category: { fontSize: 13, color: colors.primary, fontFamily: fontFamily.semiBold, marginTop: spacing.xs },
+  addressRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2, marginTop: spacing.sm },
+  address: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, flexShrink: 1 },
 
-  actionButtonRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 12 },
+  actionButtonRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm + 2, marginTop: spacing.md },
   directionsButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs + 2,
     alignSelf: "flex-start",
     backgroundColor: colors.primaryLight,
-    borderRadius: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 13,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.xl - 4,
+    paddingVertical: spacing.md + 1,
   },
-  directionsButtonText: { fontSize: 15, fontWeight: "700", color: colors.primary },
+  directionsButtonText: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.primary },
 
   modalBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end", alignItems: "center" },
   modalSheet: {
     width: "100%",
     maxWidth: 640, // 웹에서 넓은 화면일 때 앱 폭(WebFrame)에 맞춰 시트도 가운데 정렬되게
     backgroundColor: colors.surface,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingHorizontal: 20,
-    paddingTop: 20,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    paddingHorizontal: spacing.xl - 4,
+    paddingTop: spacing.xl - 4,
   },
-  modalTitle: { fontSize: 17, fontWeight: "800", color: colors.text, marginBottom: 4 },
-  modalSubtitle: { fontSize: 13, color: colors.textTertiary, marginBottom: 24 },
+  modalTitle: { fontSize: 17, fontFamily: fontFamily.extraBold, color: colors.text, marginBottom: spacing.xs },
+  modalSubtitle: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textTertiary, marginBottom: spacing.xl },
   travelModeRow: { flexDirection: "row", justifyContent: "space-between" },
-  travelModeButton: { alignItems: "center", gap: 8 },
+  travelModeButton: { alignItems: "center", gap: spacing.sm },
   travelModeCircle: {
     width: 56,
     height: 56,
@@ -608,66 +647,68 @@ function makeStyles(colors: ThemeColors) {
     justifyContent: "center",
   },
   travelModeIcon: { width: 36, height: 36 },
-  transitModeIcon: { fontSize: 28 },
-  travelModeLabel: { fontSize: 13, fontWeight: "600", color: colors.text },
-  overview: { fontSize: 14, color: colors.text, marginTop: 12, lineHeight: 21 },
+  travelModeLabel: { fontSize: 13, fontFamily: fontFamily.semiBold, color: colors.text },
+  overview: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.text, marginTop: spacing.md, lineHeight: 21 },
 
-  nearbySection: { marginTop: 20 },
-  nearbySectionTitle: { fontSize: 15, fontWeight: "800", color: colors.text, marginBottom: 10 },
-  nearbyRow: { gap: 12, paddingRight: 4 },
+  nearbySection: { marginTop: spacing.xl - 4 },
+  nearbySectionTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2, marginBottom: spacing.sm + 2 },
+  nearbySectionTitle: { fontSize: 15, fontFamily: fontFamily.extraBold, color: colors.text },
+  nearbyRow: { gap: spacing.md, paddingRight: spacing.xs },
   nearbyCard: { width: 130 },
-  nearbyImage: { width: 130, height: 90, borderRadius: 12, backgroundColor: colors.primaryLight },
+  nearbyImage: { width: 130, height: 90, borderRadius: radius.md, backgroundColor: colors.primaryLight },
   nearbyImagePlaceholder: { alignItems: "center", justifyContent: "center" },
-  nearbyImagePlaceholderText: { fontSize: 24 },
-  nearbyName: { fontSize: 13, fontWeight: "700", color: colors.text, marginTop: 6 },
-  nearbyMeta: { fontSize: 11, color: colors.textTertiary, marginTop: 2 },
+  nearbyName: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.text, marginTop: spacing.sm },
+  nearbyMeta: { fontSize: 11, fontFamily: fontFamily.regular, color: colors.textTertiary, marginTop: 2 },
 
-  badgeGroup: { flexDirection: "row", gap: 6, marginLeft: 8 },
+  badgeGroup: { flexDirection: "row", gap: spacing.xs + 2, marginLeft: spacing.sm },
   ratingBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs - 2,
     backgroundColor: colors.warningLight,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
   },
-  ratingBadgeText: { fontSize: 12, fontWeight: "700", color: colors.warningText },
+  ratingBadgeText: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.warningText },
   congestionBadge: {
     backgroundColor: colors.warningLight,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
   },
-  congestionBadgeText: { fontSize: 12, fontWeight: "700", color: colors.warningText },
+  congestionBadgeText: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.warningText },
 
-  divider: { height: 1, backgroundColor: colors.border, marginVertical: 20 },
+  divider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.xl - 4 },
 
-  sectionTitle: { fontSize: 16, fontWeight: "800", color: colors.text, marginBottom: 14 },
+  sectionTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2, marginBottom: spacing.md + 2 },
+  sectionTitle: { fontSize: 16, fontFamily: fontFamily.extraBold, color: colors.text },
 
   reviewForm: {
     backgroundColor: colors.surface,
-    borderRadius: 14,
+    borderRadius: radius.lg - 2,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 14,
-    marginBottom: 16,
+    padding: spacing.md + 2,
+    marginBottom: spacing.lg,
   },
-  reviewFormLabel: { fontSize: 13, fontWeight: "700", color: colors.text, marginBottom: 8 },
-  starRow: { flexDirection: "row", gap: 4, marginBottom: 10 },
-  star: { fontSize: 24, color: colors.border },
-  starFilled: { color: "#F0A93B" },
+  reviewFormLabel: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.text, marginBottom: spacing.sm },
+  starRow: { flexDirection: "row", gap: spacing.xs, marginBottom: spacing.sm + 2 },
   reviewInput: {
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 10,
-    padding: 10,
+    borderRadius: radius.sm + 2,
+    padding: spacing.sm + 2,
     minHeight: 70,
     textAlignVertical: "top",
     fontSize: 14,
+    fontFamily: fontFamily.regular,
     color: colors.text,
-    marginBottom: 10,
+    marginBottom: spacing.sm + 2,
   },
-  photoPickerRow: { marginBottom: 10 },
-  photoThumbWrap: { marginRight: 8, position: "relative" },
-  photoThumb: { width: 64, height: 64, borderRadius: 8, backgroundColor: colors.background },
+  photoPickerRow: { marginBottom: spacing.sm + 2 },
+  photoThumbWrap: { marginRight: spacing.sm, position: "relative" },
+  photoThumb: { width: 64, height: 64, borderRadius: spacing.sm, backgroundColor: colors.background },
   photoRemoveButton: {
     position: "absolute",
     top: -6,
@@ -679,41 +720,36 @@ function makeStyles(colors: ThemeColors) {
     alignItems: "center",
     justifyContent: "center",
   },
-  photoRemoveButtonText: { color: colors.surface, fontSize: 11, fontWeight: "700" },
   photoAddButton: {
     width: 64,
     height: 64,
-    borderRadius: 8,
+    borderRadius: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border,
     borderStyle: "dashed",
     alignItems: "center",
     justifyContent: "center",
   },
-  photoAddButtonIcon: { fontSize: 16 },
-  photoAddButtonText: { fontSize: 10, color: colors.textTertiary, marginTop: 2 },
+  photoAddButtonText: { fontSize: 10, fontFamily: fontFamily.regular, color: colors.textTertiary, marginTop: 2 },
 
   submitButton: {
     backgroundColor: colors.primary,
-    borderRadius: 10,
-    paddingVertical: 12,
+    borderRadius: radius.sm + 2,
+    paddingVertical: spacing.sm + 4,
     alignItems: "center",
   },
   submitButtonDisabled: { opacity: 0.6 },
-  submitText: { color: colors.onPrimary, fontWeight: "700", fontSize: 14 },
+  submitText: { color: colors.onPrimary, fontFamily: fontFamily.bold, fontSize: 14 },
 
-  emptyReviewText: { fontSize: 13, color: colors.textTertiary, textAlign: "center", marginTop: 8 },
+  emptyReviewText: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textTertiary, textAlign: "center", marginTop: spacing.sm },
 
   reviewCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 14,
-    marginBottom: 10,
+    paddingVertical: spacing.md + 2,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  reviewCardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
-  reviewAuthorRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  reviewCardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.xs + 2 },
+  reviewAuthorRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   reviewAvatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.primaryLight },
   reviewAvatarPlaceholder: {
     width: 28,
@@ -723,11 +759,11 @@ function makeStyles(colors: ThemeColors) {
     alignItems: "center",
     justifyContent: "center",
   },
-  reviewAvatarPlaceholderText: { color: colors.onPrimary, fontSize: 13, fontWeight: "700" },
-  reviewAuthor: { fontSize: 13, fontWeight: "700", color: colors.text },
-  reviewStars: { fontSize: 12, color: "#F0A93B" },
-  reviewBody: { fontSize: 13, color: colors.text, lineHeight: 19 },
-  reviewPhotoRow: { marginTop: 8 },
-  reviewPhoto: { width: 72, height: 72, borderRadius: 8, marginRight: 8, backgroundColor: colors.background },
+  reviewAvatarPlaceholderText: { color: colors.onPrimary, fontSize: 13, fontFamily: fontFamily.bold },
+  reviewAuthor: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.text },
+  reviewStarsRow: { flexDirection: "row", gap: 1 },
+  reviewBody: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.text, lineHeight: 19 },
+  reviewPhotoRow: { marginTop: spacing.sm },
+  reviewPhoto: { width: 72, height: 72, borderRadius: spacing.sm, marginRight: spacing.sm, backgroundColor: colors.background },
   });
 }

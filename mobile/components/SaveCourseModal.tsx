@@ -1,3 +1,4 @@
+import { CalendarBlankIcon, CheckIcon } from "phosphor-react-native";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
@@ -13,7 +14,9 @@ import {
 import { Alert } from "../services/crossPlatformAlert";
 import { api } from "../services/api";
 import { useTheme } from "../services/ThemeContext";
+import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
+import { radius, spacing } from "../constants/tokens";
 import { COURSE_CATEGORIES, CourseCategory, TripSummary } from "../types";
 import { DateRangePickerModal } from "./DateRangePickerModal";
 
@@ -165,7 +168,7 @@ export function SaveCourseModal({ visible, onClose, defaultNewTripName, onConfir
                           {item.category} · 코스 {item.course_count}개
                         </Text>
                       </View>
-                      {selectedTripId === item.trip_id && <Text style={styles.tripOptionCheck}>✓</Text>}
+                      {selectedTripId === item.trip_id && <CheckIcon size={16} color={colors.primary} weight="bold" />}
                     </TouchableOpacity>
                   )}
                 />
@@ -202,7 +205,7 @@ export function SaveCourseModal({ visible, onClose, defaultNewTripName, onConfir
                 </View>
                 {newTripCategory === "기타" && (
                   <TextInput
-                    style={[styles.input, { marginTop: 8 }]}
+                    style={[styles.input, { marginTop: spacing.sm }]}
                     placeholder="분류를 직접 입력해주세요 (예: 등산, 반려동물 동반)"
                     placeholderTextColor={colors.textTertiary}
                     value={customCategoryText}
@@ -213,7 +216,7 @@ export function SaveCourseModal({ visible, onClose, defaultNewTripName, onConfir
 
                 <Text style={styles.fieldLabel}>여행 날짜 (선택)</Text>
                 <TouchableOpacity style={styles.dateButton} onPress={() => setDateModalVisible(true)}>
-                  <Text style={styles.dateButtonIcon}>📅</Text>
+                  <CalendarBlankIcon size={16} color={colors.text} weight="bold" />
                   <Text style={styles.dateButtonText}>
                     {startDate && endDate
                       ? `${startDate} ~ ${endDate}`
@@ -261,31 +264,31 @@ function makeStyles(colors: ThemeColors) {
     width: "100%",
     maxWidth: 640, // 웹에서 넓은 화면일 때 앱 폭(WebFrame)에 맞춰 시트도 가운데 정렬되게
     backgroundColor: colors.surfaceAlt,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: spacing.xl - 4,
   },
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: spacing.lg,
   },
-  modalTitle: { fontSize: 17, fontWeight: "700", color: colors.text },
-  modalClose: { fontSize: 14, color: colors.primary, fontWeight: "600" },
+  modalTitle: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.text },
+  modalClose: { fontSize: 14, color: colors.primary, fontFamily: fontFamily.semiBold },
 
-  modeTabRow: { flexDirection: "row", gap: 8, marginBottom: 16 },
+  modeTabRow: { flexDirection: "row", gap: spacing.sm, marginBottom: spacing.lg },
   modeTab: {
     flex: 1,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 10,
-    paddingVertical: 10,
+    borderRadius: radius.sm + 2,
+    paddingVertical: spacing.sm + 2,
     alignItems: "center",
     backgroundColor: colors.surface,
   },
   modeTabSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
-  modeTabText: { fontSize: 13, fontWeight: "700", color: colors.textSecondary },
+  modeTabText: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.textSecondary },
   modeTabTextSelected: { color: colors.onPrimary },
 
   tripOption: {
@@ -294,59 +297,58 @@ function makeStyles(colors: ThemeColors) {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 8,
+    borderRadius: radius.md,
+    padding: spacing.md + 2,
+    marginBottom: spacing.sm,
   },
   tripOptionSelected: { borderColor: colors.primary, backgroundColor: colors.primaryLight },
-  tripOptionName: { fontSize: 15, fontWeight: "700", color: colors.text },
-  tripOptionMeta: { fontSize: 12, color: colors.textTertiary, marginTop: 2 },
-  tripOptionCheck: { fontSize: 16, color: colors.primary, fontWeight: "800" },
+  tripOptionName: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.text },
+  tripOptionMeta: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary, marginTop: 2 },
 
-  fieldLabel: { fontSize: 13, fontWeight: "700", color: colors.textSecondary, marginBottom: 8, marginTop: 8 },
+  fieldLabel: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.textSecondary, marginBottom: spacing.sm, marginTop: spacing.sm },
   input: {
     backgroundColor: colors.surface,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: spacing.md + 2,
+    paddingVertical: spacing.md,
     fontSize: 15,
+    fontFamily: fontFamily.regular,
     color: colors.text,
   },
-  categoryRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  categoryRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   dateButton: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: spacing.sm,
     backgroundColor: colors.surface,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    paddingHorizontal: spacing.md + 2,
+    paddingVertical: spacing.md + 2,
   },
-  dateButtonIcon: { fontSize: 15 },
-  dateButtonText: { fontSize: 14, color: colors.text, fontWeight: "600" },
+  dateButtonText: { fontSize: 14, fontFamily: fontFamily.semiBold, color: colors.text },
   categoryChip: {
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
-    borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
   },
   categoryChipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
-  categoryChipText: { fontSize: 13, color: colors.textSecondary, fontWeight: "600" },
+  categoryChipText: { fontSize: 13, fontFamily: fontFamily.semiBold, color: colors.textSecondary },
   categoryChipTextSelected: { color: colors.onPrimary },
   confirmButton: {
     backgroundColor: colors.primary,
-    borderRadius: 14,
-    paddingVertical: 15,
+    borderRadius: radius.lg - 2,
+    paddingVertical: spacing.md + 3,
     alignItems: "center",
-    marginTop: 20,
+    marginTop: spacing.xl - 4,
   },
   confirmButtonDisabled: { opacity: 0.6 },
-  confirmButtonText: { color: colors.onPrimary, fontSize: 16, fontWeight: "700" },
+  confirmButtonText: { color: colors.onPrimary, fontSize: 16, fontFamily: fontFamily.bold },
   });
 }

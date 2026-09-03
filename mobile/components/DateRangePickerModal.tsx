@@ -1,7 +1,9 @@
 import React, { useMemo, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Calendar, DateData } from "react-native-calendars";
+import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
+import { radius, spacing } from "../constants/tokens";
 import { useTheme } from "../services/ThemeContext";
 
 interface Props {
@@ -141,32 +143,32 @@ function makeStyles(colors: ThemeColors) {
     width: "100%",
     maxWidth: 640, // 웹에서 넓은 화면일 때 앱 폭(WebFrame)에 맞춰 시트도 가운데 정렬되게
     backgroundColor: colors.surfaceAlt,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: spacing.xl - 4,
   },
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
-  title: { fontSize: 17, fontWeight: "700", color: colors.text },
-  close: { fontSize: 14, color: colors.primary, fontWeight: "600" },
-  hint: { fontSize: 13, color: colors.textSecondary, marginBottom: 12 },
-  buttonRow: { flexDirection: "row", gap: 10, marginTop: 16 },
+  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm },
+  title: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.text },
+  close: { fontSize: 14, color: colors.primary, fontFamily: fontFamily.semiBold },
+  hint: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginBottom: spacing.md },
+  buttonRow: { flexDirection: "row", gap: spacing.sm + 2, marginTop: spacing.lg },
   clearButton: {
     flex: 1,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 14,
-    paddingVertical: 14,
+    borderRadius: radius.lg - 2,
+    paddingVertical: spacing.md + 2,
     alignItems: "center",
     backgroundColor: colors.surface,
   },
-  clearButtonText: { color: colors.textSecondary, fontWeight: "700", fontSize: 15 },
+  clearButtonText: { color: colors.textSecondary, fontFamily: fontFamily.bold, fontSize: 15 },
   confirmButton: {
     flex: 2,
     backgroundColor: colors.primary,
-    borderRadius: 14,
-    paddingVertical: 14,
+    borderRadius: radius.lg - 2,
+    paddingVertical: spacing.md + 2,
     alignItems: "center",
   },
-  confirmButtonText: { color: colors.onPrimary, fontWeight: "700", fontSize: 15 },
+  confirmButtonText: { color: colors.onPrimary, fontFamily: fontFamily.bold, fontSize: 15 },
   });
 }

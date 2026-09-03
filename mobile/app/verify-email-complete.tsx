@@ -2,7 +2,9 @@ import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
+import { radius, spacing } from "../constants/tokens";
 import { useTheme } from "../services/ThemeContext";
 
 /**
@@ -55,25 +57,25 @@ export default function VerifyEmailCompleteScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    container: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background, gap: 12 },
-    text: { fontSize: 14, color: colors.textSecondary, textAlign: "center" },
-    debugContainer: { flexGrow: 1, backgroundColor: colors.background, padding: 24, gap: 16, justifyContent: "center" },
-    debugTitle: { fontSize: 17, fontWeight: "800", color: colors.text, textAlign: "center" },
+    container: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background, gap: spacing.md },
+    text: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary, textAlign: "center" },
+    debugContainer: { flexGrow: 1, backgroundColor: colors.background, padding: spacing.xl, gap: spacing.lg, justifyContent: "center" },
+    debugTitle: { fontSize: 17, fontFamily: fontFamily.extraBold, color: colors.text, textAlign: "center" },
     debugBox: {
       backgroundColor: colors.surface,
-      borderRadius: 12,
+      borderRadius: radius.md,
       borderWidth: 1,
       borderColor: colors.border,
-      padding: 14,
+      padding: spacing.md + 2,
     },
-    debugLabel: { fontSize: 12, fontWeight: "700", color: colors.textTertiary, marginBottom: 6 },
-    debugValue: { fontSize: 12, color: colors.text },
+    debugLabel: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.textTertiary, marginBottom: spacing.xs + 2 },
+    debugValue: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.text },
     button: {
       backgroundColor: colors.primary,
-      borderRadius: 14,
-      paddingVertical: 14,
+      borderRadius: radius.lg - 2,
+      paddingVertical: spacing.md + 2,
       alignItems: "center",
     },
-    buttonText: { color: colors.onPrimary, fontWeight: "700", fontSize: 15 },
+    buttonText: { color: colors.onPrimary, fontFamily: fontFamily.bold, fontSize: 15 },
   });
 }

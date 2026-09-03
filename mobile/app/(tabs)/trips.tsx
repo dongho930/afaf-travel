@@ -1,4 +1,17 @@
 import { useFocusEffect, useRouter } from "expo-router";
+import {
+  CalendarBlankIcon,
+  CheckCircleIcon,
+  ChatCircleTextIcon,
+  HeartIcon,
+  type Icon,
+  MapPinIcon,
+  PersonSimpleWalkIcon,
+  StarIcon,
+  SuitcaseIcon,
+  UsersIcon,
+  UsersThreeIcon,
+} from "phosphor-react-native";
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
@@ -13,7 +26,10 @@ import {
 import { Alert } from "../../services/crossPlatformAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DateRangePickerModal } from "../../components/DateRangePickerModal";
+import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
+import { radius, spacing } from "../../constants/tokens";
+import { userTypeIcon } from "../../constants/userTypeIcons";
 import { api } from "../../services/api";
 import { useAuth } from "../../services/AuthContext";
 import { useTheme } from "../../services/ThemeContext";
@@ -27,22 +43,22 @@ import {
   VisitedPlace,
 } from "../../types";
 
-const CATEGORY_ICON: Record<string, string> = {
-  가족: "👨‍👩‍👧",
-  커플: "💑",
-  친구: "👯",
-  혼자: "🚶",
-  기타: "📍",
+const CATEGORY_ICON: Record<string, Icon> = {
+  가족: UsersThreeIcon,
+  커플: HeartIcon,
+  친구: UsersIcon,
+  혼자: PersonSimpleWalkIcon,
+  기타: MapPinIcon,
 };
 
 // 접근성 제보 카테고리 표시 라벨 (접근성 탭과 동일한 명칭/아이콘으로 맞춥니다).
-const REPORT_CATEGORY_LABEL: Record<ReportCategory, string> = {
-  wheelchair: "♿ 지체 장애",
-  visual: "👁️ 시각 장애",
-  hearing: "💡 청각 장애",
-  senior: "🧓 고령자",
-  family: "👶 영유아 가족",
-  pregnant: "🤰 임산부",
+const REPORT_CATEGORY_META: Record<ReportCategory, { icon: Icon; label: string }> = {
+  wheelchair: { icon: userTypeIcon.wheelchair, label: "지체 장애" },
+  visual: { icon: userTypeIcon.visual, label: "시각 장애" },
+  hearing: { icon: userTypeIcon.hearing, label: "청각 장애" },
+  senior: { icon: userTypeIcon.senior, label: "고령자" },
+  family: { icon: userTypeIcon.family, label: "영유아 가족" },
+  pregnant: { icon: userTypeIcon.pregnant, label: "임산부" },
 };
 
 type StatSection = "trips" | "reviews" | "reports" | "visited";
@@ -352,38 +368,28 @@ export default function TripsScreen() {
       <Text style={styles.title}>{TOP_TITLE[activeSection]}</Text>
 
       <View style={styles.statsGrid}>
-        <TouchableOpacity
-          style={[styles.statCard, activeSection === "visited" && styles.statCardActive]}
-          onPress={() => selectSection("visited")}
-        >
-          <Text style={styles.statIcon}>📍</Text>
-          <Text style={styles.statValue}>{visitedCount}</Text>
-          <Text style={styles.statLabel}>방문한 여행지</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.statCard, activeSection === "trips" && styles.statCardActive]}
-          onPress={() => selectSection("trips")}
-        >
-          <Text style={styles.statIcon}>🧳</Text>
-          <Text style={styles.statValue}>{totalSavedCourses}</Text>
-          <Text style={styles.statLabel}>저장한 경로</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.statCard, activeSection === "reviews" && styles.statCardActive]}
-          onPress={() => selectSection("reviews")}
-        >
-          <Text style={styles.statIcon}>💬</Text>
-          <Text style={styles.statValue}>{reviewCount}</Text>
-          <Text style={styles.statLabel}>리뷰 작성</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.statCard, activeSection === "reports" && styles.statCardActive]}
-          onPress={() => selectSection("reports")}
-        >
-          <Text style={styles.statIcon}>♿</Text>
-          <Text style={styles.statValue}>{reportCount}</Text>
-          <Text style={styles.statLabel}>접근성 제보</Text>
-        </TouchableOpacity>
+        {(() => {
+          const tabs: { key: StatSection; icon: Icon; value: number; label: string }[] = [
+            { key: "visited", icon: MapPinIcon, value: visitedCount, label: "방문한 여행지" },
+            { key: "trips", icon: SuitcaseIcon, value: totalSavedCourses, label: "저장한 경로" },
+            { key: "reviews", icon: ChatCircleTextIcon, value: reviewCount, label: "리뷰 작성" },
+            { key: "reports", icon: userTypeIcon.wheelchair, value: reportCount, label: "접근성 제보" },
+          ];
+          return tabs.map((t) => {
+            const isActive = activeSection === t.key;
+            const TabIcon = t.icon;
+            return (
+              <TouchableOpacity key={t.key} style={styles.statTab} onPress={() => selectSection(t.key)}>
+                <TabIcon size={24} color={isActive ? colors.primary : colors.textTertiary} weight="bold" />
+                <View style={styles.statTextGroup}>
+                  <Text style={[styles.statValue, isActive && styles.statValueActive]}>{t.value}</Text>
+                  <Text style={[styles.statLabel, isActive && styles.statLabelActive]}>{t.label}</Text>
+                </View>
+                <View style={[styles.statDot, isActive && styles.statDotActive]} />
+              </TouchableOpacity>
+            );
+          });
+        })()}
       </View>
 
       <View style={styles.sectionTitleRow}>
@@ -413,53 +419,68 @@ export default function TripsScreen() {
   let listData: any[] = trips;
   let keyExtractor = (item: any) => item.trip_id;
   let emptyText = "아직 저장한 여행이 없어요.";
-  let emptyHint: string | null = 'AI 플래너에서 코스를 만들고 "💾 저장"을 눌러보세요.';
+  let emptyHint: string | null = 'AI 플래너에서 코스를 만들고 "저장"을 눌러보세요.';
   let renderItem = ({ item }: { item: TripSummary }) => {
     const dateLabel = formatDateRange(item.start_date, item.end_date);
+    const CatIcon = CATEGORY_ICON[item.category] ?? MapPinIcon;
     return (
       <TouchableOpacity
-        style={[styles.card, item.visited && styles.cardVisited]}
+        style={styles.row}
         onPress={() => router.push({ pathname: "/trip-detail", params: { tripId: item.trip_id, tripName: item.name } })}
       >
-        <View style={styles.cardHeader}>
-          <View style={styles.cardTitleRow}>
-            <Text style={styles.categoryBadge}>
-              {CATEGORY_ICON[item.category] ?? "📍"} {item.category}
-            </Text>
-            {item.visited && (
-              <View style={styles.visitedBadge}>
-                <Text style={styles.visitedBadgeText}>✅ 방문 완료</Text>
+        <View style={styles.rowIcon}>
+          <CatIcon size={16} color={colors.primary} weight="bold" />
+        </View>
+        <View style={styles.rowContent}>
+          <View style={styles.cardHeader}>
+            <View style={styles.cardTitleRow}>
+              <View style={styles.categoryBadge}>
+                <Text style={styles.categoryBadgeText}>{item.category}</Text>
+              </View>
+              {item.visited && (
+                <View style={styles.visitedBadge}>
+                  <CheckCircleIcon size={11} color={colors.onPrimary} weight="fill" />
+                  <Text style={styles.visitedBadgeText}>방문 완료</Text>
+                </View>
+              )}
+            </View>
+            <View style={styles.cardActions}>
+              <TouchableOpacity onPress={() => openEdit(item)} hitSlop={10}>
+                <Text style={styles.editText}>수정</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => handleDelete(item.trip_id, item.name)} hitSlop={10}>
+                <Text style={styles.deleteText}>삭제</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          <Text style={styles.name} numberOfLines={1}>
+            {item.name}
+          </Text>
+          {dateLabel && (
+            <View style={styles.dateLabelRow}>
+              <CalendarBlankIcon size={11} color={colors.textSecondary} weight="bold" />
+              <Text style={styles.dateLabel}>{dateLabel}</Text>
+            </View>
+          )}
+          <Text style={styles.meta}>코스 {item.course_count}개</Text>
+
+          <TouchableOpacity
+            style={[styles.visitButton, item.visited && styles.visitButtonDone]}
+            onPress={() => handleMarkVisited(item.trip_id, item.name, item.visited)}
+            disabled={visitingTripId === item.trip_id}
+          >
+            {visitingTripId === item.trip_id ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <View style={styles.visitButtonContentRow}>
+                {item.visited && <CheckCircleIcon size={12} color={colors.textSecondary} weight="fill" />}
+                <Text style={[styles.visitButtonText, item.visited && styles.visitButtonTextDone]}>
+                  {item.visited ? "방문 완료됨 (누르면 취소)" : "방문 완료"}
+                </Text>
               </View>
             )}
-          </View>
-          <View style={styles.cardActions}>
-            <TouchableOpacity onPress={() => openEdit(item)} hitSlop={10}>
-              <Text style={styles.editText}>수정</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => handleDelete(item.trip_id, item.name)} hitSlop={10}>
-              <Text style={styles.deleteText}>삭제</Text>
-            </TouchableOpacity>
-          </View>
+          </TouchableOpacity>
         </View>
-        <Text style={styles.name} numberOfLines={1}>
-          {item.name}
-        </Text>
-        {dateLabel && <Text style={styles.dateLabel}>📅 {dateLabel}</Text>}
-        <Text style={styles.meta}>코스 {item.course_count}개</Text>
-
-        <TouchableOpacity
-          style={[styles.visitButton, item.visited && styles.visitButtonDone]}
-          onPress={() => handleMarkVisited(item.trip_id, item.name, item.visited)}
-          disabled={visitingTripId === item.trip_id}
-        >
-          {visitingTripId === item.trip_id ? (
-            <ActivityIndicator size="small" color={colors.primary} />
-          ) : (
-            <Text style={[styles.visitButtonText, item.visited && styles.visitButtonTextDone]}>
-              {item.visited ? "✅ 방문 완료됨 (누르면 취소)" : "방문 완료"}
-            </Text>
-          )}
-        </TouchableOpacity>
       </TouchableOpacity>
     );
   };
@@ -471,18 +492,27 @@ export default function TripsScreen() {
     emptyHint = null;
     renderItem = ({ item }: { item: MyReviewItem }) => (
       <TouchableOpacity
-        style={styles.card}
+        style={styles.row}
         onPress={() =>
           router.push({ pathname: "/attraction-detail", params: { contentId: item.content_id, name: item.place_name } })
         }
       >
-        <View style={styles.cardHeader}>
-          <Text style={styles.name} numberOfLines={1}>
-            {item.place_name}
-          </Text>
-          <Text style={styles.reviewStars}>{"★".repeat(item.rating)}{"☆".repeat(5 - item.rating)}</Text>
+        <View style={styles.rowIcon}>
+          <ChatCircleTextIcon size={16} color={colors.primary} weight="bold" />
         </View>
-        <Text style={styles.meta}>{item.body}</Text>
+        <View style={styles.rowContent}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.name} numberOfLines={1}>
+              {item.place_name}
+            </Text>
+            <View style={styles.reviewStarsRow}>
+              {Array.from({ length: 5 }).map((_, i) => (
+                <StarIcon key={i} size={13} color="#E0A100" weight={i < item.rating ? "fill" : "regular"} />
+              ))}
+            </View>
+          </View>
+          <Text style={styles.meta}>{item.body}</Text>
+        </View>
       </TouchableOpacity>
     );
   } else if (activeSection === "reports") {
@@ -490,48 +520,64 @@ export default function TripsScreen() {
     keyExtractor = (item: MyReportItem) => item.id;
     emptyText = "아직 작성한 접근성 제보가 없어요.";
     emptyHint = null;
-    renderItem = ({ item }: { item: MyReportItem }) => (
-      <TouchableOpacity
-        style={styles.card}
-        onPress={() =>
-          router.push({ pathname: "/attraction-detail", params: { contentId: item.content_id, name: item.place_name } })
-        }
-      >
-        <View style={styles.cardHeader}>
-          <Text style={styles.name} numberOfLines={1}>
-            {item.place_name}
-          </Text>
-          <Text style={styles.categoryBadge}>{REPORT_CATEGORY_LABEL[item.category] ?? item.category}</Text>
-        </View>
-        <Text style={styles.meta}>{item.body}</Text>
-      </TouchableOpacity>
-    );
+    renderItem = ({ item }: { item: MyReportItem }) => {
+      const meta = REPORT_CATEGORY_META[item.category];
+      const ReportIcon = meta?.icon ?? MapPinIcon;
+      return (
+        <TouchableOpacity
+          style={styles.row}
+          onPress={() =>
+            router.push({ pathname: "/attraction-detail", params: { contentId: item.content_id, name: item.place_name } })
+          }
+        >
+          <View style={styles.rowIcon}>
+            <ReportIcon size={16} color={colors.primary} weight="bold" />
+          </View>
+          <View style={styles.rowContent}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.name} numberOfLines={1}>
+                {item.place_name}
+              </Text>
+              <View style={styles.categoryBadge}>
+                <Text style={styles.categoryBadgeText}>{meta?.label ?? item.category}</Text>
+              </View>
+            </View>
+            <Text style={styles.meta}>{item.body}</Text>
+          </View>
+        </TouchableOpacity>
+      );
+    };
   } else if (activeSection === "visited") {
     listData = visitedPlaces;
     keyExtractor = (item: VisitedPlace) => item.id;
     emptyText = "아직 방문 완료로 표시한 여행지가 없어요.";
-    emptyHint = "'내가 만든 여행' 카드의 '✅ 방문 완료' 버튼을 눌러보세요.";
+    emptyHint = "'내가 만든 여행' 카드의 '방문 완료' 버튼을 눌러보세요.";
     renderItem = ({ item }: { item: VisitedPlace }) => (
       <TouchableOpacity
-        style={styles.card}
+        style={styles.row}
         onPress={() =>
           router.push({ pathname: "/attraction-detail", params: { contentId: item.content_id, name: item.place_name } })
         }
       >
-        <View style={styles.cardHeader}>
-          <Text style={styles.name} numberOfLines={1}>
-            📍 {item.place_name}
-          </Text>
-          <View style={styles.cardActions}>
-            <TouchableOpacity onPress={() => openEditVisitedDate(item)} hitSlop={10}>
-              <Text style={styles.editText}>수정</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => handleDeleteVisited(item.id, item.place_name)} hitSlop={10}>
-              <Text style={styles.deleteText}>삭제</Text>
-            </TouchableOpacity>
-          </View>
+        <View style={styles.rowIcon}>
+          <MapPinIcon size={16} color={colors.primary} weight="bold" />
         </View>
-        <Text style={styles.meta}>{item.visited_at?.slice(0, 10)} 방문</Text>
+        <View style={styles.rowContent}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.name} numberOfLines={1}>
+              {item.place_name}
+            </Text>
+            <View style={styles.cardActions}>
+              <TouchableOpacity onPress={() => openEditVisitedDate(item)} hitSlop={10}>
+                <Text style={styles.editText}>수정</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => handleDeleteVisited(item.id, item.place_name)} hitSlop={10}>
+                <Text style={styles.deleteText}>삭제</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          <Text style={styles.meta}>{item.visited_at?.slice(0, 10)} 방문</Text>
+        </View>
       </TouchableOpacity>
     );
   }
@@ -589,7 +635,7 @@ export default function TripsScreen() {
             </View>
             {editCategory === "기타" && (
               <TextInput
-                style={[styles.input, { marginTop: 8 }]}
+                style={[styles.input, { marginTop: spacing.sm }]}
                 placeholder="분류를 직접 입력해주세요 (예: 등산, 반려동물 동반)"
                 placeholderTextColor={colors.textTertiary}
                 value={editCustomCategoryText}
@@ -600,7 +646,7 @@ export default function TripsScreen() {
 
             <Text style={styles.fieldLabel}>여행 날짜 (선택)</Text>
             <TouchableOpacity style={styles.dateButton} onPress={() => setDateModalVisible(true)}>
-              <Text style={styles.dateButtonIcon}>📅</Text>
+              <CalendarBlankIcon size={16} color={colors.text} weight="bold" />
               <Text style={styles.dateButtonText}>
                 {editStartDate && editEndDate
                   ? `${editStartDate} ~ ${editEndDate}`
@@ -651,71 +697,78 @@ export default function TripsScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
-  list: { padding: 20, paddingTop: 0, gap: 12 },
-  headerArea: { paddingTop: 20, paddingBottom: 4 },
-  title: { fontSize: 22, fontWeight: "800", color: colors.text, marginBottom: 16 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl },
+  list: { padding: spacing.xl - 4, paddingTop: 0 },
+  headerArea: { paddingTop: spacing.xl - 4, paddingBottom: spacing.xs },
+  title: { fontSize: 22, fontFamily: fontFamily.extraBold, color: colors.text, marginBottom: spacing.xl },
 
-  statsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 24 },
-  statCard: {
-    width: "47%",
-    backgroundColor: colors.surface,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 14,
-  },
-  statCardActive: { borderColor: colors.primary, borderWidth: 2, backgroundColor: colors.primaryLight },
-  statIcon: { fontSize: 20, marginBottom: 6 },
-  statValue: { fontSize: 20, fontWeight: "800", color: colors.primary },
-  statLabel: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  statsGrid: { flexDirection: "row", marginBottom: spacing.xl },
+  statTab: { flex: 1, alignItems: "center", gap: spacing.sm + 2 },
+  statTextGroup: { alignItems: "center", gap: 2 },
+  statValue: { fontSize: 15, fontFamily: fontFamily.extraBold, color: colors.textTertiary, fontVariant: ["tabular-nums"] },
+  statValueActive: { color: colors.primary },
+  statLabel: { fontSize: 11, fontFamily: fontFamily.regular, color: colors.textTertiary, textAlign: "center" },
+  statLabelActive: { color: colors.primary, fontFamily: fontFamily.bold },
+  statDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: "transparent", marginTop: -2 },
+  statDotActive: { backgroundColor: colors.primary },
 
-  sectionTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 },
-  sectionTitle: { fontSize: 16, fontWeight: "800", color: colors.text },
-  backLink: { fontSize: 13, color: colors.primary, fontWeight: "600" },
-  reviewStars: { fontSize: 13, color: "#E0A100", marginLeft: 8 },
+  sectionTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.xs },
+  sectionTitle: { fontSize: 16, fontFamily: fontFamily.extraBold, color: colors.text },
+  backLink: { fontSize: 13, color: colors.primary, fontFamily: fontFamily.semiBold },
+  reviewStarsRow: { flexDirection: "row", gap: 1, marginLeft: spacing.sm },
 
-  emptyBox: { alignItems: "center", padding: 24 },
-  emptyText: { fontSize: 15, color: colors.textSecondary, fontWeight: "600", marginBottom: 6 },
-  emptyHint: { fontSize: 13, color: colors.textTertiary, textAlign: "center" },
+  emptyBox: { alignItems: "center", padding: spacing.xl },
+  emptyText: { fontSize: 15, fontFamily: fontFamily.semiBold, color: colors.textSecondary, marginBottom: spacing.xs + 2 },
+  emptyHint: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textTertiary, textAlign: "center" },
 
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 16,
-  },
-  cardVisited: { borderColor: colors.primary, backgroundColor: colors.primaryLight },
-  cardTitleRow: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1 },
-  visitedBadge: { backgroundColor: colors.primary, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
-  visitedBadgeText: { fontSize: 10, fontWeight: "700", color: colors.onPrimary },
-  cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
-  cardActions: { flexDirection: "row", gap: 14 },
-  categoryBadge: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: colors.primary,
+  row: { flexDirection: "row", gap: spacing.md, paddingVertical: spacing.lg, borderBottomWidth: 1, borderBottomColor: colors.border },
+  rowIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: colors.primaryLight,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  rowContent: { flex: 1, minWidth: 0 },
+  cardTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, flexShrink: 1 },
+  visitedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs - 2,
+    backgroundColor: colors.primary,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  visitedBadgeText: { fontSize: 10, fontFamily: fontFamily.bold, color: colors.onPrimary },
+  cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.xs + 2 },
+  cardActions: { flexDirection: "row", gap: spacing.md },
+  categoryBadge: {
+    backgroundColor: colors.primaryLight,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
     overflow: "hidden",
   },
-  editText: { fontSize: 13, color: colors.primary, fontWeight: "600" },
-  deleteText: { fontSize: 13, color: colors.danger, fontWeight: "600" },
-  name: { fontSize: 17, fontWeight: "700", color: colors.text, marginBottom: 2, flexShrink: 1 },
-  dateLabel: { fontSize: 12, color: colors.textSecondary, marginBottom: 2 },
-  meta: { fontSize: 12, color: colors.textTertiary },
+  categoryBadgeText: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.primary },
+  editText: { fontSize: 13, color: colors.primary, fontFamily: fontFamily.semiBold },
+  deleteText: { fontSize: 13, color: colors.danger, fontFamily: fontFamily.semiBold },
+  name: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.text, flexShrink: 1 },
+  dateLabelRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs, marginBottom: 2 },
+  dateLabel: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textSecondary },
+  meta: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary },
   visitButton: {
-    marginTop: 12,
+    marginTop: spacing.md,
     alignSelf: "flex-end",
     backgroundColor: colors.primaryLight,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md + 2,
+    paddingVertical: spacing.xs + 3,
   },
-  visitButtonText: { fontSize: 12, fontWeight: "700", color: colors.primary },
+  visitButtonContentRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  visitButtonText: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.primary },
   visitButtonDone: { backgroundColor: colors.border },
   visitButtonTextDone: { color: colors.textSecondary },
 
@@ -724,57 +777,57 @@ function makeStyles(colors: ThemeColors) {
     width: "100%",
     maxWidth: 640, // 웹에서 넓은 화면일 때 앱 폭(WebFrame)에 맞춰 시트도 가운데 정렬되게
     backgroundColor: colors.surfaceAlt,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: spacing.xl - 4,
   },
-  modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
-  modalTitle: { fontSize: 17, fontWeight: "700", color: colors.text },
-  modalClose: { fontSize: 14, color: colors.primary, fontWeight: "600" },
-  fieldLabel: { fontSize: 13, fontWeight: "700", color: colors.textSecondary, marginBottom: 8, marginTop: 8 },
+  modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.lg },
+  modalTitle: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.text },
+  modalClose: { fontSize: 14, color: colors.primary, fontFamily: fontFamily.semiBold },
+  fieldLabel: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.textSecondary, marginBottom: spacing.sm, marginTop: spacing.sm },
   input: {
     backgroundColor: colors.surface,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: spacing.md + 2,
+    paddingVertical: spacing.md,
     fontSize: 15,
+    fontFamily: fontFamily.regular,
     color: colors.text,
   },
-  categoryRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  categoryRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   categoryChip: {
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
-    borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
   },
   categoryChipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
-  categoryChipText: { fontSize: 13, color: colors.textSecondary, fontWeight: "600" },
+  categoryChipText: { fontSize: 13, fontFamily: fontFamily.semiBold, color: colors.textSecondary },
   categoryChipTextSelected: { color: colors.onPrimary },
   dateButton: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: spacing.sm,
     backgroundColor: colors.surface,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    paddingHorizontal: spacing.md + 2,
+    paddingVertical: spacing.md + 2,
   },
-  dateButtonIcon: { fontSize: 15 },
-  dateButtonText: { fontSize: 14, color: colors.text, fontWeight: "600" },
+  dateButtonText: { fontSize: 14, fontFamily: fontFamily.semiBold, color: colors.text },
   confirmButton: {
     backgroundColor: colors.primary,
-    borderRadius: 14,
-    paddingVertical: 15,
+    borderRadius: radius.lg - 2,
+    paddingVertical: spacing.md + 3,
     alignItems: "center",
-    marginTop: 20,
+    marginTop: spacing.xl - 4,
   },
   confirmButtonDisabled: { opacity: 0.6 },
-  confirmButtonText: { color: colors.onPrimary, fontSize: 16, fontWeight: "700" },
+  confirmButtonText: { color: colors.onPrimary, fontSize: 16, fontFamily: fontFamily.bold },
   });
 }

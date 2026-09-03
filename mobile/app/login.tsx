@@ -9,7 +9,9 @@ import {
   View,
 } from "react-native";
 import { Alert } from "../services/crossPlatformAlert";
+import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
+import { radius, spacing } from "../constants/tokens";
 import { api } from "../services/api";
 import { useAuth } from "../services/AuthContext";
 import { useTheme } from "../services/ThemeContext";
@@ -93,30 +95,31 @@ export default function LoginScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    container: { flex: 1, padding: 24, justifyContent: "center", backgroundColor: colors.background },
-    title: { fontSize: 24, fontWeight: "700", color: colors.text, marginBottom: 6 },
-    subtitle: { fontSize: 13, color: colors.textTertiary, marginBottom: 24, lineHeight: 18 },
+    container: { flex: 1, padding: spacing.xl, justifyContent: "center", backgroundColor: colors.background },
+    title: { fontSize: 24, fontFamily: fontFamily.bold, color: colors.text, marginBottom: spacing.xs + 2 },
+    subtitle: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textTertiary, marginBottom: spacing.xl, lineHeight: 18 },
     input: {
       backgroundColor: colors.surface,
-      borderRadius: 12,
+      borderRadius: radius.md,
       borderWidth: 1,
       borderColor: colors.border,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
+      paddingHorizontal: spacing.md + 2,
+      paddingVertical: spacing.md,
       fontSize: 15,
+      fontFamily: fontFamily.regular,
       color: colors.text,
-      marginBottom: 12,
+      marginBottom: spacing.md,
     },
     button: {
       backgroundColor: colors.primary,
-      borderRadius: 14,
-      paddingVertical: 15,
+      borderRadius: radius.lg - 2,
+      paddingVertical: spacing.md + 3,
       alignItems: "center",
-      marginTop: 8,
+      marginTop: spacing.sm,
     },
     buttonDisabled: { opacity: 0.6 },
-    buttonText: { color: colors.onPrimary, fontSize: 16, fontWeight: "700" },
-    linkButton: { marginTop: 18, alignItems: "center" },
-    linkText: { color: colors.primary, fontSize: 14, fontWeight: "600" },
+    buttonText: { color: colors.onPrimary, fontSize: 16, fontFamily: fontFamily.bold },
+    linkButton: { marginTop: spacing.lg + 2, alignItems: "center" },
+    linkText: { color: colors.primary, fontSize: 14, fontFamily: fontFamily.semiBold },
   });
 }

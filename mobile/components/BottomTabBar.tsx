@@ -3,6 +3,8 @@ import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../services/ThemeContext";
+import { fontFamily } from "../constants/fonts";
+import { spacing } from "../constants/tokens";
 import { AccessibilityIcon, AirplaneIcon, HomeIcon, MapIcon } from "./TabIcons";
 
 const TABS: {
@@ -59,8 +61,8 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
     borderTopWidth: 1,
-    paddingTop: 8,
+    paddingTop: spacing.sm,
   },
-  tabButton: { flex: 1, alignItems: "center", justifyContent: "center", gap: 4, paddingVertical: 2 },
-  label: { fontSize: 11, fontWeight: "600" },
+  tabButton: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.xs, paddingVertical: 2 },
+  label: { fontSize: 11, fontFamily: fontFamily.semiBold },
 });

@@ -1,11 +1,21 @@
 import { useRouter } from "expo-router";
+import {
+  CaretDownIcon,
+  CaretUpIcon,
+  FloppyDiskIcon,
+  HandTapIcon,
+  MapTrifoldIcon,
+  WifiSlashIcon,
+} from "phosphor-react-native";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Alert } from "../services/crossPlatformAlert";
 import DraggableFlatList, { ScaleDecorator } from "react-native-draggable-flatlist";
 import { AttractionCard } from "../components/AttractionCard";
 import { SaveCourseModal, SaveCourseParams } from "../components/SaveCourseModal";
+import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
+import { radius, spacing } from "../constants/tokens";
 import { api } from "../services/api";
 import { useAuth } from "../services/AuthContext";
 import { useCourseContext } from "../services/CourseContext";
@@ -62,6 +72,21 @@ export default function ResultsScreen() {
     setOrderChanged(true);
   };
 
+  // 웹에서는 길게 눌러 끄는 드래그 순서변경이 동작하지 않아(사용 중인 드래그
+  // 라이브러리가 데스크톱 브라우저에서 제스처를 안정적으로 못 잡음), 대신
+  // 카드마다 위/아래 버튼으로 순서를 바꿀 수 있게 합니다. 결과는 드래그와
+  // 동일하게 로컬 반영 + '순서 저장' 버튼 노출입니다.
+  const handleMoveStop = (index: number, direction: -1 | 1) => {
+    if (!course) return;
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= course.stops.length) return;
+    const stops = [...course.stops];
+    [stops[index], stops[targetIndex]] = [stops[targetIndex], stops[index]];
+    const reordered = stops.map((stop, i) => ({ ...stop, order: i + 1 }));
+    setCourse({ ...course, stops: reordered });
+    setOrderChanged(true);
+  };
+
   const handleSaveOrder = async () => {
     if (!course) return;
     if (!session) {
@@ -97,7 +122,10 @@ export default function ResultsScreen() {
   return (
     <View style={styles.container}>
       {offlineNotice && (
-        <Text style={styles.offlineBanner}>📴 오프라인 저장된 마지막 코스를 보여드리고 있어요</Text>
+        <View style={styles.offlineBanner}>
+          <WifiSlashIcon size={13} color={colors.warningText} weight="bold" />
+          <Text style={styles.offlineBannerText}>오프라인 저장된 마지막 코스를 보여드리고 있어요</Text>
+        </View>
       )}
 
       <View style={styles.titleRow}>
@@ -106,12 +134,20 @@ export default function ResultsScreen() {
           <Text style={styles.summary}>{course.summary}</Text>
         </View>
         <TouchableOpacity style={styles.saveButton} onPress={openSaveModal}>
-          <Text style={styles.saveButtonText}>💾 저장</Text>
+          <FloppyDiskIcon size={13} color={colors.primary} weight="bold" />
+          <Text style={styles.saveButtonText}>저장</Text>
         </TouchableOpacity>
       </View>
 
       <View style={styles.orderHintRow}>
-        <Text style={styles.orderHint}>✋ 카드를 길게 눌러서 순서를 바꿀 수 있어요</Text>
+        <View style={styles.orderHintTextRow}>
+          <HandTapIcon size={13} color={colors.textTertiary} weight="bold" />
+          <Text style={styles.orderHint}>
+            {Platform.OS === "web"
+              ? "카드의 화살표 버튼으로 순서를 바꿀 수 있어요"
+              : "카드를 길게 눌러서 순서를 바꿀 수 있어요"}
+          </Text>
+        </View>
         {orderChanged && (
           <TouchableOpacity
             style={[styles.saveOrderButton, savingOrder && styles.saveOrderButtonDisabled]}
@@ -128,14 +164,53 @@ export default function ResultsScreen() {
       </View>
 
       <DraggableFlatList
+        style={{ flex: 1 }}
+        containerStyle={{ flex: 1 }}
         data={course.stops}
         keyExtractor={(item) => item.attraction.content_id}
         contentContainerStyle={{ paddingBottom: 90 }}
         onDragEnd={handleDragEnd}
-        renderItem={({ item, drag, isActive }) => (
+        renderItem={({ item, drag, isActive, getIndex }) => (
           <ScaleDecorator>
-            <Pressable onLongPress={drag} disabled={isActive} style={isActive ? styles.dragging : undefined}>
-              <AttractionCard stop={item} userType={course.generated_for} />
+            <Pressable
+              onLongPress={Platform.OS === "web" ? undefined : drag}
+              disabled={isActive}
+              style={isActive ? styles.dragging : undefined}
+            >
+              <AttractionCard
+                stop={item}
+                userType={course.generated_for}
+                actions={
+                  Platform.OS === "web" ? (
+                    <View style={styles.moveButtonGroup}>
+                      <Pressable
+                        style={styles.moveButton}
+                        disabled={getIndex() === 0}
+                        onPress={() => handleMoveStop(getIndex() ?? 0, -1)}
+                        accessibilityLabel="위로 순서 이동"
+                      >
+                        <CaretUpIcon
+                          size={14}
+                          color={getIndex() === 0 ? colors.textTertiary : colors.primary}
+                          weight="bold"
+                        />
+                      </Pressable>
+                      <Pressable
+                        style={styles.moveButton}
+                        disabled={getIndex() === course.stops.length - 1}
+                        onPress={() => handleMoveStop(getIndex() ?? 0, 1)}
+                        accessibilityLabel="아래로 순서 이동"
+                      >
+                        <CaretDownIcon
+                          size={14}
+                          color={getIndex() === course.stops.length - 1 ? colors.textTertiary : colors.primary}
+                          weight="bold"
+                        />
+                      </Pressable>
+                    </View>
+                  ) : undefined
+                }
+              />
             </Pressable>
           </ScaleDecorator>
         )}
@@ -146,7 +221,8 @@ export default function ResultsScreen() {
         onPress={() => router.push("/map")}
         accessibilityLabel="지도로 전체 동선 보기"
       >
-        <Text style={styles.mapButtonText}>🗺️ 지도로 전체 동선 보기</Text>
+        <MapTrifoldIcon size={16} color={colors.onPrimary} weight="bold" />
+        <Text style={styles.mapButtonText}>지도로 전체 동선 보기</Text>
       </Pressable>
 
       <SaveCourseModal
@@ -161,52 +237,73 @@ export default function ResultsScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { flex: 1, padding: 20, backgroundColor: colors.background },
-  titleRow: { flexDirection: "row", alignItems: "flex-start", marginBottom: 16, gap: 10 },
-  title: { fontSize: 21, fontWeight: "700", color: colors.text, marginBottom: 4 },
-  summary: { fontSize: 14, color: colors.textSecondary },
+  container: { flex: 1, padding: spacing.xl - 4, backgroundColor: colors.background },
+  titleRow: { flexDirection: "row", alignItems: "flex-start", marginBottom: spacing.lg, gap: spacing.sm + 2 },
+  title: { fontSize: 21, fontFamily: fontFamily.bold, color: colors.text, marginBottom: spacing.xs },
+  summary: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary },
   saveButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs + 2,
     backgroundColor: colors.primaryLight,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    borderRadius: radius.sm + 2,
+    paddingHorizontal: spacing.md + 2,
+    paddingVertical: spacing.md,
   },
-  saveButtonText: { color: colors.primary, fontWeight: "700", fontSize: 13 },
-  orderHintRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
-  orderHint: { fontSize: 12, color: colors.textTertiary, flexShrink: 1 },
+  saveButtonText: { color: colors.primary, fontFamily: fontFamily.bold, fontSize: 13 },
+  orderHintRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm + 2 },
+  orderHintTextRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs, flexShrink: 1 },
+  orderHint: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary, flexShrink: 1 },
   saveOrderButton: {
     backgroundColor: colors.primary,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    marginLeft: 8,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md + 2,
+    paddingVertical: spacing.xs + 3,
+    marginLeft: spacing.sm,
   },
   saveOrderButtonDisabled: { opacity: 0.6 },
-  saveOrderButtonText: { color: colors.onPrimary, fontWeight: "700", fontSize: 12 },
+  saveOrderButtonText: { color: colors.onPrimary, fontFamily: fontFamily.bold, fontSize: 12 },
   dragging: { opacity: 0.7 },
-  offlineBanner: {
-    backgroundColor: colors.warningLight,
-    color: colors.warningText,
-    fontSize: 12,
-    padding: 8,
-    borderRadius: 8,
-    marginBottom: 12,
-    textAlign: "center",
+  moveButtonGroup: {
+    flexDirection: "row",
+    gap: spacing.xs,
   },
+  moveButton: {
+    width: 26,
+    height: 26,
+    borderRadius: radius.sm,
+    backgroundColor: colors.primaryLight,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  offlineBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs + 2,
+    backgroundColor: colors.warningLight,
+    padding: spacing.sm,
+    borderRadius: radius.sm,
+    marginBottom: spacing.md,
+  },
+  offlineBannerText: { color: colors.warningText, fontSize: 12, fontFamily: fontFamily.regular, textAlign: "center" },
   mapButton: {
     position: "absolute",
-    bottom: 20,
-    left: 20,
-    right: 20,
+    bottom: spacing.xl - 4,
+    left: spacing.xl - 4,
+    right: spacing.xl - 4,
+    flexDirection: "row",
     backgroundColor: colors.primary,
-    borderRadius: 14,
-    paddingVertical: 16,
+    borderRadius: radius.lg - 2,
+    paddingVertical: spacing.lg,
     alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs + 2,
   },
-  mapButtonText: { color: colors.onPrimary, fontSize: 16, fontWeight: "700" },
-  empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: colors.background },
-  emptyText: { fontSize: 15, color: colors.textTertiary, marginBottom: 16 },
-  emptyButton: { backgroundColor: colors.primary, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 12 },
-  emptyButtonText: { color: colors.onPrimary, fontWeight: "700" },
+  mapButtonText: { color: colors.onPrimary, fontSize: 16, fontFamily: fontFamily.bold },
+  empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, backgroundColor: colors.background },
+  emptyText: { fontSize: 15, fontFamily: fontFamily.regular, color: colors.textTertiary, marginBottom: spacing.lg },
+  emptyButton: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.xl - 4, paddingVertical: spacing.md },
+  emptyButtonText: { color: colors.onPrimary, fontFamily: fontFamily.bold },
   });
 }

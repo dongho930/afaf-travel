@@ -1,4 +1,5 @@
 import { useRouter } from "expo-router";
+import { NotePencilIcon, XIcon, type Icon } from "phosphor-react-native";
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -13,7 +14,10 @@ import {
 } from "react-native";
 import { Alert } from "../../services/crossPlatformAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
+import { radius, spacing } from "../../constants/tokens";
+import { userTypeIcon } from "../../constants/userTypeIcons";
 import { api } from "../../services/api";
 import { useAuth } from "../../services/AuthContext";
 import { useTheme } from "../../services/ThemeContext";
@@ -27,13 +31,13 @@ import {
 
 type CategoryKey = "wheelchair_count" | "visual_count" | "hearing_count" | "senior_count" | "family_count" | "pregnant_count";
 
-const CATEGORY_META: { key: CategoryKey; icon: string; label: string; isMock: boolean }[] = [
-  { key: "wheelchair_count", icon: "♿", label: "지체 장애", isMock: false },
-  { key: "visual_count", icon: "👁️", label: "시각 장애", isMock: false },
-  { key: "hearing_count", icon: "💡", label: "청각 장애", isMock: false },
-  { key: "senior_count", icon: "🧓", label: "고령자", isMock: false },
-  { key: "family_count", icon: "👶", label: "영유아 가족", isMock: false },
-  { key: "pregnant_count", icon: "🤰", label: "임산부", isMock: false },
+const CATEGORY_META: { key: CategoryKey; icon: Icon; label: string; isMock: boolean }[] = [
+  { key: "wheelchair_count", icon: userTypeIcon.wheelchair, label: "지체 장애", isMock: false },
+  { key: "visual_count", icon: userTypeIcon.visual, label: "시각 장애", isMock: false },
+  { key: "hearing_count", icon: userTypeIcon.hearing, label: "청각 장애", isMock: false },
+  { key: "senior_count", icon: userTypeIcon.senior, label: "고령자", isMock: false },
+  { key: "family_count", icon: userTypeIcon.family, label: "영유아 가족", isMock: false },
+  { key: "pregnant_count", icon: userTypeIcon.pregnant, label: "임산부", isMock: false },
 ];
 
 // 각 카테고리를 선택했을 때 어떤 필드의 목록을 보여줄지 매핑합니다.
@@ -211,19 +215,23 @@ export default function AccessibilityScreen() {
         <View style={styles.grid}>
           {CATEGORY_META.map((c) => {
             const isSelected = c.key === selectedCategory;
+            const CategoryIcon = c.icon;
             return (
               <Pressable
                 key={c.key}
-                style={[styles.categoryCard, isSelected && styles.categoryCardSelected]}
+                style={styles.categoryTab}
                 onPress={() => {
                   setSelectedCategory(c.key);
                   setVisiblePlacesCount(PLACES_PAGE_SIZE); // 카테고리를 바꾸면 다시 5개부터
                 }}
               >
-                <Text style={styles.categoryIcon}>{c.icon}</Text>
-                <Text style={styles.categoryCount}>{counts[c.key] ?? "-"}개 장소</Text>
-                <Text style={styles.categoryLabel}>{c.label}</Text>
-                {c.isMock && <Text style={styles.mockBadge}>참고용 수치</Text>}
+                <CategoryIcon size={24} color={isSelected ? colors.primary : colors.textTertiary} weight="bold" />
+                <Text style={[styles.categoryCount, isSelected && styles.categoryCountActive]}>
+                  {counts[c.key] ?? "-"}개
+                </Text>
+                <Text style={[styles.categoryLabel, isSelected && styles.categoryLabelActive]}>{c.label}</Text>
+                {c.isMock && <Text style={styles.mockBadge}>참고용</Text>}
+                <View style={[styles.categoryDot, isSelected && styles.categoryDotActive]} />
               </Pressable>
             );
           })}
@@ -244,9 +252,10 @@ export default function AccessibilityScreen() {
           </View>
         </View>
 
-        <Text style={styles.sectionTitle}>
-          {selectedMeta.icon} {selectedMeta.label} 주요 여행지
-        </Text>
+        <View style={styles.sectionTitleRow}>
+          <selectedMeta.icon size={16} color={colors.text} weight="bold" />
+          <Text style={styles.sectionTitle}>{selectedMeta.label} 주요 여행지</Text>
+        </View>
         {selectedPlaces.length ? (
           selectedPlaces.slice(0, visiblePlacesCount).map((place) => {
             const tier = tierLabel(place.score, colors);
@@ -299,7 +308,10 @@ export default function AccessibilityScreen() {
         <View style={styles.divider} />
 
         <View style={styles.reportHeaderRow}>
-          <Text style={styles.sectionTitle}>📝 {selectedMeta.label} 최근 제보</Text>
+          <View style={styles.reportTitleRow}>
+            <NotePencilIcon size={16} color={colors.text} weight="bold" />
+            <Text style={styles.sectionTitle}>{selectedMeta.label} 최근 제보</Text>
+          </View>
           <Pressable style={styles.reportButton} onPress={openReportModal}>
             <Text style={styles.reportButtonText}>제보하기</Text>
           </Pressable>
@@ -349,7 +361,7 @@ export default function AccessibilityScreen() {
                 <View style={styles.selectedPlaceChip}>
                   <Text style={styles.selectedPlaceChipText}>{selectedPlace.name}</Text>
                   <Pressable onPress={() => setSelectedPlace(null)}>
-                    <Text style={styles.selectedPlaceChipRemove}>✕</Text>
+                    <XIcon size={13} color={colors.primary} weight="bold" />
                   </Pressable>
                 </View>
               ) : (
@@ -382,22 +394,27 @@ export default function AccessibilityScreen() {
 
               <Text style={styles.fieldLabel}>어떤 유형인가요?</Text>
               <View style={styles.categoryChipsRow}>
-                {CATEGORY_META.map((c) => (
-                  <Pressable
-                    key={c.key}
-                    style={[styles.reportCategoryChip, reportCategory === c.key && styles.reportCategoryChipSelected]}
-                    onPress={() => setReportCategory(c.key)}
-                  >
-                    <Text
-                      style={[
-                        styles.reportCategoryChipText,
-                        reportCategory === c.key && styles.reportCategoryChipTextSelected,
-                      ]}
+                {CATEGORY_META.map((c) => {
+                  const ChipIcon = c.icon;
+                  const chipSelected = reportCategory === c.key;
+                  return (
+                    <Pressable
+                      key={c.key}
+                      style={[styles.reportCategoryChip, chipSelected && styles.reportCategoryChipSelected]}
+                      onPress={() => setReportCategory(c.key)}
                     >
-                      {c.icon} {c.label}
-                    </Text>
-                  </Pressable>
-                ))}
+                      <ChipIcon size={12} color={chipSelected ? colors.onPrimary : colors.textSecondary} weight="bold" />
+                      <Text
+                        style={[
+                          styles.reportCategoryChipText,
+                          chipSelected && styles.reportCategoryChipTextSelected,
+                        ]}
+                      >
+                        {c.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </View>
 
               <Text style={styles.fieldLabel}>어떤 점이 있었나요?</Text>
@@ -437,82 +454,72 @@ export default function AccessibilityScreen() {
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  container: { padding: 24, paddingBottom: 40 },
-  title: { fontSize: 22, fontWeight: "800", color: colors.text, marginBottom: 4 },
-  subtitle: { fontSize: 14, color: colors.textSecondary, marginBottom: 20 },
+  container: { padding: spacing.xl, paddingBottom: spacing.xxl + spacing.sm },
+  title: { fontSize: 22, fontFamily: fontFamily.extraBold, color: colors.text, marginBottom: spacing.xs },
+  subtitle: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary, marginBottom: spacing.xl },
 
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 20 },
-  categoryCard: {
-    width: "47%",
-    backgroundColor: colors.surface,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 14,
-  },
-  categoryCardSelected: {
-    borderColor: colors.primary,
-    borderWidth: 2,
-    backgroundColor: colors.primaryLight,
-  },
-  categoryIcon: { fontSize: 22, marginBottom: 6 },
-  categoryCount: { fontSize: 16, fontWeight: "800", color: colors.text },
-  categoryLabel: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
-  mockBadge: { fontSize: 10, color: colors.warning, marginTop: 6, fontWeight: "600" },
+  grid: { flexDirection: "row", flexWrap: "wrap", rowGap: spacing.lg, marginBottom: spacing.xl - 4 },
+  categoryTab: { width: "33.33%", alignItems: "center", gap: spacing.xs + 2 },
+  categoryCount: { fontSize: 13, fontFamily: fontFamily.extraBold, color: colors.textTertiary, fontVariant: ["tabular-nums"] },
+  categoryCountActive: { color: colors.primary },
+  categoryLabel: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary },
+  categoryLabelActive: { color: colors.primary, fontFamily: fontFamily.bold },
+  categoryDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: "transparent", marginTop: -4 },
+  categoryDotActive: { backgroundColor: colors.primary },
+  mockBadge: { fontSize: 10, color: colors.warning, fontFamily: fontFamily.semiBold },
 
-  legendRow: { flexDirection: "row", gap: 16, marginBottom: 24 },
-  legendItem: { flexDirection: "row", alignItems: "center", gap: 6 },
+  legendRow: { flexDirection: "row", gap: spacing.lg, marginBottom: spacing.xl },
+  legendItem: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2 },
   legendDot: { width: 8, height: 8, borderRadius: 4 },
-  legendText: { fontSize: 12, color: colors.textSecondary },
+  legendText: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textSecondary },
 
-  sectionTitle: { fontSize: 16, fontWeight: "800", color: colors.text, marginBottom: 12 },
+  sectionTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2, marginBottom: spacing.md },
+  reportTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2 },
+  sectionTitle: { fontSize: 16, fontFamily: fontFamily.extraBold, color: colors.text },
   placeRow: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: colors.surface,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 12,
-    marginBottom: 10,
-    gap: 12,
+    padding: spacing.md,
+    marginBottom: spacing.sm + 2,
+    gap: spacing.md,
   },
   scoreBadge: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
-  scoreBadgeText: { color: "#FFFFFF", fontWeight: "800", fontSize: 14 },
-  placeName: { fontSize: 15, fontWeight: "700", color: colors.text },
-  placeAddress: { fontSize: 12, color: colors.textTertiary, marginTop: 2 },
+  scoreBadgeText: { color: "#FFFFFF", fontFamily: fontFamily.extraBold, fontSize: 14 },
+  placeName: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.text },
+  placeAddress: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary, marginTop: 2 },
   tierBar: { width: 4, height: 32, borderRadius: 2 },
-  emptyText: { fontSize: 13, color: colors.textTertiary },
+  emptyText: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textTertiary },
   moreButton: {
-    marginTop: 4,
-    paddingVertical: 13,
-    borderRadius: 12,
+    marginTop: spacing.xs,
+    paddingVertical: spacing.md + 1,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
     alignItems: "center",
   },
-  moreButtonText: { fontSize: 14, fontWeight: "700", color: colors.primary },
+  moreButtonText: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.primary },
 
-  divider: { height: 1, backgroundColor: colors.border, marginVertical: 20 },
+  divider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.xl - 4 },
 
-  reportHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+  reportHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.md },
   reportButton: {
     backgroundColor: colors.primary,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
+    paddingHorizontal: spacing.md + 2,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
   },
-  reportButtonText: { color: colors.onPrimary, fontSize: 13, fontWeight: "700" },
+  reportButtonText: { color: colors.onPrimary, fontSize: 13, fontFamily: fontFamily.bold },
 
   reportCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 14,
-    marginBottom: 10,
+    paddingVertical: spacing.md + 2,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  reportCardHeader: { flexDirection: "row", alignItems: "center", marginBottom: 6, gap: 8 },
+  reportCardHeader: { flexDirection: "row", alignItems: "center", marginBottom: spacing.xs + 2, gap: spacing.sm },
   reportAvatar: { width: 26, height: 26, borderRadius: 13, backgroundColor: colors.primaryLight },
   reportAvatarPlaceholder: {
     width: 26,
@@ -522,31 +529,32 @@ function makeStyles(colors: ThemeColors) {
     alignItems: "center",
     justifyContent: "center",
   },
-  reportAvatarPlaceholderText: { color: colors.onPrimary, fontSize: 12, fontWeight: "700" },
-  reportAuthor: { fontSize: 13, fontWeight: "700", color: colors.text },
-  reportPlaceName: { fontSize: 12, color: colors.textTertiary, marginLeft: 4, flexShrink: 1 },
-  reportBody: { fontSize: 13, color: colors.text, lineHeight: 19 },
+  reportAvatarPlaceholderText: { color: colors.onPrimary, fontSize: 12, fontFamily: fontFamily.bold },
+  reportAuthor: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.text },
+  reportPlaceName: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary, marginLeft: spacing.xs, flexShrink: 1 },
+  reportBody: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.text, lineHeight: 19 },
 
   modalBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end", alignItems: "center" },
   modalSheet: {
     width: "100%",
     maxWidth: 640, // 웹에서 넓은 화면일 때 앱 폭(WebFrame)에 맞춰 시트도 가운데 정렬되게
     backgroundColor: colors.surface,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: spacing.xl - 4,
     maxHeight: "85%",
   },
-  modalTitle: { fontSize: 18, fontWeight: "800", color: colors.text, marginBottom: 16 },
-  fieldLabel: { fontSize: 13, fontWeight: "700", color: colors.text, marginTop: 14, marginBottom: 8 },
+  modalTitle: { fontSize: 18, fontFamily: fontFamily.extraBold, color: colors.text, marginBottom: spacing.lg },
+  fieldLabel: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.text, marginTop: spacing.md + 2, marginBottom: spacing.sm },
   input: {
     backgroundColor: colors.surface,
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: spacing.md + 2,
+    paddingVertical: spacing.md,
     fontSize: 14,
+    fontFamily: fontFamily.regular,
     color: colors.text,
   },
   textArea: { minHeight: 80, textAlignVertical: "top" },
@@ -555,50 +563,52 @@ function makeStyles(colors: ThemeColors) {
     alignItems: "center",
     alignSelf: "flex-start",
     backgroundColor: colors.primaryLight,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    gap: 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    gap: spacing.sm,
   },
-  selectedPlaceChipText: { fontSize: 13, fontWeight: "700", color: colors.primary },
-  selectedPlaceChipRemove: { fontSize: 13, color: colors.primary, fontWeight: "700" },
+  selectedPlaceChipText: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.primary },
   searchResultRow: {
-    paddingVertical: 10,
-    paddingHorizontal: 4,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.xs,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  searchResultName: { fontSize: 14, fontWeight: "700", color: colors.text },
-  searchResultAddress: { fontSize: 12, color: colors.textTertiary, marginTop: 2 },
-  categoryChipsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  searchResultName: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.text },
+  searchResultAddress: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary, marginTop: 2 },
+  categoryChipsRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   reportCategoryChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm - 1,
   },
   reportCategoryChipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
-  reportCategoryChipText: { fontSize: 12, fontWeight: "600", color: colors.textSecondary },
+  reportCategoryChipText: { fontSize: 12, fontFamily: fontFamily.semiBold, color: colors.textSecondary },
   reportCategoryChipTextSelected: { color: colors.onPrimary },
-  modalButtonRow: { flexDirection: "row", gap: 10, marginTop: 20, marginBottom: 8 },
+  modalButtonRow: { flexDirection: "row", gap: spacing.sm + 2, marginTop: spacing.xl - 4, marginBottom: spacing.sm },
   modalCancelButton: {
     flex: 1,
-    paddingVertical: 13,
-    borderRadius: 12,
+    paddingVertical: spacing.md + 1,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
     alignItems: "center",
   },
-  modalCancelButtonText: { fontSize: 14, fontWeight: "700", color: colors.textSecondary },
+  modalCancelButtonText: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.textSecondary },
   modalSubmitButton: {
     flex: 1,
-    paddingVertical: 13,
-    borderRadius: 12,
+    paddingVertical: spacing.md + 1,
+    borderRadius: radius.md,
     backgroundColor: colors.primary,
     alignItems: "center",
   },
-  modalSubmitButtonText: { fontSize: 14, fontWeight: "700", color: colors.onPrimary },
+  modalSubmitButtonText: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.onPrimary },
   buttonDisabled: { opacity: 0.6 },
   });
 }
