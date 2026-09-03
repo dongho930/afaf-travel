@@ -64,8 +64,8 @@ function ThemedApp() {
               <Stack.Screen name="profile" options={{ title: "프로필" }} />
               <Stack.Screen name="settings" options={{ title: "설정" }} />
               <Stack.Screen name="attraction-detail" options={{ title: "관광지 상세" }} />
-              <Stack.Screen name="post-detail" options={{ title: "여행기록" }} />
-              <Stack.Screen name="post-create" options={{ title: "여행기록 작성" }} />
+              <Stack.Screen name="post-create" options={{ title: "게시물 작성" }} />
+              <Stack.Screen name="post-manage" options={{ title: "게시물 관리" }} />
             </Stack>
           </View>
           <BottomTabBar />

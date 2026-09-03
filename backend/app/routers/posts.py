@@ -11,6 +11,7 @@ from app.services.post_service import (
     delete_post,
     get_post,
     list_comments_for_post,
+    list_my_posts,
     list_posts_feed,
 )
 
@@ -85,6 +86,14 @@ async def submit_post(
     if not ok:
         raise HTTPException(status_code=400, detail=result)
     return result
+
+
+@router.get("/me/list", response_model=list[PostItem])
+async def my_posts(user_id: Optional[str] = Depends(get_optional_user_id)):
+    """'게시물 관리' 화면용, 내가 작성한 게시물 전체(최신순). 비로그인이면 빈 목록."""
+    if not user_id:
+        return []
+    return await list_my_posts(user_id)
 
 
 @router.get("/{post_id}", response_model=PostItem)

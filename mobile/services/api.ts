@@ -331,6 +331,9 @@ export const api = {
 
   getPost: (postId: string) => request<PostItem>(`/api/posts/${encodeURIComponent(postId)}`),
 
+  // '게시물 관리' 화면용, 내가 작성한 게시물 전체 (최신순, 로그인 필요)
+  getMyPosts: () => request<PostItem[]>("/api/posts/me/list"),
+
   // 여행기록 게시물 작성 (로그인 필요). photos는 base64 인코딩된 이미지 배열(최대 5장)
   createPost: (contentId: string, placeName: string, body: string, photos: string[] = []) =>
     request<PostItem>("/api/posts", {

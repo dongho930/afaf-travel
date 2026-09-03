@@ -56,7 +56,7 @@ export function AccessibilityIcon({ color = "#8A8A8A", size = 22 }: IconProps) {
   );
 }
 
-// 하단 탭바 5번째 탭('여행기록') 아이콘 — 원본 SVG 세트에 없어서 같은
+// 하단 탭바 5번째 탭('게시물') 아이콘 — 원본 SVG 세트에 없어서 같은
 // stroke 스타일(strokeWidth 3, round cap)로 새로 그린 노트/기록 아이콘입니다.
 export function NotebookIcon({ color = "#8A8A8A", size = 22 }: IconProps) {
   const width = size * (80 / 64);

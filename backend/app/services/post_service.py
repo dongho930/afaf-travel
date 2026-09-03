@@ -169,6 +169,33 @@ async def list_posts_feed(
         return []
 
 
+async def list_my_posts(user_id: str, limit: int = 100) -> list[dict]:
+    """'게시물 관리' 화면용, 이 사용자가 작성한 게시물 전체를 최신순으로
+    반환합니다 (review_service.list_reviews_by_user와 동일한 패턴)."""
+    if _client is None:
+        return []
+    try:
+        result = (
+            _client.table(_POSTS_TABLE)
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        rows = result.data or []
+        if not rows:
+            return []
+        rows = await _attach_authors(rows)
+        rows = await _attach_comment_counts(rows)
+        for r in rows:
+            r["is_mine"] = True
+        return rows
+    except Exception as e:
+        print(f"[post] 내 게시물 목록 조회 실패: {e}")
+        return []
+
+
 async def get_post(post_id: str, viewer_user_id: Optional[str] = None) -> Optional[dict]:
     """게시물 단건 조회 (작성자/댓글 수 포함)."""
     if _client is None:

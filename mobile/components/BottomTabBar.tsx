@@ -16,7 +16,7 @@ const TABS: {
   { path: "/planner", Icon: AirplaneIcon, label: "AI 플래너" },
   { path: "/accessibility", Icon: AccessibilityIcon, label: "접근성" },
   { path: "/trips", Icon: MapIcon, label: "내 여행" },
-  { path: "/posts", Icon: NotebookIcon, label: "여행기록" },
+  { path: "/posts", Icon: NotebookIcon, label: "게시물" },
 ];
 
 /**

@@ -1,4 +1,3 @@
-import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
@@ -154,25 +153,21 @@ export default function AttractionDetailScreen() {
       return;
     }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsMultipleSelection: true,
-      selectionLimit: MAX_REVIEW_PHOTOS - photoDrafts.length,
-      quality: 0.6,
-    });
-    if (result.canceled || !result.assets?.length) return;
-
     setPickingPhoto(true);
     try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: true,
+        selectionLimit: MAX_REVIEW_PHOTOS - photoDrafts.length,
+        quality: 0.6,
+        base64: true,
+      });
+      if (result.canceled || !result.assets?.length) return;
+
       const picked = result.assets.slice(0, MAX_REVIEW_PHOTOS - photoDrafts.length);
-      const encoded = await Promise.all(
-        picked.map(async (asset) => {
-          const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-            encoding: FileSystem.EncodingType.Base64,
-          });
-          return { uri: asset.uri, payload: base64 };
-        })
-      );
+      const encoded = picked
+        .filter((asset) => !!asset.base64)
+        .map((asset) => ({ uri: asset.uri, payload: asset.base64 as string }));
       setPhotoDrafts((prev) => [...prev, ...encoded].slice(0, MAX_REVIEW_PHOTOS));
     } catch (err) {
       Alert.alert("사진을 불러오지 못했어요", String(err));
