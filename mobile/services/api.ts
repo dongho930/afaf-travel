@@ -11,6 +11,8 @@ import {
   MyReviewItem,
   NearbyAttraction,
   PlaceCandidate,
+  PostComment,
+  PostItem,
   RegionOption,
   ReportCategory,
   Review,
@@ -319,4 +321,38 @@ export const api = {
 
   // 내가 작성한 접근성 제보 전체 (내 여행 탭 '접근성 제보' 카드용)
   getMyReports: () => request<MyReportItem[]>("/api/reports/me/list"),
+
+  // 여행기록 전체 공개 피드 (최신순, 로그인 불필요). before는 이전 페이지
+  // 마지막 게시물의 created_at을 넣으면 그 이전 게시물을 이어서 받습니다.
+  getPostFeed: (limit: number = 20, before?: string) =>
+    request<PostItem[]>(
+      `/api/posts?limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ""}`
+    ),
+
+  getPost: (postId: string) => request<PostItem>(`/api/posts/${encodeURIComponent(postId)}`),
+
+  // 여행기록 게시물 작성 (로그인 필요). photos는 base64 인코딩된 이미지 배열(최대 5장)
+  createPost: (contentId: string, placeName: string, body: string, photos: string[] = []) =>
+    request<PostItem>("/api/posts", {
+      method: "POST",
+      body: JSON.stringify({ content_id: contentId, place_name: placeName, body, photos }),
+    }),
+
+  deletePost: (postId: string) =>
+    request<{ ok: boolean }>(`/api/posts/${encodeURIComponent(postId)}`, { method: "DELETE" }),
+
+  getPostComments: (postId: string) =>
+    request<PostComment[]>(`/api/posts/${encodeURIComponent(postId)}/comments`),
+
+  // 댓글 또는 답글 작성 (로그인 필요). parentCommentId를 넣으면 그 댓글에 대한 답글입니다.
+  createPostComment: (postId: string, body: string, parentCommentId?: string) =>
+    request<PostComment>(`/api/posts/${encodeURIComponent(postId)}/comments`, {
+      method: "POST",
+      body: JSON.stringify({ body, parent_comment_id: parentCommentId ?? null }),
+    }),
+
+  deletePostComment: (commentId: string) =>
+    request<{ ok: boolean }>(`/api/posts/comments/${encodeURIComponent(commentId)}`, {
+      method: "DELETE",
+    }),
 };

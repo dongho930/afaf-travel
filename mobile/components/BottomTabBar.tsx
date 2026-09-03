@@ -5,10 +5,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../services/ThemeContext";
 import { fontFamily } from "../constants/fonts";
 import { spacing } from "../constants/tokens";
-import { AccessibilityIcon, AirplaneIcon, HomeIcon, MapIcon } from "./TabIcons";
+import { AccessibilityIcon, AirplaneIcon, HomeIcon, MapIcon, NotebookIcon } from "./TabIcons";
 
 const TABS: {
-  path: "/" | "/planner" | "/accessibility" | "/trips";
+  path: "/" | "/planner" | "/accessibility" | "/trips" | "/posts";
   Icon: React.ComponentType<{ color?: string; size?: number }>;
   label: string;
 }[] = [
@@ -16,6 +16,7 @@ const TABS: {
   { path: "/planner", Icon: AirplaneIcon, label: "AI 플래너" },
   { path: "/accessibility", Icon: AccessibilityIcon, label: "접근성" },
   { path: "/trips", Icon: MapIcon, label: "내 여행" },
+  { path: "/posts", Icon: NotebookIcon, label: "여행기록" },
 ];
 
 /**

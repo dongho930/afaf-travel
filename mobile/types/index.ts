@@ -223,3 +223,29 @@ export interface VisitedPlace {
   place_name: string;
   visited_at: string;
 }
+
+export interface PostItem {
+  id: string;
+  content_id: string;
+  place_name: string;
+  user_id: string;
+  username: string;
+  avatar_url?: string | null;
+  body: string;
+  photo_urls: string[];
+  comment_count: number;
+  is_mine: boolean;
+  created_at: string;
+}
+
+export interface PostComment {
+  id: string;
+  post_id: string;
+  user_id: string;
+  username: string;
+  avatar_url?: string | null;
+  parent_comment_id?: string | null;
+  body: string;
+  is_mine: boolean;
+  created_at: string;
+}

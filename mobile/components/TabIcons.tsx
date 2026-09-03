@@ -1,5 +1,5 @@
 import React from "react";
-import Svg, { Path } from "react-native-svg";
+import Svg, { Line, Path, Rect } from "react-native-svg";
 
 type IconProps = {
   color?: string;
@@ -52,6 +52,20 @@ export function AccessibilityIcon({ color = "#8A8A8A", size = 22 }: IconProps) {
         strokeWidth={3}
         strokeLinecap="round"
       />
+    </Svg>
+  );
+}
+
+// 하단 탭바 5번째 탭('여행기록') 아이콘 — 원본 SVG 세트에 없어서 같은
+// stroke 스타일(strokeWidth 3, round cap)로 새로 그린 노트/기록 아이콘입니다.
+export function NotebookIcon({ color = "#8A8A8A", size = 22 }: IconProps) {
+  const width = size * (80 / 64);
+  return (
+    <Svg width={width} height={size} viewBox="0 0 80 64" fill="none">
+      <Rect x="21" y="9" width="38" height="46" rx="5" stroke={color} strokeWidth={3} />
+      <Line x1="29" y1="23" x2="51" y2="23" stroke={color} strokeWidth={3} strokeLinecap="round" />
+      <Line x1="29" y1="33" x2="51" y2="33" stroke={color} strokeWidth={3} strokeLinecap="round" />
+      <Line x1="29" y1="43" x2="43" y2="43" stroke={color} strokeWidth={3} strokeLinecap="round" />
     </Svg>
   );
 }

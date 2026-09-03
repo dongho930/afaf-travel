@@ -15,6 +15,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="planner" />
       <Tabs.Screen name="accessibility" />
       <Tabs.Screen name="trips" />
+      <Tabs.Screen name="posts" />
     </Tabs>
   );
 }
