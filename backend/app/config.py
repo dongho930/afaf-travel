@@ -41,10 +41,11 @@ class Settings(BaseSettings):
 
     # 무장애 정보(detailWithTour2) 전수조사용 일일 예산.
     # 지금 발급받은 키가 '개발계정'이라 하루 트래픽 한도가 1,000건입니다.
-    # 한 번의 /refresh 호출에서 이 한도를 다 써버리면 그날은 이후 다른 API 호출도
-    # 막힐 수 있어, 여유를 두고 기본값을 900으로 잡았습니다. 운영계정으로 전환하면
-    # TOUR_API_DAILY_FETCH_BUDGET 환경변수로 더 큰 값(예: 90000)을 넣어주면 됩니다.
-    tour_api_daily_fetch_budget: int = int(os.getenv("TOUR_API_DAILY_FETCH_BUDGET", "900"))
+    # 이 한도는 소개문(overview_api_daily_fetch_budget)과 공유되므로, 둘을
+    # 합쳐서 1,000을 넘지 않도록 절반씩(500/500) 나눠 잡았습니다. 운영계정으로
+    # 전환하면 TOUR_API_DAILY_FETCH_BUDGET 환경변수로 더 큰 값(예: 90000)을
+    # 넣어주면 됩니다.
+    tour_api_daily_fetch_budget: int = int(os.getenv("TOUR_API_DAILY_FETCH_BUDGET", "500"))
 
     # 관광지 집중률(TatsCnctrRateService) 전수조사용 일일 예산.
     # 이 API는 장소 단위가 아니라 시/군/구 단위로 한 번에 여러 관광지 정보를
@@ -56,10 +57,10 @@ class Settings(BaseSettings):
     )
 
     # 홈 화면 소개문 미리 채우기(예열)용 일일 예산. detailCommon2도 무장애 정보와
-    # 같은 일일 한도를 공유하므로, 한 번의 새로고침에서 너무 많이 쓰지 않도록
-    # 안전하게 예산을 둡니다.
+    # 같은 일일 한도(1,000건)를 공유하므로, tour_api_daily_fetch_budget과 합쳐서
+    # 1,000을 넘지 않도록 절반씩(500/500) 나눠 잡았습니다.
     overview_api_daily_fetch_budget: int = int(
-        os.getenv("OVERVIEW_API_DAILY_FETCH_BUDGET", "300")
+        os.getenv("OVERVIEW_API_DAILY_FETCH_BUDGET", "500")
     )
 
     class Config:

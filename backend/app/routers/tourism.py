@@ -42,7 +42,7 @@ async def list_regions(province: str = Query(default="경기도")):
 async def list_attractions(
     region: str = Query(default="경기도"),
     user_type: UserType = Query(default=UserType.GENERAL),
-    limit: int = Query(default=20, le=50),
+    limit: int = Query(default=20, le=1500),
     sigungu_cd: int | None = Query(default=None, description="특정 시/군/구로 좁혀서 조회 (선택)"),
     include_overview: bool = Query(
         default=True,

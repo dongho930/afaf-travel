@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import { MapPinIcon, SparkleIcon, WheelchairIcon, type Icon } from "phosphor-react-native";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -107,7 +107,7 @@ export default function HomeScreen() {
     // 그 시점에 새로 보이는 6개씩만 채워서, 한 번에 50개를 다 채우려다 뒤쪽이
     // 6초 제한에 밀리는 문제를 피합니다.
     api
-      .listAttractions("경기도", wheelchairOnly ? "wheelchair" : "general", matchedRegion?.code ?? null, 50, false)
+      .listAttractions("경기도", wheelchairOnly ? "wheelchair" : "general", matchedRegion?.code ?? null, 1500, false)
       .then((places) => {
         // 축제/공연/행사, 여행코스, 쇼핑은 인기 여행지 목록에서 아예 제외합니다.
         const filtered = places.filter((p) => !EXCLUDED_CATEGORIES.includes(p.category));
@@ -138,14 +138,20 @@ export default function HomeScreen() {
   }, [wheelchairOnly, selectedRegion, regionOptions]);
 
   const handleShowMorePlaces = () => {
-    // ref가 항상 최신 값이라, 리렌더링을 기다리지 않고도 정확한 시작 지점을 씁니다.
+    // '더보기'도 카테고리 필터가 적용된 목록(filteredPlaces) 기준으로 다음
+    // 항목들을 계산해야 합니다. 필터링 전(원본 50개) 기준으로 계산하면, 화면에
+    // 실제로 새로 나타나는 카드(필터링된 목록 기준)와 소개문을 요청하는 카드
+    // (필터링 전 목록 기준)가 서로 어긋나서 — 필터가 좁을수록 화면엔 보이는데
+    // 소개문은 영영 요청조차 안 되는 카드가 생겼습니다.
+    const filtered =
+      selectedCategory === "전체" ? popularPlaces : popularPlaces.filter((p) => p.category === selectedCategory);
     const start = visiblePlacesCountRef.current;
-    const nextCount = Math.min(start + PLACES_PAGE_SIZE, popularPlaces.length);
-    if (nextCount <= start) return; // 이미 끝까지 다 보여준 상태면 아무것도 안 함
+    const nextCount = Math.min(start + PLACES_PAGE_SIZE, filtered.length);
+    if (nextCount <= start) return; // 이미 이 카테고리를 끝까지 다 보여준 상태면 아무것도 안 함
     visiblePlacesCountRef.current = nextCount;
     setVisiblePlacesCount(nextCount);
 
-    const newlyRevealedIds = popularPlaces
+    const newlyRevealedIds = filtered
       .slice(start, nextCount)
       .filter((p) => !p.overview)
       .map((p) => p.content_id);
@@ -167,6 +173,33 @@ export default function HomeScreen() {
     }
     router.push("/(tabs)/planner");
   };
+
+  // 카테고리 탭을 바꾸면, 그 카테고리에서 화면에 처음 보이는 항목들이
+  // (전체 기준으로 미리 불러온 첫 6개와는 다른 항목일 수 있어서) 아직 소개문을
+  // 못 받아온 상태일 수 있습니다. 그래서 탭이 바뀔 때마다 그 시점에 보이는
+  // 항목들 중 소개문이 없는 것만 새로 불러옵니다.
+  useEffect(() => {
+    visiblePlacesCountRef.current = PLACES_PAGE_SIZE;
+    setVisiblePlacesCount(PLACES_PAGE_SIZE);
+
+    const filtered =
+      selectedCategory === "전체" ? popularPlaces : popularPlaces.filter((p) => p.category === selectedCategory);
+    const idsNeedingOverview = filtered
+      .slice(0, PLACES_PAGE_SIZE)
+      .filter((p) => !p.overview)
+      .map((p) => p.content_id);
+    if (idsNeedingOverview.length > 0) {
+      api
+        .getOverviews(idsNeedingOverview)
+        .then((overviews) => {
+          setPopularPlaces((prev) =>
+            prev.map((p) => (overviews[p.content_id] ? { ...p, overview: overviews[p.content_id] } : p))
+          );
+        })
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCategory]);
 
   // 카테고리 필터는 서버에 다시 요청하지 않고, 이미 받아온 목록(최대 50개) 안에서
   // 화면단에서만 걸러 보여줍니다. '더보기'는 여전히 원본 목록(popularPlaces) 기준
@@ -332,7 +365,7 @@ export default function HomeScreen() {
           ))
         )}
 
-        {!loadingPlaces && visiblePlacesCount < popularPlaces.length && (
+        {!loadingPlaces && visiblePlacesCount < filteredPlaces.length && (
           <TouchableOpacity style={styles.moreButton} onPress={handleShowMorePlaces}>
             <Text style={styles.moreButtonText}>더보기</Text>
           </TouchableOpacity>
