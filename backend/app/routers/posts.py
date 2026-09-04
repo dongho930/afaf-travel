@@ -64,11 +64,14 @@ class CreateCommentRequest(BaseModel):
 async def list_feed(
     limit: int = Query(default=20, le=50),
     before: Optional[str] = None,
+    content_id: Optional[str] = None,
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
     """여행기록 전체 공개 피드 (최신순, 로그인 불필요). before는 이전 페이지
-    마지막 게시물의 created_at을 넣어서 그 이전 게시물을 이어서 받습니다."""
-    return await list_posts_feed(limit=limit, before=before, viewer_user_id=user_id)
+    마지막 게시물의 created_at을 넣어서 그 이전 게시물을 이어서 받습니다.
+    content_id를 넣으면 그 관광지에 대한 게시물만(관광지 상세 화면의 '게시물'
+    팝업용)."""
+    return await list_posts_feed(limit=limit, before=before, viewer_user_id=user_id, content_id=content_id)
 
 
 @router.post("", response_model=PostItem)

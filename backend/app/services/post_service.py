@@ -143,18 +143,24 @@ async def create_post(
 
 
 async def list_posts_feed(
-    limit: int = 20, before: Optional[str] = None, viewer_user_id: Optional[str] = None
+    limit: int = 20,
+    before: Optional[str] = None,
+    viewer_user_id: Optional[str] = None,
+    content_id: Optional[str] = None,
 ) -> list[dict]:
     """전체 공개 피드 (최신순). before는 이전 페이지 마지막 게시물의
     created_at(ISO 문자열)을 넣으면 그 이전 게시물만 더 가져옵니다(간단한
     커서 방식 페이지네이션 — 이 코드베이스엔 offset 페이지네이션이 없어서
-    같은 스타일로 맞췄습니다)."""
+    같은 스타일로 맞췄습니다). content_id를 넣으면 그 관광지에 대한 게시물만
+    (관광지 상세 화면의 '게시물' 팝업용)."""
     if _client is None:
         return []
     try:
         query = _client.table(_POSTS_TABLE).select("*").order("created_at", desc=True).limit(limit)
         if before:
             query = query.lt("created_at", before)
+        if content_id:
+            query = query.eq("content_id", content_id)
         result = query.execute()
         rows = result.data or []
         if not rows:

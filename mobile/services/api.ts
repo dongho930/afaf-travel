@@ -331,6 +331,12 @@ export const api = {
 
   getPost: (postId: string) => request<PostItem>(`/api/posts/${encodeURIComponent(postId)}`),
 
+  // 관광지 상세 화면 '게시물' 팝업용, 이 관광지(content_id)에 대한 게시물 전체 (최신순)
+  getPostsByPlace: (contentId: string, limit: number = 50) =>
+    request<PostItem[]>(
+      `/api/posts?content_id=${encodeURIComponent(contentId)}&limit=${limit}`
+    ),
+
   // '게시물 관리' 화면용, 내가 작성한 게시물 전체 (최신순, 로그인 필요)
   getMyPosts: () => request<PostItem[]>("/api/posts/me/list"),
 

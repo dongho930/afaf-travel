@@ -10,6 +10,7 @@ import {
   type Icon,
   MapPinIcon,
   MapTrifoldIcon,
+  NotebookIcon,
   StarIcon,
   TrainIcon,
   XIcon,
@@ -32,6 +33,7 @@ import {
 import { Alert } from "../services/crossPlatformAlert";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AccessibilityIcons } from "../components/AccessibilityIcons";
+import { PostCard } from "../components/PostCard";
 import { SaveCourseModal, SaveCourseParams } from "../components/SaveCourseModal";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
@@ -45,7 +47,7 @@ import {
 import { api } from "../services/api";
 import { useAuth } from "../services/AuthContext";
 import { useTheme } from "../services/ThemeContext";
-import { Attraction, NearbyAttraction, Review } from "../types";
+import { Attraction, NearbyAttraction, PostItem, Review } from "../types";
 
 // 카카오맵 길찾기 URL Scheme이 요구하는 이동수단 값 (공식 문서 기준: 소문자).
 type TravelMode = "car" | "publictransit" | "foot" | "bicycle";
@@ -104,6 +106,9 @@ export default function AttractionDetailScreen() {
   const [findingRoute, setFindingRoute] = useState<TravelMode | null>(null);
   const [transitModalVisible, setTransitModalVisible] = useState(false);
   const [saveModalVisible, setSaveModalVisible] = useState(false);
+  const [postsModalVisible, setPostsModalVisible] = useState(false);
+  const [placePosts, setPlacePosts] = useState<PostItem[]>([]);
+  const [loadingPlacePosts, setLoadingPlacePosts] = useState(false);
 
   const load = useCallback(() => {
     if (!contentId) return;
@@ -220,6 +225,19 @@ export default function AttractionDetailScreen() {
       return;
     }
     setSaveModalVisible(true);
+  };
+
+  // '게시물' 버튼 — 이 관광지에 대한 게시물을 팝업으로 보여줍니다(최신순).
+  // 열 때마다 다시 불러와서 항상 최신 상태를 보여줍니다.
+  const handleOpenPosts = () => {
+    if (!contentId) return;
+    setPostsModalVisible(true);
+    setLoadingPlacePosts(true);
+    api
+      .getPostsByPlace(contentId)
+      .then(setPlacePosts)
+      .catch(() => Alert.alert("불러오기 실패", "게시물을 불러오지 못했어요."))
+      .finally(() => setLoadingPlacePosts(false));
   };
 
   const handleConfirmSave = async (params: SaveCourseParams) => {
@@ -355,6 +373,10 @@ export default function AttractionDetailScreen() {
         <Pressable style={styles.directionsButton} onPress={() => setTransitModalVisible(true)}>
           <TrainIcon size={16} color={colors.primary} weight="bold" />
           <Text style={styles.directionsButtonText}>교통편 예약</Text>
+        </Pressable>
+        <Pressable style={styles.directionsButton} onPress={handleOpenPosts}>
+          <NotebookIcon size={16} color={colors.primary} weight="bold" />
+          <Text style={styles.directionsButtonText}>게시물</Text>
         </Pressable>
         <Pressable style={styles.directionsButton} onPress={openSaveModal}>
           <FloppyDiskIcon size={16} color={colors.primary} weight="bold" />
@@ -588,6 +610,35 @@ export default function AttractionDetailScreen() {
       defaultNewTripName={attraction.name}
       onConfirm={handleConfirmSave}
     />
+
+    <Modal
+      visible={postsModalVisible}
+      animationType="slide"
+      transparent
+      onRequestClose={() => setPostsModalVisible(false)}
+    >
+      <View style={styles.postsModalBackdrop}>
+        <View style={styles.postsModalSheet}>
+          <View style={styles.postsModalHeader}>
+            <Text style={styles.postsModalTitle}>게시물</Text>
+            <TouchableOpacity onPress={() => setPostsModalVisible(false)} hitSlop={10}>
+              <XIcon size={18} color={colors.text} weight="bold" />
+            </TouchableOpacity>
+          </View>
+          {loadingPlacePosts ? (
+            <ActivityIndicator color={colors.primary} style={{ marginVertical: spacing.lg }} />
+          ) : placePosts.length === 0 ? (
+            <Text style={styles.postsEmptyText}>아직 이 장소에 대한 게시물이 없어요.</Text>
+          ) : (
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {placePosts.map((p) => (
+                <PostCard key={p.id} item={p} />
+              ))}
+            </ScrollView>
+          )}
+        </View>
+      </View>
+    </Modal>
     </>
   );
 }
@@ -631,6 +682,28 @@ function makeStyles(colors: ThemeColors) {
   },
   modalTitle: { fontSize: 17, fontFamily: fontFamily.extraBold, color: colors.text, marginBottom: spacing.xs },
   modalSubtitle: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textTertiary, marginBottom: spacing.xl },
+
+  // '게시물' 팝업 — 게시물 관리 화면의 게시물 팝업과 같은 형태(가운데 정렬 시트,
+  // 제목+닫기 헤더)이되, 여러 게시물을 최신순으로 스크롤해서 볼 수 있습니다.
+  postsModalBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end", alignItems: "center" },
+  postsModalSheet: {
+    width: "100%",
+    maxWidth: 640, // 웹에서 넓은 화면일 때 앱 폭(WebFrame)에 맞춰 시트도 가운데 정렬되게
+    backgroundColor: colors.surfaceAlt,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: spacing.xl - 4,
+    maxHeight: "85%",
+  },
+  postsModalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.lg },
+  postsModalTitle: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.text },
+  postsEmptyText: {
+    fontSize: 13,
+    fontFamily: fontFamily.regular,
+    color: colors.textTertiary,
+    textAlign: "center",
+    paddingVertical: spacing.xl,
+  },
   travelModeRow: { flexDirection: "row", justifyContent: "space-between" },
   travelModeButton: { alignItems: "center", gap: spacing.sm },
   travelModeCircle: {
