@@ -388,6 +388,20 @@ export default function AttractionDetailScreen() {
 
       <AccessibilityIcons features={attraction.accessibility} />
 
+      {!!attraction.extra_info?.length && (
+        <View style={styles.infoSection}>
+          {attraction.extra_info.map((info, i) => (
+            <View
+              key={info.label}
+              style={[styles.infoRow, i === attraction.extra_info!.length - 1 && styles.infoRowLast]}
+            >
+              <Text style={styles.infoLabel}>{info.label}</Text>
+              <Text style={styles.infoValue}>{info.value}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
       {nearby.length > 0 && (
         <View style={styles.nearbySection}>
           <View style={styles.nearbySectionTitleRow}>
@@ -717,6 +731,26 @@ function makeStyles(colors: ThemeColors) {
   travelModeIcon: { width: 36, height: 36 },
   travelModeLabel: { fontSize: 13, fontFamily: fontFamily.semiBold, color: colors.text },
   overview: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.text, marginTop: spacing.md, lineHeight: 21 },
+
+  infoSection: {
+    marginTop: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md + 2,
+  },
+  infoRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: spacing.md,
+    paddingVertical: spacing.sm + 4,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  infoRowLast: { borderBottomWidth: 0 },
+  infoLabel: { fontSize: 13, fontFamily: fontFamily.semiBold, color: colors.textSecondary },
+  infoValue: { flex: 1, fontSize: 13, fontFamily: fontFamily.regular, color: colors.text, textAlign: "right" },
 
   nearbySection: { marginTop: spacing.xl - 4 },
   nearbySectionTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2, marginBottom: spacing.sm + 2 },

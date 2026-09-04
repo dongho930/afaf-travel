@@ -57,6 +57,7 @@ export interface Attraction {
   accessibility_benefits: string[];
   avg_rating?: number | null;
   review_count: number;
+  extra_info?: { label: string; value: string }[];
 }
 
 export interface Review {

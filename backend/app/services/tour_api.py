@@ -26,7 +26,7 @@ import math
 import httpx
 
 from app.config import get_settings
-from app.models.schemas import AccessibilityFeatures, Attraction, CongestionForecast
+from app.models.schemas import AccessibilityFeatures, Attraction, CongestionForecast, InfoField
 from app.services.review_service import get_average_ratings
 from app.services.sigungu_codes import (
     area_code_for_signgu,
@@ -40,11 +40,13 @@ from app.services.supabase_service import (
     get_cached_attraction_list,
     get_cached_congestion_rates,
     get_cached_congestion_signgu_cds,
+    get_cached_intro_info,
     get_cached_overviews,
     get_cached_place_accessibility,
     save_attraction_basic,
     save_attraction_list_cache,
     save_congestion_rates_batch,
+    save_intro_info,
     save_overviews_batch,
     save_place_accessibility_batch,
 )
@@ -125,6 +127,11 @@ _MOCK_ATTRACTIONS: list[Attraction] = [
         ],
         related_attraction_ids=["GG-002"],
         nearby_medical_info="수원화성 인근 약국 3곳, 종합병원 1곳 (도보 15분)",
+        extra_info=[
+            InfoField(label="이용시간", value="09:00~18:00 (계절별 상이)"),
+            InfoField(label="쉬는날", value="연중무휴"),
+            InfoField(label="문의 및 안내", value="031-290-3600"),
+        ],
     ),
     Attraction(
         content_id="GG-002",
@@ -146,6 +153,10 @@ _MOCK_ATTRACTIONS: list[Attraction] = [
         ],
         related_attraction_ids=["GG-001"],
         nearby_medical_info=None,
+        extra_info=[
+            InfoField(label="이용시간", value="24시간 개방"),
+            InfoField(label="쉬는날", value="없음"),
+        ],
     ),
     Attraction(
         content_id="GG-003",
@@ -170,6 +181,11 @@ _MOCK_ATTRACTIONS: list[Attraction] = [
         ],
         related_attraction_ids=[],
         nearby_medical_info="에버랜드 내 응급의료센터 운영",
+        extra_info=[
+            InfoField(label="이용요금", value="자유이용권 성인 62,000원"),
+            InfoField(label="이용시간", value="09:30~21:00"),
+            InfoField(label="주차시설", value="유료 주차장 운영"),
+        ],
     ),
     Attraction(
         content_id="GG-004",
@@ -191,6 +207,10 @@ _MOCK_ATTRACTIONS: list[Attraction] = [
         ],
         related_attraction_ids=[],
         nearby_medical_info=None,
+        extra_info=[
+            InfoField(label="이용시간", value="09:30~18:30"),
+            InfoField(label="쉬는날", value="월요일(성수기 제외)"),
+        ],
     ),
     Attraction(
         content_id="GG-005",
@@ -212,6 +232,11 @@ _MOCK_ATTRACTIONS: list[Attraction] = [
         ],
         related_attraction_ids=["GG-001"],
         nearby_medical_info=None,
+        extra_info=[
+            InfoField(label="대표 메뉴", value="골목시장 먹거리"),
+            InfoField(label="영업시간", value="11:00~21:00 (매장별 상이)"),
+            InfoField(label="쉬는날", value="매장별 상이"),
+        ],
     ),
 ]
 
@@ -230,6 +255,84 @@ _CONTENT_TYPE_LABELS: dict[int, str] = {
 
 # 코스에 기본으로 섞어서 조회할 카테고리 (관광지 + 맛집 + 문화시설 + 레포츠 + 숙박)
 _DEFAULT_CONTENT_TYPE_IDS: list[int] = [12, 39, 14, 28, 32]
+
+# 카테고리 한글 라벨 -> contentTypeId 역매핑 (Attraction.category로 detailIntro2
+# 호출 시 필요한 contentTypeId를 되돌려 찾을 때 씁니다).
+_CONTENT_TYPE_ID_BY_LABEL: dict[str, int] = {v: k for k, v in _CONTENT_TYPE_LABELS.items()}
+
+# 숙박(32) 전용: 인증 등급 표시를 위해 하나로 합쳐 보여줄 플래그 필드들.
+# detailIntro2 응답에서 각 필드가 "1"이면 해당 인증을 보유한 것으로 간주합니다.
+_LODGING_CERT_FLAGS: list[tuple[str, str]] = [
+    ("benikia", "베니키아"),
+    ("goodstay", "굿스테이"),
+    ("hanok", "한옥"),
+]
+# field_values 딕셔너리에서 위 인증 플래그들을 합친 결과를 담아두는 합성 키
+# (detailIntro2의 실제 필드명이 아니라, _fetch_intro_info 내부에서 만들어 붙이는 키입니다).
+_LODGING_CERT_KEY = "__certification__"
+
+# detailIntro2(소개정보 조회)는 contentTypeId마다 응답 필드가 완전히 다릅니다.
+# 여기 정의된 필드만 화이트리스트로 뽑아서 상세 페이지에 보여줍니다(그 외 필드는
+# 무시). 값 목록과 표시 순서는 TourAPI 4.0 공식 매뉴얼 기준이며, 실제 서비스키로
+# 연동한 뒤 응답을 한 번 확인해보는 걸 권장합니다(필드가 비어있는 경우가 흔합니다).
+_INTRO_FIELDS_BY_TYPE: dict[int, list[tuple[str, str]]] = {
+    12: [  # 관광지
+        ("usetime", "이용시간"),
+        ("useseason", "이용시기"),
+        ("restdate", "쉬는날"),
+        ("opendate", "개장일"),
+        ("accomcount", "수용 인원"),
+        ("infocenter", "문의 및 안내"),
+    ],
+    14: [  # 문화시설
+        ("usefee", "이용요금"),
+        ("usetimeculture", "이용시간"),
+        ("restdateculture", "쉬는날"),
+        ("discountinfo", "할인 정보"),
+        ("parkingculture", "주차시설"),
+        ("parkingfee", "주차요금"),
+    ],
+    28: [  # 레포츠
+        ("usefeeleports", "이용요금"),
+        ("usetimeleports", "이용시간"),
+        ("openperiod", "개장 시간"),
+        ("restdateleports", "쉬는날"),
+        ("parkingleports", "주차시설"),
+        ("parkingfeeleports", "주차 요금"),
+        ("reservationleports", "예약 안내"),
+        ("accomcountleports", "수용 인원"),
+        ("expagerangeleports", "체험 가능 연령"),
+        ("scaleleports", "규모"),
+        ("infocenterleports", "문의 및 안내"),
+    ],
+    32: [  # 숙박
+        ("checkintime", "입실 시간"),
+        ("checkouttime", "퇴실 시간"),
+        ("roomcount", "객실 수"),
+        ("roomtype", "객실 유형"),
+        ("chkcooking", "취사 가능 여부"),
+        ("parkinglodging", "주차시설"),
+        ("pickup", "픽업 서비스"),
+        ("reservationlodging", "예약 전화"),
+        ("reservationurl", "예약 홈페이지"),
+        (_LODGING_CERT_KEY, "인증 등급"),
+        ("scalelodging", "규모"),
+        ("infocenterlodging", "문의 및 안내"),
+    ],
+    39: [  # 음식점
+        ("firstmenu", "대표 메뉴"),
+        ("treatmenu", "취급 메뉴"),
+        ("opentimefood", "영업시간"),
+        ("restdatefood", "쉬는날"),
+        ("discountinfofood", "할인 정보"),
+        ("reservationfood", "예약 안내"),
+        ("packing", "포장 가능 여부"),
+        ("kidsfacility", "어린이 놀이방 여부"),
+        ("seat", "좌석 수"),
+        ("scalefood", "규모"),
+        ("infocenterfood", "문의 및 안내"),
+    ],
+}
 
 # 관광지별 연관 관광지 정보 / 관광지 집중률 예측 정보는 국문관광정보서비스(B551011)
 # 산하의 별도 서비스 ID를 씁니다 (Base URL은 settings.tour_api_base_url과 동일 도메인).
@@ -397,6 +500,80 @@ class TourApiClient:
                     )
                 return None, False
         return None, False
+
+    async def _fetch_intro_info(
+        self, client: httpx.AsyncClient, content_id: str, content_type_id: int
+    ) -> dict[str, str]:
+        """
+        detailIntro2(소개정보 조회)로 카테고리별 부가 정보(이용시간/요금/주차 등)를
+        가져옵니다. _INTRO_FIELDS_BY_TYPE에 정의된 화이트리스트 필드만 뽑아
+        {필드키: 값} 형태로 돌려줍니다(값이 빈 문자열인 필드는 아예 뺍니다).
+
+        이 오퍼레이션도 detailCommon2/detailWithTour2와 같은 일일 트래픽 한도를
+        공유하므로, 429는 같은 방식(최대 2회 재시도)으로 처리합니다.
+        """
+        fields = _INTRO_FIELDS_BY_TYPE.get(content_type_id)
+        if not fields:
+            return {}
+
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            await self._rate_limiter.wait_turn()
+            try:
+                resp = await client.get(
+                    f"{settings.tour_api_base_url}/KorWithService2/detailIntro2",
+                    params=self._common_params(
+                        {
+                            "contentId": content_id,
+                            "contentTypeId": content_type_id,
+                            "numOfRows": 1,
+                            "pageNo": 1,
+                        }
+                    ),
+                )
+                if resp.status_code == 429:
+                    if attempt < max_retries:
+                        retry_after = resp.headers.get("Retry-After")
+                        wait_seconds = float(retry_after) if retry_after else 0.5 * (2 ** attempt)
+                        await asyncio.sleep(wait_seconds)
+                        continue
+                    logger.warning(
+                        "detailIntro2(부가정보) 재시도 소진, 429 계속 발생 (contentId=%s)", content_id
+                    )
+                    return {}
+
+                resp.raise_for_status()
+                items = self._extract_items(resp.json())
+                if not items:
+                    return {}
+                raw = items[0]
+
+                result: dict[str, str] = {}
+                for key, _label in fields:
+                    if key == _LODGING_CERT_KEY:
+                        continue
+                    value = (raw.get(key) or "").strip()
+                    if value:
+                        result[key] = value
+
+                if content_type_id == 32:  # 숙박: 인증 플래그들을 하나로 합쳐서 담음
+                    cert_labels = [
+                        label for flag, label in _LODGING_CERT_FLAGS if (raw.get(flag) or "").strip() == "1"
+                    ]
+                    if cert_labels:
+                        result[_LODGING_CERT_KEY] = ", ".join(cert_labels)
+
+                return result
+            except Exception as exc:
+                logger.warning("detailIntro2(부가정보) 호출 실패 (contentId=%s): %s", content_id, exc)
+                return {}
+        return {}
+
+    @staticmethod
+    def _build_extra_info(content_type_id: int, field_values: dict[str, str]) -> list[InfoField]:
+        """캐시/조회된 field_values를 _INTRO_FIELDS_BY_TYPE 순서대로 InfoField 목록으로 만듭니다."""
+        fields = _INTRO_FIELDS_BY_TYPE.get(content_type_id, [])
+        return [InfoField(label=label, value=field_values[key]) for key, label in fields if field_values.get(key)]
 
     @staticmethod
     def _shorten_overview(text: str | None, max_len: int = 110) -> str | None:
@@ -1377,6 +1554,28 @@ class TourApiClient:
             if rating_row:
                 attraction.avg_rating = rating_row["avg_rating"]
                 attraction.review_count = rating_row["review_count"]
+
+            # 카테고리별 부가 정보(이용시간/요금/주차 등): 캐시 우선, 없으면 이번 하나만
+            # 즉시 조회합니다. 값이 하나도 없으면(진짜로 정보가 없거나 조회 실패)
+            # 캐시에 저장하지 않아서, 다음 조회 때 다시 시도되게 둡니다(소개문 캐시와
+            # 동일한 방침 — attraction_overview_cache 관련 주석 참고).
+            content_type_id = _CONTENT_TYPE_ID_BY_LABEL.get(attraction.category)
+            if content_type_id is not None and content_type_id in _INTRO_FIELDS_BY_TYPE:
+                cached_intro = await get_cached_intro_info(content_id)
+                if cached_intro:
+                    field_values = cached_intro.get("fields") or {}
+                else:
+                    field_values = await self._fetch_intro_info(client, content_id, content_type_id)
+                    if field_values:
+                        await save_intro_info(
+                            {
+                                "content_id": content_id,
+                                "content_type_id": content_type_id,
+                                "fields": field_values,
+                                "fetched_at": datetime.datetime.utcnow().isoformat(),
+                            }
+                        )
+                attraction.extra_info = self._build_extra_info(content_type_id, field_values)
 
             return attraction
 

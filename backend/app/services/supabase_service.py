@@ -669,6 +669,52 @@ async def save_overviews_batch(rows: list[dict]) -> None:
         print(f"[supabase] 관광지 소개문 캐시 저장 실패: {e}")
 
 
+# ---- 관광지 카테고리별 부가 정보(이용시간/요금/주차 등) 캐시 ----
+#
+# detailIntro2(소개정보 조회)는 detailCommon2/detailWithTour2와 같은 일일
+# 트래픽 한도를 공유하는 별도 오퍼레이션이라, 이것도 똑같이 캐시합니다.
+# 카테고리(contentTypeId)마다 응답 필드가 완전히 달라서, 뽑아낸 화이트리스트
+# 필드만 fields(jsonb)에 통째로 저장합니다.
+#
+# Supabase 대시보드에서 미리 만들어둬야 하는 테이블(backend/sql/create_attraction_intro_cache.sql 참고):
+#   attraction_intro_cache
+#     - content_id (text, Primary Key)
+#     - content_type_id (int4)
+#     - fields (jsonb)
+#     - fetched_at (timestamptz)
+
+_INTRO_TABLE = "attraction_intro_cache"
+
+
+async def get_cached_intro_info(content_id: str) -> dict | None:
+    """상세 페이지용: 캐시된 카테고리별 부가 정보(한 건)를 돌려줍니다."""
+    if _client is None or not content_id:
+        return None
+    try:
+        result = (
+            _client.table(_INTRO_TABLE)
+            .select("*")
+            .eq("content_id", content_id)
+            .limit(1)
+            .execute()
+        )
+        rows = result.data or []
+        return rows[0] if rows else None
+    except Exception as e:
+        print(f"[supabase] 관광지 부가정보 캐시 조회 실패: {e}")
+        return None
+
+
+async def save_intro_info(row: dict) -> None:
+    """새로 조회한 부가 정보를 캐시 테이블에 upsert합니다."""
+    if _client is None or not row:
+        return
+    try:
+        _client.table(_INTRO_TABLE).upsert(row).execute()
+    except Exception as e:
+        print(f"[supabase] 관광지 부가정보 캐시 저장 실패: {e}")
+
+
 async def mark_trip_as_visited(trip_id: str, user_id: str) -> int:
     """
     '내 여행' 탭의 '방문 완료' 버튼용. 그 여행(trip) 안의 모든 코스에 담긴

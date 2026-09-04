@@ -79,6 +79,12 @@ class CongestionForecast(BaseModel):
     congestion_level: str  # low / medium / high
 
 
+class InfoField(BaseModel):
+    """관광지 상세의 카테고리별 부가 정보 한 줄 (예: {label: "이용시간", value: "09:00~18:00"})"""
+    label: str
+    value: str
+
+
 class Attraction(BaseModel):
     content_id: str
     name: str
@@ -101,6 +107,10 @@ class Attraction(BaseModel):
     # 방문자 리뷰 평균 별점(1~5)과 리뷰 수. 리뷰가 없으면 avg_rating은 None.
     avg_rating: Optional[float] = None
     review_count: int = 0
+    # 카테고리별 부가 정보(이용시간/요금/주차 등). detailIntro2에서 카테고리
+    # (contentTypeId)별 화이트리스트 필드만 뽑아 채웁니다. 상세 페이지 조회 시에만
+    # 채워지고(목록 조회에는 없음), 값이 있는 필드만 순서대로 담깁니다.
+    extra_info: list[InfoField] = Field(default_factory=list)
 
 
 class RegionOption(BaseModel):
