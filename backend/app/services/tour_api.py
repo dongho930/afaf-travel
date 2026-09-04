@@ -22,6 +22,7 @@ import asyncio
 import datetime
 import logging
 import math
+import re
 
 import httpx
 
@@ -270,6 +271,12 @@ _LODGING_CERT_FLAGS: list[tuple[str, str]] = [
 # field_values 딕셔너리에서 위 인증 플래그들을 합친 결과를 담아두는 합성 키
 # (detailIntro2의 실제 필드명이 아니라, _fetch_intro_info 내부에서 만들어 붙이는 키입니다).
 _LODGING_CERT_KEY = "__certification__"
+
+# detailIntro2 텍스트 필드에는 원문에 <br>, <br/> 같은 HTML 줄바꿈 태그가 그대로
+# 섞여 있는 경우가 흔합니다(TourAPI 원본 데이터 특성). 화면에는 태그가 아니라
+# 줄바꿈으로 보여야 하므로 여기서 미리 정리합니다.
+_HTML_BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 # detailIntro2(소개정보 조회)는 contentTypeId마다 응답 필드가 완전히 다릅니다.
 # 여기 정의된 필드만 화이트리스트로 뽑아서 상세 페이지에 보여줍니다(그 외 필드는
@@ -554,7 +561,7 @@ class TourApiClient:
                         continue
                     value = (raw.get(key) or "").strip()
                     if value:
-                        result[key] = value
+                        result[key] = self._clean_intro_value(value)
 
                 if content_type_id == 32:  # 숙박: 인증 플래그들을 하나로 합쳐서 담음
                     cert_labels = [
@@ -570,10 +577,29 @@ class TourApiClient:
         return {}
 
     @staticmethod
+    def _clean_intro_value(text: str) -> str:
+        """detailIntro2 텍스트 필드에 섞여 있는 <br> 등 HTML 태그를 정리합니다."""
+        cleaned = _HTML_BR_RE.sub("\n", text)
+        cleaned = _HTML_TAG_RE.sub("", cleaned)
+        cleaned = re.sub(r"\n{2,}", "\n", cleaned)
+        return cleaned.strip()
+
+    @staticmethod
     def _build_extra_info(content_type_id: int, field_values: dict[str, str]) -> list[InfoField]:
-        """캐시/조회된 field_values를 _INTRO_FIELDS_BY_TYPE 순서대로 InfoField 목록으로 만듭니다."""
+        """
+        캐시/조회된 field_values를 _INTRO_FIELDS_BY_TYPE 순서대로 InfoField 목록으로 만듭니다.
+
+        여기서도 다시 한번 _clean_intro_value를 거칩니다 — <br> 정리 로직을 추가하기
+        전에 이미 캐시(attraction_intro_cache)에 원문 그대로(<br> 포함) 저장된 행이
+        있을 수 있는데, 그런 행은 _fetch_intro_info를 다시 안 타고 캐시에서 바로
+        읽히므로 여기서 안 걸러주면 예전 캐시 값에는 계속 <br>이 남아있게 됩니다.
+        """
         fields = _INTRO_FIELDS_BY_TYPE.get(content_type_id, [])
-        return [InfoField(label=label, value=field_values[key]) for key, label in fields if field_values.get(key)]
+        return [
+            InfoField(label=label, value=TourApiClient._clean_intro_value(field_values[key]))
+            for key, label in fields
+            if field_values.get(key)
+        ]
 
     @staticmethod
     def _shorten_overview(text: str | None, max_len: int = 110) -> str | None:

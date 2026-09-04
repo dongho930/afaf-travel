@@ -750,7 +750,7 @@ function makeStyles(colors: ThemeColors) {
   },
   infoRowLast: { borderBottomWidth: 0 },
   infoLabel: { fontSize: 13, fontFamily: fontFamily.semiBold, color: colors.textSecondary },
-  infoValue: { flex: 1, fontSize: 13, fontFamily: fontFamily.regular, color: colors.text, textAlign: "right" },
+  infoValue: { flex: 1, fontSize: 13, fontFamily: fontFamily.regular, color: colors.text, textAlign: "left" },
 
   nearbySection: { marginTop: spacing.xl - 4 },
   nearbySectionTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2, marginBottom: spacing.sm + 2 },
