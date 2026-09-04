@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
+  Easing,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
@@ -12,6 +13,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  TextStyle,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -188,7 +190,12 @@ export default function HomeScreen() {
   // 어색하지 않아서(글이 아니라 짧은 항목들이라), 소개문 로딩을 막지 않도록
   // 별도로(기다리지 않고) 실행합니다.
   const loadExtraInfoFor = (places: Attraction[]) => {
-    const targets = places.filter((p) => !p.extra_info && EXTRA_INFO_LABELS_BY_CATEGORY[p.category]);
+    // extra_info는 목록 조회 시에도 항상 배열로 채워져서 오는데(정보가 없으면
+    // undefined가 아니라 빈 배열 []), !p.extra_info는 빈 배열을 truthy로 보고
+    // "이미 불러왔음"으로 오판합니다. 그래서 배열이 비어있는지(length)로 판단합니다.
+    const targets = places.filter(
+      (p) => (p.extra_info?.length ?? 0) === 0 && EXTRA_INFO_LABELS_BY_CATEGORY[p.category]
+    );
     if (targets.length === 0) return;
     api
       .getExtraInfo(targets.map((p) => ({ contentId: p.content_id, category: p.category })))
@@ -294,9 +301,9 @@ export default function HomeScreen() {
   const filteredPlaces =
     selectedCategory === "전체" ? popularPlaces : popularPlaces.filter((p) => p.category === selectedCategory);
 
-  const stats: { icon: Icon; value: string; label: string }[] = [
-    { icon: WheelchairIcon, value: totalAccessibleCount != null ? String(totalAccessibleCount) : "-", label: "무장애 여행지" },
-    { icon: MapPinIcon, value: supportedRegionCount != null ? String(supportedRegionCount) : "-", label: "지원 지역" },
+  const stats: { icon: Icon; value: number | null; label: string }[] = [
+    { icon: WheelchairIcon, value: totalAccessibleCount, label: "무장애 여행지" },
+    { icon: MapPinIcon, value: supportedRegionCount, label: "지원 지역" },
   ];
 
   // 카드 소개문 아래에 카테고리별로 정해둔 부가 정보(이용시간/요금 등)만 골라
@@ -386,7 +393,7 @@ export default function HomeScreen() {
             return (
               <View key={s.label} style={styles.statCard}>
                 <StatIcon size={26} color={colors.primary} weight="bold" />
-                <Text style={styles.statValue}>{s.value}</Text>
+                <AnimatedCountUpText value={s.value} style={styles.statValue} />
                 <Text style={styles.statLabel}>{s.label}</Text>
               </View>
             );
@@ -498,6 +505,33 @@ function AnimatedPlaceCard({ children }: { children: React.ReactNode }) {
       {children}
     </Animated.View>
   );
+}
+
+// 상단 통계 카드 숫자용 — 값이 없을 때는 아무것도 보여주지 않다가(대시 "-" 없이),
+// 실제 값이 도착하면 0에서 그 값까지 세어 올라가며 부드럽게 나타납니다. 값이
+// 나중에 다시 바뀌는 경우(지역 필터 변경 등)에도 그 시점 값에서 새 값까지 이어서 세어갑니다.
+function AnimatedCountUpText({ value, style }: { value: number | null; style: TextStyle }) {
+  const animated = useRef(new Animated.Value(0)).current;
+  const [display, setDisplay] = useState<number | null>(null);
+  const fromRef = useRef(0);
+
+  useEffect(() => {
+    if (value == null) return;
+    animated.setValue(fromRef.current);
+    const listenerId = animated.addListener(({ value: v }) => setDisplay(Math.round(v)));
+    Animated.timing(animated, {
+      toValue: value,
+      duration: 900,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start(() => {
+      fromRef.current = value;
+    });
+    return () => animated.removeListener(listenerId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  return <Text style={style}>{display == null ? "" : String(display)}</Text>;
 }
 
 function makeStyles(colors: ThemeColors) {
