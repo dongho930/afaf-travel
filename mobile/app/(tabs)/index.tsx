@@ -1,10 +1,9 @@
-import { useFocusEffect, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { MapPinIcon, SparkleIcon, WheelchairIcon, type Icon } from "phosphor-react-native";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Image,
-  ImageBackground,
+  Animated,
   Platform,
   Pressable,
   ScrollView,
@@ -18,15 +17,15 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { AccessibilityIcons } from "../../components/AccessibilityIcons";
 import { AppLogo } from "../../components/AppLogo";
 import { PhotoCardHeader } from "../../components/PhotoCardHeader";
+import { ProfileButton } from "../../components/ProfileButton";
 import { getCongestionDisplay } from "../../constants/congestion";
 import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
 import { radius, spacing } from "../../constants/tokens";
 import { api } from "../../services/api";
-import { useAuth } from "../../services/AuthContext";
 import { useCourseContext } from "../../services/CourseContext";
 import { useTheme } from "../../services/ThemeContext";
-import { Attraction, RegionOption, UserProfile } from "../../types";
+import { Attraction, RegionOption } from "../../types";
 
 const REGION_CHIPS = ["전체", "수원", "용인", "성남", "고양", "안양"];
 const CATEGORY_CHIPS = ["전체", "관광지", "문화시설", "레포츠", "숙박", "음식점"];
@@ -36,11 +35,9 @@ const EXCLUDED_CATEGORIES = ["축제/공연/행사", "여행코스", "쇼핑"];
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { session } = useAuth();
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const { setPendingQueryText } = useCourseContext();
-  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [searchText, setSearchText] = useState("");
   const [selectedRegion, setSelectedRegion] = useState("전체");
   const [selectedCategory, setSelectedCategory] = useState("전체");
@@ -51,7 +48,21 @@ export default function HomeScreen() {
   const [regionOptions, setRegionOptions] = useState<RegionOption[]>([]);
   const [popularPlaces, setPopularPlaces] = useState<Attraction[]>([]);
   const [loadingPlaces, setLoadingPlaces] = useState(true);
-  const [heroImageUrl, setHeroImageUrl] = useState<string | null>(null);
+  // 히어로 배경 사진을 깜빡임 없이 부드럽게(크로스페이드) 바꾸기 위해, 두 장을
+  // 겹쳐두고 하나씩 번갈아 투명도를 애니메이션합니다(둘 다 같은 실제 사진칸
+  // 자리에 절대 위치로 겹쳐 있고, opacity만 서로 반대로 움직입니다).
+  const [heroImageCandidates, setHeroImageCandidates] = useState<string[]>([]);
+  const [hero, setHero] = useState<{ a: string | null; b: string | null; visible: "a" | "b" }>({
+    a: null,
+    b: null,
+    visible: "a",
+  });
+  const heroRef = useRef(hero);
+  useEffect(() => {
+    heroRef.current = hero;
+  }, [hero]);
+  const heroOpacityA = useRef(new Animated.Value(1)).current;
+  const heroOpacityB = useRef(new Animated.Value(0)).current;
   const PLACES_PAGE_SIZE = 6;
   const [visiblePlacesCount, setVisiblePlacesCount] = useState(PLACES_PAGE_SIZE);
   // '더보기'를 빠르게 여러 번 눌러도 안전하게 순서대로 진행되도록, 화면이 아직
@@ -59,21 +70,6 @@ export default function HomeScreen() {
   // (state만 쓰면, 리렌더링 전에 또 누를 때 예전 값을 기준으로 계산해서
   // 같은 구간을 중복 조회하거나 건너뛰는 문제가 있었습니다.)
   const visiblePlacesCountRef = React.useRef(PLACES_PAGE_SIZE);
-
-  // 프로필 사진은 다른 화면(프로필 화면)에서 바뀔 수 있어서, 이 탭에 다시
-  // 들어올 때마다 최신 상태로 불러옵니다.
-  useFocusEffect(
-    useCallback(() => {
-      if (!session) {
-        setProfile(null);
-        return;
-      }
-      api
-        .getMyProfile()
-        .then(setProfile)
-        .catch(() => setProfile(null));
-    }, [session])
-  );
 
   React.useEffect(() => {
     // '무장애 여행지' 개수는 휠체어/유모차/고령자·임산부를 모두 합친(중복 제거) 실제 계산값입니다.
@@ -112,15 +108,18 @@ export default function HomeScreen() {
         // 축제/공연/행사, 여행코스, 쇼핑은 인기 여행지 목록에서 아예 제외합니다.
         const filtered = places.filter((p) => !EXCLUDED_CATEGORIES.includes(p.category));
         setPopularPlaces(filtered);
-        // 사진이 있는 관광지 중 하나를 무작위로 골라 상단 배너 배경으로 씁니다.
-        // 새로고침(필터/지역 변경으로 목록을 다시 받아올 때)마다 다시 뽑히니
-        // 매번 다른 사진이 나옵니다.
-        const withImage = filtered.filter((p) => !!p.image_url);
-        setHeroImageUrl(
-          withImage.length > 0
-            ? withImage[Math.floor(Math.random() * withImage.length)].image_url ?? null
-            : null
-        );
+        // 사진이 있는 관광지들의 사진 URL을 후보 목록으로 저장해두고, 그중
+        // 하나를 무작위로 골라 상단 배너 배경으로 씁니다. 아래 useEffect가 이
+        // 후보 목록에서 3초마다 다시 무작위로 골라 배경을 크로스페이드로 바꿉니다.
+        const imageUrls = filtered.map((p) => p.image_url).filter((url): url is string => !!url);
+        setHeroImageCandidates(imageUrls);
+        heroOpacityA.setValue(1);
+        heroOpacityB.setValue(0);
+        setHero({
+          a: imageUrls.length > 0 ? imageUrls[Math.floor(Math.random() * imageUrls.length)] : null,
+          b: null,
+          visible: "a",
+        });
         const firstIds = filtered.slice(0, PLACES_PAGE_SIZE).map((p) => p.content_id);
         if (firstIds.length > 0) {
           api
@@ -136,6 +135,30 @@ export default function HomeScreen() {
       .catch(() => setPopularPlaces([]))
       .finally(() => setLoadingPlaces(false));
   }, [wheelchairOnly, selectedRegion, regionOptions]);
+
+  // 히어로 배경 사진을 3초마다 후보 목록에서 무작위로 다시 골라 바꿉니다.
+  // 지금 보이지 않는(opacity 0) 레이어에 다음 사진을 미리 얹어두고, 두
+  // 레이어의 opacity를 동시에 서로 반대로 애니메이션해서 깜빡임 없이
+  // 크로스페이드되게 합니다(바로 직전 사진은 후보에서 빼서 연달아 나오지 않게 함).
+  React.useEffect(() => {
+    if (heroImageCandidates.length <= 1) return;
+    const timer = setInterval(() => {
+      const prev = heroRef.current;
+      const currentUrl = prev.visible === "a" ? prev.a : prev.b;
+      const pool = heroImageCandidates.filter((url) => url !== currentUrl);
+      if (pool.length === 0) return;
+      const nextUrl = pool[Math.floor(Math.random() * pool.length)];
+      const nextLayer: "a" | "b" = prev.visible === "a" ? "b" : "a";
+      const fadeOut = prev.visible === "a" ? heroOpacityA : heroOpacityB;
+      const fadeIn = nextLayer === "a" ? heroOpacityA : heroOpacityB;
+      setHero({ ...prev, [nextLayer]: nextUrl, visible: nextLayer });
+      Animated.parallel([
+        Animated.timing(fadeOut, { toValue: 0, duration: 900, useNativeDriver: true }),
+        Animated.timing(fadeIn, { toValue: 1, duration: 900, useNativeDriver: true }),
+      ]).start();
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [heroImageCandidates, heroOpacityA, heroOpacityB]);
 
   const handleShowMorePlaces = () => {
     // '더보기'도 카테고리 필터가 적용된 목록(filteredPlaces) 기준으로 다음
@@ -228,52 +251,48 @@ export default function HomeScreen() {
             <AppLogo size={30} />
             <Text style={styles.logoSub}>당신만을 위한 여행 가이드</Text>
           </View>
-          <TouchableOpacity
-            onPress={() => router.push(session ? "/profile" : "/login")}
-            accessibilityRole="button"
-            accessibilityLabel="프로필"
-          >
-            {profile?.avatar_url ? (
-              <Image source={{ uri: profile.avatar_url }} style={styles.avatar} />
-            ) : (
-              <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                <Text style={styles.avatarPlaceholderText}>{profile?.username?.[0]?.toUpperCase() ?? "?"}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
+          <ProfileButton />
         </View>
 
-        <ImageBackground
-          source={heroImageUrl ? { uri: heroImageUrl } : undefined}
-          style={styles.hero}
-          imageStyle={styles.heroImage}
-        >
-          {heroImageUrl && <View style={styles.heroOverlay} />}
-          <View style={[styles.heroBadge, heroImageUrl && styles.heroBadgeOnPhoto]}>
-            <SparkleIcon size={11} color={colors.onPrimary} weight="fill" />
-            <Text style={styles.heroBadgeText}>AI 추천 경로</Text>
-          </View>
-          <Text style={[styles.heroTitle, heroImageUrl && styles.heroTextOnPhoto]}>
-            나만의 완벽한{"\n"}무장애 여행을 계획하세요
-          </Text>
-          <Text style={[styles.heroDesc, heroImageUrl && styles.heroTextOnPhoto]}>
-            AI가 이동 제약 없이 즐길 수 있는 최적 경로를 추천해드립니다
-          </Text>
+        <View style={styles.hero}>
+          <Animated.Image
+            source={hero.a ? { uri: hero.a } : undefined}
+            style={[styles.heroImageLayer, { opacity: heroOpacityA }]}
+            resizeMode="cover"
+          />
+          <Animated.Image
+            source={hero.b ? { uri: hero.b } : undefined}
+            style={[styles.heroImageLayer, { opacity: heroOpacityB }]}
+            resizeMode="cover"
+          />
+          {(hero.a || hero.b) && <View style={styles.heroOverlay} />}
+          <View style={styles.heroContent}>
+            <View style={[styles.heroBadge, (hero.a || hero.b) && styles.heroBadgeOnPhoto]}>
+              <SparkleIcon size={11} color={colors.onPrimary} weight="fill" />
+              <Text style={styles.heroBadgeText}>AI 추천 경로</Text>
+            </View>
+            <Text style={[styles.heroTitle, (hero.a || hero.b) && styles.heroTextOnPhoto]}>
+              나만의 완벽한{"\n"}무장애 여행을 계획하세요
+            </Text>
+            <Text style={[styles.heroDesc, (hero.a || hero.b) && styles.heroTextOnPhoto]}>
+              AI가 이동 제약 없이 즐길 수 있는 최적 경로를 추천해드립니다
+            </Text>
 
-          <View style={styles.searchRow}>
-            <TextInput
-              style={styles.searchInput}
-              placeholder="어디로 떠나고 싶으세요?"
-              placeholderTextColor={colors.textTertiary}
-              value={searchText}
-              onChangeText={setSearchText}
-              onSubmitEditing={goToPlannerWithSearch}
-            />
-            <Pressable style={styles.searchButton} onPress={goToPlannerWithSearch}>
-              <Text style={styles.searchButtonText}>검색</Text>
-            </Pressable>
+            <View style={styles.searchRow}>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="어디로 떠나고 싶으세요?"
+                placeholderTextColor={colors.textTertiary}
+                value={searchText}
+                onChangeText={setSearchText}
+                onSubmitEditing={goToPlannerWithSearch}
+              />
+              <Pressable style={styles.searchButton} onPress={goToPlannerWithSearch}>
+                <Text style={styles.searchButtonText}>검색</Text>
+              </Pressable>
+            </View>
           </View>
-        </ImageBackground>
+        </View>
 
         <View style={styles.statsRow}>
           {stats.map((s) => {
@@ -381,18 +400,24 @@ function makeStyles(colors: ThemeColors) {
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.xl - 2 },
   logoRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   logoSub: { fontSize: 12, fontFamily: fontFamily.medium, color: colors.textTertiary },
-  avatar: { width: 34, height: 34, borderRadius: 17 },
-  avatarPlaceholder: { backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" },
-  avatarPlaceholderText: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.primary },
 
   hero: {
     backgroundColor: colors.primaryLight,
     borderRadius: radius.xl,
     padding: spacing.xl - 4,
     marginBottom: spacing.xl - 6,
-    overflow: "hidden", // ImageBackground의 둥근 모서리가 이미지에도 적용되도록
+    overflow: "hidden", // 둥근 모서리가 아래 겹쳐진 사진 레이어들에도 적용되도록
   },
-  heroImage: { borderRadius: radius.xl },
+  // 크로스페이드용 사진 두 장이 이 자리에 절대 위치로 겹쳐서, opacity만 서로
+  // 반대로 움직이며 부드럽게 넘어갑니다.
+  heroImageLayer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: radius.xl,
+  },
   heroOverlay: {
     position: "absolute",
     top: 0,
@@ -401,6 +426,12 @@ function makeStyles(colors: ThemeColors) {
     bottom: 0,
     backgroundColor: colors.overlay, // 사진 위 글자 가독성용 어두운 반투명 오버레이
   },
+  // 웹(react-native-web)에서는 static 요소보다 absolute 요소(heroOverlay)가
+  // DOM 순서와 무관하게 항상 위에 그려지는 CSS 규칙 때문에, 검색창 등 실제
+  // 콘텐츠가 오버레이 밑에 깔려 안 보이는 문제가 있었습니다. 콘텐츠를 명시적
+  // position+zIndex로 오버레이보다 위 레이어에 두어 해결합니다(네이티브 앱은
+  // 원래도 정상 동작이라 영향 없음).
+  heroContent: { position: "relative", zIndex: 1 },
   heroBadge: {
     flexDirection: "row",
     alignItems: "center",

@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { Alert } from "../../services/crossPlatformAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { ProfileButton } from "../../components/ProfileButton";
 import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
 import { radius, spacing } from "../../constants/tokens";
@@ -137,10 +138,11 @@ export default function PlannerScreen() {
         contentContainerStyle={styles.container}
         renderItem={() => (
           <>
-            <Text style={styles.title}>AI 경로 플래너</Text>
-            <Text style={styles.subtitle}>접근성 유형을 선택하고 조건을 입력하면 AI가 최적의 무장애 동선을 제안합니다</Text>
-
-            <Text style={styles.fieldLabel}>접근성 유형</Text>
+            <View style={styles.header}>
+              <Text style={styles.title}>AI 경로 플래너</Text>
+              <ProfileButton />
+            </View>
+            <Text style={[styles.fieldLabel, styles.typeFieldLabel]}>접근성 유형</Text>
             <View style={styles.typeGrid}>
               {OPTIONS.map((opt) => {
                 const TypeIcon = opt.icon;
@@ -163,19 +165,19 @@ export default function PlannerScreen() {
               })}
             </View>
 
+            {selectedOption && (
+              <View style={styles.typeDescRow}>
+                <selectedOption.icon size={21} color={colors.primary} weight="bold" />
+                <Text style={styles.typeDescText}>{selectedOption.desc}</Text>
+              </View>
+            )}
+
             <Text style={styles.fieldLabel}>지역</Text>
             <TouchableOpacity style={styles.regionButton} onPress={() => setRegionModalVisible(true)}>
               <MapPinIcon size={15} color={colors.text} weight="bold" />
               <Text style={styles.regionButtonText}>{sigunguName ?? "경기도 전체"}</Text>
               <Text style={styles.regionButtonChevron}>변경</Text>
             </TouchableOpacity>
-
-            {selectedOption && (
-              <View style={styles.typeDescRow}>
-                <selectedOption.icon size={14} color={colors.primary} weight="bold" />
-                <Text style={styles.typeDescText}>{selectedOption.desc}</Text>
-              </View>
-            )}
 
             <Text style={styles.fieldLabel}>어떤 여행을 원하세요?</Text>
             <Text style={styles.hint}>예: "{exampleQuery}"</Text>
@@ -280,9 +282,10 @@ export default function PlannerScreen() {
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
   container: { padding: spacing.xl, paddingBottom: spacing.xxl + spacing.xl + 4 },
-  title: { fontSize: 22, fontFamily: fontFamily.extraBold, color: colors.text, marginBottom: spacing.xs },
-  subtitle: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary, marginBottom: spacing.xl },
+  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.xl },
+  title: { fontSize: 22, fontFamily: fontFamily.extraBold, color: colors.text },
   fieldLabel: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.text, marginBottom: spacing.sm + 2, marginTop: spacing.xs },
+  typeFieldLabel: { marginBottom: spacing.xxl },
 
   typeGrid: { flexDirection: "row", flexWrap: "wrap", rowGap: spacing.lg, marginBottom: spacing.lg },
   typeTab: { width: "25%", alignItems: "center", gap: spacing.xs + 2 },
@@ -307,11 +310,11 @@ function makeStyles(colors: ThemeColors) {
   regionButtonChevron: { fontSize: 13, color: colors.primary, fontFamily: fontFamily.semiBold },
   typeDescRow: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: spacing.xs + 2,
     marginBottom: spacing.xl - 4,
   },
-  typeDescText: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, flexShrink: 1 },
+  typeDescText: { fontSize: 20, lineHeight: 27, fontFamily: fontFamily.regular, color: colors.textSecondary, flexShrink: 1 },
 
   hint: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textTertiary, marginBottom: spacing.md },
   input: {

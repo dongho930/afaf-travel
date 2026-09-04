@@ -26,6 +26,7 @@ import {
 import { Alert } from "../../services/crossPlatformAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DateRangePickerModal } from "../../components/DateRangePickerModal";
+import { ProfileButton } from "../../components/ProfileButton";
 import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
 import { radius, spacing } from "../../constants/tokens";
@@ -365,7 +366,10 @@ export default function TripsScreen() {
 
   const StatsHeader = (
     <View style={styles.headerArea}>
-      <Text style={styles.title}>{TOP_TITLE[activeSection]}</Text>
+      <View style={styles.header}>
+        <Text style={styles.title}>{TOP_TITLE[activeSection]}</Text>
+        <ProfileButton />
+      </View>
 
       <View style={styles.statsGrid}>
         {(() => {
@@ -700,7 +704,8 @@ function makeStyles(colors: ThemeColors) {
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl },
   list: { padding: spacing.xl - 4, paddingTop: 0 },
   headerArea: { paddingTop: spacing.xl - 4, paddingBottom: spacing.xs },
-  title: { fontSize: 22, fontFamily: fontFamily.extraBold, color: colors.text, marginBottom: spacing.xl },
+  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.xl },
+  title: { fontSize: 22, fontFamily: fontFamily.extraBold, color: colors.text },
 
   statsGrid: { flexDirection: "row", marginBottom: spacing.xl },
   statTab: { flex: 1, alignItems: "center", gap: spacing.sm + 2 },

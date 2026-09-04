@@ -1,7 +1,8 @@
 import { useFocusEffect, useRouter } from "expo-router";
-import { ChatCircleTextIcon, TrashIcon } from "phosphor-react-native";
+import { ChatCircleTextIcon, TrashIcon, XIcon } from "phosphor-react-native";
 import React, { useCallback, useState } from "react";
-import { ActivityIndicator, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, FlatList, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { PostCard } from "../components/PostCard";
 import { Alert } from "../services/crossPlatformAlert";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
@@ -12,8 +13,8 @@ import { PostItem } from "../types";
 
 /**
  * '게시물 관리' 화면. 내가 작성한 게시물만 한눈에 모아 보고 삭제할 수
- * 있습니다. 게시물 상세 화면(post-detail)이 없어진 뒤로는, 본인 게시물을
- * 지우는 유일한 통로입니다.
+ * 있습니다. 게시물을 누르면 피드 카드와 같은 모습(사진/글/댓글)을 팝업으로
+ * 보여줍니다. 본인 게시물 삭제는 이 화면 목록에서 합니다.
  */
 export default function PostManageScreen() {
   const router = useRouter();
@@ -23,6 +24,7 @@ export default function PostManageScreen() {
   const [posts, setPosts] = useState<PostItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [viewingPost, setViewingPost] = useState<PostItem | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -39,7 +41,7 @@ export default function PostManageScreen() {
     }, [load])
   );
 
-  const handleDelete = (postId: string) => {
+  const handleDelete = (postId: string, onDeleted?: () => void) => {
     Alert.alert("게시물을 삭제할까요?", "삭제하면 댓글과 함께 되돌릴 수 없어요.", [
       { text: "취소", style: "cancel" },
       {
@@ -50,6 +52,7 @@ export default function PostManageScreen() {
           try {
             await api.deletePost(postId);
             setPosts((prev) => prev.filter((p) => p.id !== postId));
+            onDeleted?.();
           } catch (err) {
             Alert.alert("삭제 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
           } finally {
@@ -69,8 +72,9 @@ export default function PostManageScreen() {
   }
 
   return (
-    <FlatList
-      data={posts}
+    <>
+      <FlatList
+        data={posts}
       keyExtractor={(item) => item.id}
       contentContainerStyle={styles.list}
       ListEmptyComponent={
@@ -82,7 +86,7 @@ export default function PostManageScreen() {
         </View>
       }
       renderItem={({ item }) => (
-        <View style={styles.row}>
+        <TouchableOpacity style={styles.row} onPress={() => setViewingPost(item)} activeOpacity={0.7}>
           {item.photo_urls.length > 0 ? (
             <Image source={{ uri: item.photo_urls[0] }} style={styles.thumb} />
           ) : (
@@ -113,9 +117,44 @@ export default function PostManageScreen() {
               <TrashIcon size={18} color={colors.danger} weight="bold" />
             )}
           </TouchableOpacity>
-        </View>
+        </TouchableOpacity>
       )}
     />
+
+      <Modal
+        visible={!!viewingPost}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setViewingPost(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>게시물</Text>
+              <View style={styles.modalHeaderActions}>
+                <TouchableOpacity
+                  onPress={() => viewingPost && handleDelete(viewingPost.id, () => setViewingPost(null))}
+                  disabled={!!viewingPost && deletingId === viewingPost.id}
+                  hitSlop={10}
+                >
+                  {viewingPost && deletingId === viewingPost.id ? (
+                    <ActivityIndicator size="small" color={colors.danger} />
+                  ) : (
+                    <TrashIcon size={18} color={colors.danger} weight="bold" />
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setViewingPost(null)} hitSlop={10}>
+                  <XIcon size={18} color={colors.text} weight="bold" />
+                </TouchableOpacity>
+              </View>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {viewingPost && <PostCard item={viewingPost} />}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
@@ -148,5 +187,19 @@ function makeStyles(colors: ThemeColors) {
     metaRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs, marginTop: spacing.xs },
     metaText: { fontSize: 11, fontFamily: fontFamily.regular, color: colors.textTertiary },
     deleteButton: { padding: spacing.xs + 2 },
+
+    modalBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end", alignItems: "center" },
+    modalSheet: {
+      width: "100%",
+      maxWidth: 640, // 웹에서 넓은 화면일 때 앱 폭(WebFrame)에 맞춰 시트도 가운데 정렬되게
+      backgroundColor: colors.surfaceAlt,
+      borderTopLeftRadius: radius.xl,
+      borderTopRightRadius: radius.xl,
+      padding: spacing.xl - 4,
+      maxHeight: "85%",
+    },
+    modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.lg },
+    modalTitle: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.text },
+    modalHeaderActions: { flexDirection: "row", alignItems: "center", gap: spacing.lg },
   });
 }

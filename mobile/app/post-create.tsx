@@ -15,6 +15,8 @@ import {
   View,
 } from "react-native";
 import { Alert } from "../services/crossPlatformAlert";
+import { PhotoCarousel } from "../components/PhotoCarousel";
+import { PhotoEditor } from "../components/PhotoEditor";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
@@ -25,10 +27,9 @@ import { VisitedPlace } from "../types";
 
 const MAX_POST_PHOTOS = 5;
 
-// uri는 미리보기용, payload는 서버로 보낼 base64 값입니다. ImagePicker에
-// base64:true를 줘서 바로 받아오므로, expo-file-system(readAsStringAsync)에
-// 의존하지 않습니다 — 그 API는 웹에서 지원되지 않아 "not available on web"
-// 에러가 났었습니다.
+// uri는 미리보기용(payload를 data URI로 감싼 값), payload는 서버로 보낼 base64
+// 값입니다. 사진을 고르면 원본을 바로 쓰지 않고 PhotoEditor(크롭/필터/꾸미기)를
+// 거쳐 이미 편집이 끝난 결과물만 여기 들어옵니다.
 interface PhotoDraft {
   uri: string;
   payload: string;
@@ -54,6 +55,10 @@ export default function PostCreateScreen() {
   const [photoDrafts, setPhotoDrafts] = useState<PhotoDraft[]>([]);
   const [pickingPhoto, setPickingPhoto] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // 여러 장을 한 번에 고르면, 한 장씩 순서대로 PhotoEditor를 띄워 편집을
+  // 마친 것부터 photoDrafts에 추가합니다. 큐의 첫 항목이 곧 '지금 편집 중인 사진'.
+  const [editQueue, setEditQueue] = useState<string[]>([]);
+  const editingUri = editQueue[0] ?? null;
   // 게시물 피드 카드의 사진과 같은 크기(카드 폭 기준 정사각형)로 미리보기를
   // 보여주기 위해, 이 화면에서도 같은 방식(onLayout으로 실제 폭 측정)을 씁니다.
   const [previewWidth, setPreviewWidth] = useState(0);
@@ -90,16 +95,13 @@ export default function PostCreateScreen() {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsMultipleSelection: true,
         selectionLimit: MAX_POST_PHOTOS - photoDrafts.length,
-        quality: 0.6,
-        base64: true,
+        quality: 0.9,
       });
       if (result.canceled || !result.assets?.length) return;
 
       const picked = result.assets.slice(0, MAX_POST_PHOTOS - photoDrafts.length);
-      const encoded = picked
-        .filter((asset) => !!asset.base64)
-        .map((asset) => ({ uri: asset.uri, payload: asset.base64 as string }));
-      setPhotoDrafts((prev) => [...prev, ...encoded].slice(0, MAX_POST_PHOTOS));
+      // 바로 photoDrafts에 넣지 않고, 한 장씩 편집기를 거치도록 큐에 쌓아둡니다.
+      setEditQueue((prev) => [...prev, ...picked.map((a) => a.uri)]);
     } catch (err) {
       Alert.alert("사진을 불러오지 못했어요", String(err));
     } finally {
@@ -109,6 +111,17 @@ export default function PostCreateScreen() {
 
   const handleRemovePhoto = (uri: string) => {
     setPhotoDrafts((prev) => prev.filter((p) => p.uri !== uri));
+  };
+
+  const handleEditorConfirm = (base64: string) => {
+    setPhotoDrafts((prev) =>
+      [...prev, { uri: `data:image/jpeg;base64,${base64}`, payload: base64 }].slice(0, MAX_POST_PHOTOS)
+    );
+    setEditQueue((prev) => prev.slice(1));
+  };
+
+  const handleEditorCancel = () => {
+    setEditQueue((prev) => prev.slice(1));
   };
 
   const handleSubmit = async () => {
@@ -171,7 +184,10 @@ export default function PostCreateScreen() {
               )}
             </TouchableOpacity>
           ) : (
-            <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
+            <PhotoCarousel
+              pageWidth={previewWidth}
+              pageCount={photoDrafts.length + (photoDrafts.length < MAX_POST_PHOTOS ? 1 : 0)}
+            >
               {photoDrafts.map((p) => (
                 <View key={p.uri} style={[styles.photoPreviewWrap, { width: previewWidth, height: previewWidth }]}>
                   <Image
@@ -205,7 +221,7 @@ export default function PostCreateScreen() {
                   )}
                 </TouchableOpacity>
               )}
-            </ScrollView>
+            </PhotoCarousel>
           ))}
       </View>
 
@@ -269,6 +285,10 @@ export default function PostCreateScreen() {
           </View>
         </View>
       </Modal>
+
+      {editingUri && (
+        <PhotoEditor key={editingUri} imageUri={editingUri} onCancel={handleEditorCancel} onConfirm={handleEditorConfirm} />
+      )}
     </ScrollView>
   );
 }

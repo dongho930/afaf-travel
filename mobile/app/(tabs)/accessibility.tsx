@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { Alert } from "../../services/crossPlatformAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { ProfileButton } from "../../components/ProfileButton";
 import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
 import { radius, spacing } from "../../constants/tokens";
@@ -209,9 +210,10 @@ export default function AccessibilityScreen() {
     // edges=["top"]로 화면 상단만 안전영역 처리합니다 (홈 화면과 동일한 방식).
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>접근성 정보</Text>
-        <Text style={styles.subtitle}>장애 유형별 실시간 접근성 정보를 확인하세요</Text>
-
+        <View style={styles.header}>
+          <Text style={styles.title}>접근성 정보</Text>
+          <ProfileButton />
+        </View>
         <View style={styles.grid}>
           {CATEGORY_META.map((c) => {
             const isSelected = c.key === selectedCategory;
@@ -455,8 +457,8 @@ function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   container: { padding: spacing.xl, paddingBottom: spacing.xxl + spacing.sm },
-  title: { fontSize: 22, fontFamily: fontFamily.extraBold, color: colors.text, marginBottom: spacing.xs },
-  subtitle: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary, marginBottom: spacing.xl },
+  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.xl },
+  title: { fontSize: 22, fontFamily: fontFamily.extraBold, color: colors.text },
 
   grid: { flexDirection: "row", flexWrap: "wrap", rowGap: spacing.lg, marginBottom: spacing.xl - 4 },
   categoryTab: { width: "33.33%", alignItems: "center", gap: spacing.xs + 2 },
