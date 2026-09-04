@@ -77,6 +77,24 @@ async def attraction_overviews(content_ids: str = Query(..., description="쉼표
     return await tour_api_client.get_overviews_for_ids(ids)
 
 
+@router.get("/attractions/extra-info")
+async def attraction_extra_info(
+    content_ids: str = Query(..., description="쉼표로 구분된 content_id 목록"),
+    categories: str = Query(..., description="content_ids와 같은 순서로 대응하는 카테고리 목록(쉼표 구분)"),
+):
+    """
+    주어진 content_id들의 카테고리별 부가 정보(이용시간/요금 등)만 따로 조회합니다.
+    홈 화면 카드의 소개문 아래에, 화면에 실제로 보이는 만큼만(더보기 단위로) 채울 때 씁니다
+    (전체 목록을 한 번에 채우려다 시간제한에 걸리는 문제를 /attractions/overviews와
+    같은 방식으로 피합니다). content_ids와 categories는 개수와 순서가 일치해야 합니다.
+    """
+    ids = [c.strip() for c in content_ids.split(",") if c.strip()]
+    cats = [c.strip() for c in categories.split(",") if c.strip()]
+    if len(ids) != len(cats):
+        raise HTTPException(status_code=400, detail="content_ids와 categories의 개수가 일치해야 합니다.")
+    return await tour_api_client.get_extra_info_for_ids(list(zip(ids, cats)))
+
+
 @router.get("/attractions/{content_id}/related", response_model=list[Attraction])
 async def related_attractions(content_id: str):
     results = await tour_api_client.get_related_attractions(content_id)

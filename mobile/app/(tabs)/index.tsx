@@ -35,6 +35,17 @@ const CATEGORY_CHIPS = ["전체", "관광지", "문화시설", "레포츠", "숙
 // 선택해도 안 보입니다). 나중에 다시 보이게 하려면 이 배열을 비우면 됩니다.
 const EXCLUDED_CATEGORIES = ["축제/공연/행사", "여행코스", "쇼핑"];
 
+// 카테고리별로 카드에 보여줄 부가 정보 라벨(순서 그대로 표시). 라벨 문자열은
+// 백엔드 _INTRO_FIELDS_BY_TYPE(backend/app/services/tour_api.py)이 실제로 채우는
+// InfoField.label과 정확히 일치해야 골라낼 수 있습니다.
+const EXTRA_INFO_LABELS_BY_CATEGORY: Record<string, string[]> = {
+  관광지: ["이용시간", "쉬는날", "개장일"],
+  문화시설: ["이용요금", "이용시간", "쉬는날"],
+  레포츠: ["이용요금", "이용시간", "개장 시간", "쉬는날", "체험 가능 연령", "수용 인원"],
+  숙박: ["입실 시간", "퇴실 시간", "취사 가능 여부", "객실 수", "인증 등급"],
+  음식점: ["대표 메뉴", "영업시간", "쉬는날"],
+};
+
 export default function HomeScreen() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -136,6 +147,7 @@ export default function HomeScreen() {
           setPopularPlaces(filtered);
           return;
         }
+        loadExtraInfoFor(filtered.slice(0, PLACES_PAGE_SIZE));
         return api
           .getOverviews(firstIds)
           .then((overviews) => {
@@ -171,6 +183,23 @@ export default function HomeScreen() {
     return () => clearInterval(timer);
   }, [heroImageCandidates, heroOpacityA, heroOpacityB]);
 
+  // 주어진 카드들 중 아직 부가 정보(이용시간/요금 등)가 없는 것만 골라 따로
+  // 불러와서 채웁니다. 소개문과 달리 카드가 먼저 뜬 뒤 나중에 채워져도 크게
+  // 어색하지 않아서(글이 아니라 짧은 항목들이라), 소개문 로딩을 막지 않도록
+  // 별도로(기다리지 않고) 실행합니다.
+  const loadExtraInfoFor = (places: Attraction[]) => {
+    const targets = places.filter((p) => !p.extra_info && EXTRA_INFO_LABELS_BY_CATEGORY[p.category]);
+    if (targets.length === 0) return;
+    api
+      .getExtraInfo(targets.map((p) => ({ contentId: p.content_id, category: p.category })))
+      .then((result) => {
+        setPopularPlaces((prev) =>
+          prev.map((p) => (result[p.content_id] ? { ...p, extra_info: result[p.content_id] } : p))
+        );
+      })
+      .catch(() => {}); // 못 받아와도 카드는 그냥 보여줍니다.
+  };
+
   // 다음 묶음도 소개문까지 다 받아온 뒤에야 visiblePlacesCount를 늘려서 화면에
   // 내보냅니다 — 카드가 먼저 뜨고 소개문이 나중에 튀어나오는 걸 막기 위함입니다.
   const handleShowMorePlaces = async () => {
@@ -185,10 +214,10 @@ export default function HomeScreen() {
     const nextCount = Math.min(start + PLACES_PAGE_SIZE, filtered.length);
     if (nextCount <= start) return; // 이미 이 카테고리를 끝까지 다 보여준 상태면 아무것도 안 함
 
-    const newlyRevealedIds = filtered
-      .slice(start, nextCount)
-      .filter((p) => !p.overview)
-      .map((p) => p.content_id);
+    const newlyRevealed = filtered.slice(start, nextCount);
+    loadExtraInfoFor(newlyRevealed);
+
+    const newlyRevealedIds = newlyRevealed.filter((p) => !p.overview).map((p) => p.content_id);
     if (newlyRevealedIds.length > 0) {
       setLoadingMore(true);
       try {
@@ -241,10 +270,10 @@ export default function HomeScreen() {
 
     const filtered =
       selectedCategory === "전체" ? popularPlaces : popularPlaces.filter((p) => p.category === selectedCategory);
-    const idsNeedingOverview = filtered
-      .slice(0, PLACES_PAGE_SIZE)
-      .filter((p) => !p.overview)
-      .map((p) => p.content_id);
+    const firstVisible = filtered.slice(0, PLACES_PAGE_SIZE);
+    loadExtraInfoFor(firstVisible);
+
+    const idsNeedingOverview = firstVisible.filter((p) => !p.overview).map((p) => p.content_id);
     if (idsNeedingOverview.length > 0) {
       api
         .getOverviews(idsNeedingOverview)
@@ -269,6 +298,31 @@ export default function HomeScreen() {
     { icon: WheelchairIcon, value: totalAccessibleCount != null ? String(totalAccessibleCount) : "-", label: "무장애 여행지" },
     { icon: MapPinIcon, value: supportedRegionCount != null ? String(supportedRegionCount) : "-", label: "지원 지역" },
   ];
+
+  // 카드 소개문 아래에 카테고리별로 정해둔 부가 정보(이용시간/요금 등)만 골라
+  // 정해진 순서대로 보여줍니다. 해당 카테고리에 대한 항목 정의가 없거나, 아직
+  // 부가 정보를 못 받아왔거나(로딩 전), 그 항목이 실제로 없는 곳이면 아무것도
+  // 보여주지 않습니다.
+  const renderExtraInfo = (place: Attraction) => {
+    const labels = EXTRA_INFO_LABELS_BY_CATEGORY[place.category];
+    if (!labels || !place.extra_info?.length) return null;
+    const entries = labels
+      .map((label) => place.extra_info!.find((info) => info.label === label))
+      .filter((info): info is { label: string; value: string } => !!info);
+    if (entries.length === 0) return null;
+    return (
+      <View style={styles.placeExtraInfo}>
+        {entries.map((info) => (
+          <View key={info.label} style={styles.placeExtraInfoRow}>
+            <Text style={styles.placeExtraInfoLabel}>{info.label}</Text>
+            <Text style={styles.placeExtraInfoValue} numberOfLines={1}>
+              {info.value}
+            </Text>
+          </View>
+        ))}
+      </View>
+    );
+  };
 
   return (
     // edges=["top"]로 화면 상단만 안전영역 처리합니다 — 스크롤을 위로 당겨도
@@ -411,6 +465,7 @@ export default function HomeScreen() {
                         {place.overview}
                       </Text>
                     )}
+                    {renderExtraInfo(place)}
                     {place.accessibility && <AccessibilityIcons features={place.accessibility} />}
                   </View>
                 </TouchableOpacity>
@@ -574,5 +629,18 @@ function makeStyles(colors: ThemeColors) {
   placeInfo: { padding: spacing.md + 2 },
   placeCategory: { fontSize: 12, fontFamily: fontFamily.semiBold, color: colors.primary },
   placeOverview: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: spacing.xs + 2, lineHeight: 17 },
+
+  // 소개문 아래 카테고리별 부가 정보(이용시간/요금 등) — 라벨 칸을 고정 너비로
+  // 잡아서(장소 상세 화면의 infoLabel과 동일한 방침) 값이 항목마다 같은 위치에서 시작합니다.
+  placeExtraInfo: {
+    marginTop: spacing.sm,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    gap: spacing.xs,
+  },
+  placeExtraInfoRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm },
+  placeExtraInfoLabel: { width: 64, fontSize: 11, fontFamily: fontFamily.semiBold, color: colors.textTertiary },
+  placeExtraInfoValue: { flex: 1, fontSize: 11, fontFamily: fontFamily.regular, color: colors.textSecondary },
   });
 }

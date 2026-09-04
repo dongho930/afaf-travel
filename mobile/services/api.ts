@@ -66,6 +66,15 @@ export const api = {
       `/api/tourism/attractions/overviews?content_ids=${contentIds.map(encodeURIComponent).join(",")}`
     ),
 
+  // 특정 관광지들의 카테고리별 부가 정보(이용시간/요금 등)만 따로 조회
+  // (홈 화면 카드의 소개문 아래 표시용, '더보기'로 새로 보이는 만큼만 채울 때 사용)
+  getExtraInfo: (items: { contentId: string; category: string }[]) =>
+    request<Record<string, { label: string; value: string }[]>>(
+      `/api/tourism/attractions/extra-info?content_ids=${items
+        .map((i) => encodeURIComponent(i.contentId))
+        .join(",")}&categories=${items.map((i) => encodeURIComponent(i.category)).join(",")}`
+    ),
+
   // 지역 선택 UI용: 시/도 안의 시/군/구 목록 (예: 경기도 → 수원시 팔달구, ...)
   listRegions: (province: string = "경기도") =>
     request<RegionOption[]>(`/api/tourism/regions?province=${encodeURIComponent(province)}`),

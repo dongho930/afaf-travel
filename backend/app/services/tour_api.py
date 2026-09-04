@@ -42,12 +42,14 @@ from app.services.supabase_service import (
     get_cached_congestion_rates,
     get_cached_congestion_signgu_cds,
     get_cached_intro_info,
+    get_cached_intro_info_batch,
     get_cached_overviews,
     get_cached_place_accessibility,
     save_attraction_basic,
     save_attraction_list_cache,
     save_congestion_rates_batch,
     save_intro_info,
+    save_intro_info_batch,
     save_overviews_batch,
     save_place_accessibility_batch,
 )
@@ -691,6 +693,65 @@ class TourApiClient:
                         )
             if new_rows:
                 await save_overviews_batch(new_rows)
+
+    async def _fill_extra_info_with_cache(
+        self,
+        client: httpx.AsyncClient,
+        attractions: list[Attraction],
+        max_concurrency: int = 8,
+    ) -> None:
+        """
+        attractions 각각의 extra_info(이용시간/요금 등)를 채웁니다. _fill_overview_with_cache와
+        동일한 방침 — 캐시(attraction_intro_cache)를 먼저 배치로 조회하고, 없는 것만
+        새로 조회한 뒤 청크 단위로 바로 캐시에 저장합니다.
+
+        카테고리(문화시설/음식점 등)마다 응답 필드가 달라서 attraction.category로
+        content_type_id를 역매핑할 수 없으면(또는 화이트리스트에 없으면) 건너뜁니다.
+        """
+        candidates = [
+            (a, _CONTENT_TYPE_ID_BY_LABEL.get(a.category))
+            for a in attractions
+            if a.content_id
+        ]
+        candidates = [(a, tid) for a, tid in candidates if tid is not None and tid in _INTRO_FIELDS_BY_TYPE]
+        if not candidates:
+            return
+
+        content_ids = [a.content_id for a, _ in candidates]
+        cached = await get_cached_intro_info_batch(content_ids)
+        to_fetch: list[tuple[Attraction, int]] = []
+        for a, content_type_id in candidates:
+            row = cached.get(a.content_id)
+            if row:
+                a.extra_info = self._build_extra_info(content_type_id, row.get("fields") or {})
+            else:
+                to_fetch.append((a, content_type_id))
+
+        if not to_fetch:
+            return
+
+        async def bounded_fetch(a: Attraction, content_type_id: int):
+            field_values = await self._fetch_intro_info(client, a.content_id, content_type_id)
+            return a, content_type_id, field_values
+
+        for chunk_start in range(0, len(to_fetch), max_concurrency):
+            chunk = to_fetch[chunk_start : chunk_start + max_concurrency]
+            chunk_results = await asyncio.gather(*(bounded_fetch(a, tid) for a, tid in chunk))
+
+            new_rows: list[dict] = []
+            for a, content_type_id, field_values in chunk_results:
+                if field_values:
+                    a.extra_info = self._build_extra_info(content_type_id, field_values)
+                    new_rows.append(
+                        {
+                            "content_id": a.content_id,
+                            "content_type_id": content_type_id,
+                            "fields": field_values,
+                            "fetched_at": datetime.datetime.utcnow().isoformat(),
+                        }
+                    )
+            if new_rows:
+                await save_intro_info_batch(new_rows)
 
     async def _resolve_attraction_by_name(
         self, client: httpx.AsyncClient, name: str
@@ -1388,6 +1449,39 @@ class TourApiClient:
                     "get_overviews_for_ids: 6초 안에 끝나지 않아 일부는 비어있는 채로 반환합니다."
                 )
         return {a.content_id: a.overview for a in placeholders}
+
+    async def get_extra_info_for_ids(self, items: list[tuple[str, str]]) -> dict[str, list[InfoField]]:
+        """
+        주어진 (content_id, category) 쌍들의 카테고리별 부가 정보(이용시간/요금 등)만
+        따로 채워서 {content_id: extra_info} 형태로 돌려줍니다. 홈 화면 카드에서
+        소개문 아래에 보여줄 요약 정보를, 화면에 실제로 보이는 만큼만(더보기 단위로)
+        가져올 때 씁니다 — get_overviews_for_ids와 짝을 이룹니다.
+
+        category가 필요한 이유: 카테고리(문화시설/음식점 등)마다 detailIntro2 응답
+        필드가 달라서, 캐시 미스일 때 어떤 필드를 조회할지 알려면 content_type_id가
+        있어야 하는데, 목록 화면은 이미 각 카드의 category를 알고 있으므로 그대로 넘겨받습니다.
+        """
+        if not items:
+            return {}
+        if self.use_mock:
+            by_id = {a.content_id: a.extra_info for a in _MOCK_ATTRACTIONS}
+            return {cid: by_id.get(cid, []) for cid, _category in items}
+
+        placeholders = [
+            Attraction(content_id=cid, name="", address="", latitude=0.0, longitude=0.0, category=category)
+            for cid, category in items
+        ]
+        async with httpx.AsyncClient(timeout=15) as client:
+            try:
+                await asyncio.wait_for(
+                    self._fill_extra_info_with_cache(client, placeholders, max_concurrency=8),
+                    timeout=6.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "get_extra_info_for_ids: 6초 안에 끝나지 않아 일부는 비어있는 채로 반환합니다."
+                )
+        return {a.content_id: a.extra_info for a in placeholders}
 
     async def search_attractions_by_keyword(self, keyword: str, limit: int = 8) -> list[dict]:
         """

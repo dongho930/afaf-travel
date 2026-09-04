@@ -715,6 +715,37 @@ async def save_intro_info(row: dict) -> None:
         print(f"[supabase] 관광지 부가정보 캐시 저장 실패: {e}")
 
 
+async def get_cached_intro_info_batch(content_ids: list[str]) -> dict[str, dict]:
+    """홈 화면 카드용: 캐시된 카테고리별 부가 정보를 {content_id: row} 형태로 여러 건 한 번에 돌려줍니다."""
+    if _client is None or not content_ids:
+        return {}
+    found: dict[str, dict] = {}
+    chunk_size = 500
+    try:
+        for i in range(0, len(content_ids), chunk_size):
+            chunk = content_ids[i : i + chunk_size]
+            result = _client.table(_INTRO_TABLE).select("*").in_("content_id", chunk).execute()
+            for row in result.data or []:
+                found[row["content_id"]] = row
+    except Exception as e:
+        print(f"[supabase] 관광지 부가정보 캐시 일괄 조회 실패: {e}")
+        return {}
+    return found
+
+
+async def save_intro_info_batch(rows: list[dict]) -> None:
+    """새로 조회한 부가 정보 여러 건을 캐시 테이블에 upsert합니다."""
+    if _client is None or not rows:
+        return
+    chunk_size = 500
+    try:
+        for i in range(0, len(rows), chunk_size):
+            chunk = rows[i : i + chunk_size]
+            _client.table(_INTRO_TABLE).upsert(chunk).execute()
+    except Exception as e:
+        print(f"[supabase] 관광지 부가정보 캐시 일괄 저장 실패: {e}")
+
+
 async def mark_trip_as_visited(trip_id: str, user_id: str) -> int:
     """
     '내 여행' 탭의 '방문 완료' 버튼용. 그 여행(trip) 안의 모든 코스에 담긴

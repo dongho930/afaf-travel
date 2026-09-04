@@ -741,7 +741,6 @@ function makeStyles(colors: ThemeColors) {
   },
   infoRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "flex-start",
     gap: spacing.md,
     paddingVertical: spacing.sm + 4,
@@ -749,8 +748,10 @@ function makeStyles(colors: ThemeColors) {
     borderBottomColor: colors.border,
   },
   infoRowLast: { borderBottomWidth: 0 },
-  infoLabel: { fontSize: 13, fontFamily: fontFamily.semiBold, color: colors.textSecondary },
-  infoValue: { flex: 1, fontSize: 13, fontFamily: fontFamily.regular, color: colors.text, textAlign: "left" },
+  // 라벨 칸을 고정 너비로 잡아야 "이용시간"처럼 짧은 라벨과 "문의 및 안내"처럼
+  // 긴 라벨이 섞여도 값(오른쪽 칸)이 행마다 같은 위치에서 시작합니다.
+  infoLabel: { width: 84, fontSize: 13, fontFamily: fontFamily.semiBold, color: colors.textSecondary },
+  infoValue: { flex: 1, fontSize: 13, fontFamily: fontFamily.regular, color: colors.text, textAlign: "left", lineHeight: 19 },
 
   nearbySection: { marginTop: spacing.xl - 4 },
   nearbySectionTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2, marginBottom: spacing.sm + 2 },
