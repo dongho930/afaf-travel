@@ -50,6 +50,9 @@ function ThemedApp() {
                 headerTitleStyle: { fontSize: 17, fontFamily: fontFamily.semiBold, color: colors.text },
                 headerTintColor: colors.text,
                 contentStyle: { backgroundColor: colors.background },
+                // 화면 전환이 즉시 뚝 바뀌지 않고 부드럽게 이어지도록(네이티브에서만
+                // 적용됨 — expo-router 웹은 이 옵션을 반영하지 않고 그대로 바뀝니다).
+                animation: "fade",
               }}
             >
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />

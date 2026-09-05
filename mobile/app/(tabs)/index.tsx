@@ -19,7 +19,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AccessibilityIcons } from "../../components/AccessibilityIcons";
+import { AnimatedChip } from "../../components/AnimatedChip";
 import { AppLogo } from "../../components/AppLogo";
+import { EXTRA_INFO_LABELS_BY_CATEGORY, renderExtraInfo as renderExtraInfoRow } from "../../components/ExtraInfoList";
+import { FadeInView } from "../../components/FadeInView";
 import { PhotoCardHeader } from "../../components/PhotoCardHeader";
 import { ProfileButton } from "../../components/ProfileButton";
 import { getCongestionDisplay } from "../../constants/congestion";
@@ -36,17 +39,6 @@ const CATEGORY_CHIPS = ["전체", "관광지", "문화시설", "레포츠", "숙
 // 인기 여행지 목록에서 아예 제외할 카테고리 (필터 칩으로도 고를 수 없고, '전체'를
 // 선택해도 안 보입니다). 나중에 다시 보이게 하려면 이 배열을 비우면 됩니다.
 const EXCLUDED_CATEGORIES = ["축제/공연/행사", "여행코스", "쇼핑"];
-
-// 카테고리별로 카드에 보여줄 부가 정보 라벨(순서 그대로 표시). 라벨 문자열은
-// 백엔드 _INTRO_FIELDS_BY_TYPE(backend/app/services/tour_api.py)이 실제로 채우는
-// InfoField.label과 정확히 일치해야 골라낼 수 있습니다.
-const EXTRA_INFO_LABELS_BY_CATEGORY: Record<string, string[]> = {
-  관광지: ["이용시간", "쉬는날", "개장일"],
-  문화시설: ["이용요금", "이용시간", "쉬는날"],
-  레포츠: ["이용요금", "이용시간", "개장 시간", "쉬는날", "체험 가능 연령", "수용 인원"],
-  숙박: ["입실 시간", "퇴실 시간", "취사 가능 여부", "객실 수", "인증 등급"],
-  음식점: ["대표 메뉴", "영업시간", "쉬는날"],
-};
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -80,6 +72,12 @@ export default function HomeScreen() {
   useEffect(() => {
     heroRef.current = hero;
   }, [hero]);
+  // 지역 목록이 뒤늦게 도착하면 여행지 목록 조회 useEffect가 한 번 더
+  // 실행되는데, 그때마다 배경 사진을 즉시(애니메이션 없이) 다시 뽑아버리면
+  // "첫 사진 → 뚝 끊기고 다음 사진 → 그 이후부터 부드러움" 현상이 생깁니다.
+  // 배경 사진은 최초 1회만 즉시 세팅하고, 그 뒤로는 3초 크로스페이드
+  // 인터벌만 사진을 바꾸도록 이 플래그로 막습니다.
+  const heroInitializedRef = useRef(false);
   const heroOpacityA = useRef(new Animated.Value(1)).current;
   const heroOpacityB = useRef(new Animated.Value(0)).current;
   const PLACES_PAGE_SIZE = 6;
@@ -136,26 +134,30 @@ export default function HomeScreen() {
         // 후보 목록에서 3초마다 다시 무작위로 골라 배경을 크로스페이드로 바꿉니다.
         const imageUrls = filtered.map((p) => p.image_url).filter((url): url is string => !!url);
         setHeroImageCandidates(imageUrls);
-        heroOpacityA.setValue(1);
-        heroOpacityB.setValue(0);
-        setHero({
-          a: imageUrls.length > 0 ? imageUrls[Math.floor(Math.random() * imageUrls.length)] : null,
-          b: null,
-          visible: "a",
-        });
+        if (!heroInitializedRef.current && imageUrls.length > 0) {
+          heroInitializedRef.current = true;
+          heroOpacityA.setValue(0);
+          heroOpacityB.setValue(0);
+          setHero({
+            a: imageUrls[Math.floor(Math.random() * imageUrls.length)],
+            b: null,
+            visible: "a",
+          });
+          Animated.timing(heroOpacityA, { toValue: 1, duration: 900, useNativeDriver: true }).start();
+        }
 
-        const firstIds = filtered.slice(0, PLACES_PAGE_SIZE).map((p) => p.content_id);
+        const firstBatch = filtered.slice(0, PLACES_PAGE_SIZE);
+        const firstIds = firstBatch.map((p) => p.content_id);
         if (firstIds.length === 0) {
           setPopularPlaces(filtered);
           return;
         }
-        loadExtraInfoFor(filtered.slice(0, PLACES_PAGE_SIZE));
-        return api
-          .getOverviews(firstIds)
-          .then((overviews) => {
-            setPopularPlaces(filtered.map((p) => (overviews[p.content_id] ? { ...p, overview: overviews[p.content_id] } : p)));
-          })
-          .catch(() => setPopularPlaces(filtered)); // 소개문을 못 받아와도 카드는 그냥 보여줍니다.
+        return Promise.all([
+          api.getOverviews(firstIds).catch(() => ({}) as Record<string, string | null>),
+          fetchExtraInfoMap(firstBatch),
+        ]).then(([overviews, extraInfoMap]) => {
+          setPopularPlaces(mergeOverviewAndExtraInfo(filtered, overviews, extraInfoMap));
+        }); // 소개문/부가 정보를 못 받아와도 카드는 그냥 보여줍니다(각 헬퍼가 실패 시 빈 맵을 돌려줌).
       })
       .catch(() => setPopularPlaces([]))
       .finally(() => setLoadingPlaces(false));
@@ -186,26 +188,52 @@ export default function HomeScreen() {
   }, [heroImageCandidates, heroOpacityA, heroOpacityB]);
 
   // 주어진 카드들 중 아직 부가 정보(이용시간/요금 등)가 없는 것만 골라 따로
-  // 불러와서 채웁니다. 소개문과 달리 카드가 먼저 뜬 뒤 나중에 채워져도 크게
-  // 어색하지 않아서(글이 아니라 짧은 항목들이라), 소개문 로딩을 막지 않도록
-  // 별도로(기다리지 않고) 실행합니다.
+  // 불러와서 채웁니다. 카테고리 탭 전환(아래 useEffect)처럼 이미 화면에 나와
+  // 있는 카드에 부가 정보만 나중에 채워 넣어도 되는 경우에 씁니다.
   const loadExtraInfoFor = (places: Attraction[]) => {
+    fetchExtraInfoMap(places).then((result) => {
+      if (Object.keys(result).length === 0) return;
+      setPopularPlaces((prev) =>
+        prev.map((p) => (result[p.content_id] ? { ...p, extra_info: result[p.content_id] } : p))
+      );
+    });
+  };
+
+  // 부가 정보만 따로 받아와서 맵으로 돌려줍니다(state는 직접 건드리지 않음).
+  // 초기 로딩/더보기처럼 "부가 정보까지 다 받아온 뒤에 카드를 보여주기"가
+  // 필요한 곳에서, 소개문 조회와 Promise.all로 같이 기다리는 데 씁니다.
+  const fetchExtraInfoMap = (
+    places: Attraction[]
+  ): Promise<Record<string, { label: string; value: string }[]>> => {
     // extra_info는 목록 조회 시에도 항상 배열로 채워져서 오는데(정보가 없으면
     // undefined가 아니라 빈 배열 []), !p.extra_info는 빈 배열을 truthy로 보고
     // "이미 불러왔음"으로 오판합니다. 그래서 배열이 비어있는지(length)로 판단합니다.
     const targets = places.filter(
       (p) => (p.extra_info?.length ?? 0) === 0 && EXTRA_INFO_LABELS_BY_CATEGORY[p.category]
     );
-    if (targets.length === 0) return;
-    api
+    if (targets.length === 0) return Promise.resolve({});
+    return api
       .getExtraInfo(targets.map((p) => ({ contentId: p.content_id, category: p.category })))
-      .then((result) => {
-        setPopularPlaces((prev) =>
-          prev.map((p) => (result[p.content_id] ? { ...p, extra_info: result[p.content_id] } : p))
-        );
-      })
-      .catch(() => {}); // 못 받아와도 카드는 그냥 보여줍니다.
+      .catch(() => ({})); // 못 받아와도 카드는(부가 정보 없이) 그냥 보여줍니다.
   };
+
+  // 소개문/부가 정보 맵을 원본 목록에 병합합니다. 카드를 보여주기 전에 둘 다
+  // 기다렸다가 한 번에 합쳐 넣을 때 씁니다.
+  const mergeOverviewAndExtraInfo = (
+    places: Attraction[],
+    overviews: Record<string, string | null>,
+    extraInfoMap: Record<string, { label: string; value: string }[]>
+  ): Attraction[] =>
+    places.map((p) => {
+      const overview = overviews[p.content_id];
+      const extraInfo = extraInfoMap[p.content_id];
+      if (!overview && !extraInfo) return p;
+      return {
+        ...p,
+        ...(overview ? { overview } : {}),
+        ...(extraInfo ? { extra_info: extraInfo } : {}),
+      };
+    });
 
   // 다음 묶음도 소개문까지 다 받아온 뒤에야 visiblePlacesCount를 늘려서 화면에
   // 내보냅니다 — 카드가 먼저 뜨고 소개문이 나중에 튀어나오는 걸 막기 위함입니다.
@@ -222,21 +250,26 @@ export default function HomeScreen() {
     if (nextCount <= start) return; // 이미 이 카테고리를 끝까지 다 보여준 상태면 아무것도 안 함
 
     const newlyRevealed = filtered.slice(start, nextCount);
-    loadExtraInfoFor(newlyRevealed);
-
     const newlyRevealedIds = newlyRevealed.filter((p) => !p.overview).map((p) => p.content_id);
-    if (newlyRevealedIds.length > 0) {
-      setLoadingMore(true);
-      try {
-        const overviews = await api.getOverviews(newlyRevealedIds);
-        setPopularPlaces((prev) =>
-          prev.map((p) => (overviews[p.content_id] ? { ...p, overview: overviews[p.content_id] } : p))
-        );
-      } catch {
-        // 소개문을 못 받아와도 카드는 그냥 보여줍니다.
-      } finally {
-        setLoadingMore(false);
+
+    // 소개문과 부가 정보를 둘 다 받아온 뒤에야 이 묶음을 화면에 내보냅니다
+    // (visiblePlacesCount를 그 다음에 늘림) — 부가 정보만 나중에 툭 튀어나오는
+    // 걸 막기 위함입니다.
+    setLoadingMore(true);
+    try {
+      const [overviews, extraInfoMap] = await Promise.all([
+        newlyRevealedIds.length > 0
+          ? api.getOverviews(newlyRevealedIds)
+          : Promise.resolve({} as Record<string, string | null>),
+        fetchExtraInfoMap(newlyRevealed),
+      ]);
+      if (Object.keys(overviews).length > 0 || Object.keys(extraInfoMap).length > 0) {
+        setPopularPlaces((prev) => mergeOverviewAndExtraInfo(prev, overviews, extraInfoMap));
       }
+    } catch {
+      // 소개문/부가 정보를 못 받아와도 카드는 그냥 보여줍니다.
+    } finally {
+      setLoadingMore(false);
     }
 
     visiblePlacesCountRef.current = nextCount;
@@ -306,30 +339,9 @@ export default function HomeScreen() {
     { icon: MapPinIcon, value: supportedRegionCount, label: "지원 지역" },
   ];
 
-  // 카드 소개문 아래에 카테고리별로 정해둔 부가 정보(이용시간/요금 등)만 골라
-  // 정해진 순서대로 보여줍니다. 해당 카테고리에 대한 항목 정의가 없거나, 아직
-  // 부가 정보를 못 받아왔거나(로딩 전), 그 항목이 실제로 없는 곳이면 아무것도
-  // 보여주지 않습니다.
-  const renderExtraInfo = (place: Attraction) => {
-    const labels = EXTRA_INFO_LABELS_BY_CATEGORY[place.category];
-    if (!labels || !place.extra_info?.length) return null;
-    const entries = labels
-      .map((label) => place.extra_info!.find((info) => info.label === label))
-      .filter((info): info is { label: string; value: string } => !!info);
-    if (entries.length === 0) return null;
-    return (
-      <View style={styles.placeExtraInfo}>
-        {entries.map((info) => (
-          <View key={info.label} style={styles.placeExtraInfoRow}>
-            <Text style={styles.placeExtraInfoLabel}>{info.label}</Text>
-            <Text style={styles.placeExtraInfoValue} numberOfLines={1}>
-              {info.value}
-            </Text>
-          </View>
-        ))}
-      </View>
-    );
-  };
+  // 카드 소개문 아래에 카테고리별로 정해둔 부가 정보(이용시간/요금 등)를 보여줍니다.
+  // 장소 선택하기/추천 코스 화면과 표시 방식을 공유하기 위해 components/ExtraInfoList로 뽑아뒀습니다.
+  const renderExtraInfo = (place: Attraction) => renderExtraInfoRow(place, colors);
 
   return (
     // edges=["top"]로 화면 상단만 안전영역 처리합니다 — 스크롤을 위로 당겨도
@@ -417,25 +429,39 @@ export default function HomeScreen() {
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
           {REGION_CHIPS.map((chip) => (
-            <TouchableOpacity
+            <AnimatedChip
               key={chip}
-              style={[styles.chip, selectedRegion === chip && styles.chipSelected]}
+              selected={selectedRegion === chip}
               onPress={() => setSelectedRegion(chip)}
-            >
-              <Text style={[styles.chipText, selectedRegion === chip && styles.chipTextSelected]}>{chip}</Text>
-            </TouchableOpacity>
+              label={chip}
+              style={styles.chip}
+              textStyle={styles.chipText}
+              backgroundColor={colors.surface}
+              selectedBackgroundColor={colors.primary}
+              borderColor={colors.border}
+              selectedBorderColor={colors.primary}
+              textColor={colors.textSecondary}
+              selectedTextColor={colors.onPrimary}
+            />
           ))}
         </ScrollView>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
           {CATEGORY_CHIPS.map((chip) => (
-            <TouchableOpacity
+            <AnimatedChip
               key={chip}
-              style={[styles.chip, selectedCategory === chip && styles.chipSelected]}
+              selected={selectedCategory === chip}
               onPress={() => setSelectedCategory(chip)}
-            >
-              <Text style={[styles.chipText, selectedCategory === chip && styles.chipTextSelected]}>{chip}</Text>
-            </TouchableOpacity>
+              label={chip}
+              style={styles.chip}
+              textStyle={styles.chipText}
+              backgroundColor={colors.surface}
+              selectedBackgroundColor={colors.primary}
+              borderColor={colors.border}
+              selectedBorderColor={colors.primary}
+              textColor={colors.textSecondary}
+              selectedTextColor={colors.onPrimary}
+            />
           ))}
         </ScrollView>
 
@@ -446,7 +472,7 @@ export default function HomeScreen() {
         ) : (
           <>
             {filteredPlaces.slice(0, visiblePlacesCount).map((place) => (
-              <AnimatedPlaceCard key={place.content_id}>
+              <FadeInView key={place.content_id} duration={350}>
                 <TouchableOpacity
                   style={styles.placeCard}
                   onPress={() =>
@@ -472,38 +498,28 @@ export default function HomeScreen() {
                         {place.overview}
                       </Text>
                     )}
-                    {renderExtraInfo(place)}
-                    {place.accessibility && <AccessibilityIcons features={place.accessibility} />}
+                    {(() => {
+                      const extraInfoNode = renderExtraInfo(place);
+                      return (
+                        <>
+                          {extraInfoNode}
+                          {!!place.accessibility && (
+                            <View style={extraInfoNode ? styles.placeAccessibility : undefined}>
+                              <AccessibilityIcons features={place.accessibility} />
+                            </View>
+                          )}
+                        </>
+                      );
+                    })()}
                   </View>
                 </TouchableOpacity>
-              </AnimatedPlaceCard>
+              </FadeInView>
             ))}
             {loadingMore && <ActivityIndicator style={{ marginTop: spacing.sm }} color={colors.primary} />}
           </>
         )}
       </ScrollView>
     </SafeAreaView>
-  );
-}
-
-// 새로 화면에 나타나는 여행지 카드가 뚝 끊기듯 나타나지 않고 아래에서 살짝
-// 떠오르며 부드럽게 페이드인되도록 감싸는 컴포넌트입니다. 마운트될 때 한
-// 번만 애니메이션되므로, 이미 보이던 카드는 다시 움직이지 않습니다.
-function AnimatedPlaceCard({ children }: { children: React.ReactNode }) {
-  const progress = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.timing(progress, { toValue: 1, duration: 350, useNativeDriver: true }).start();
-  }, [progress]);
-
-  return (
-    <Animated.View
-      style={{
-        opacity: progress,
-        transform: [{ translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
-      }}
-    >
-      {children}
-    </Animated.View>
   );
 }
 
@@ -664,17 +680,13 @@ function makeStyles(colors: ThemeColors) {
   placeCategory: { fontSize: 12, fontFamily: fontFamily.semiBold, color: colors.primary },
   placeOverview: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: spacing.xs + 2, lineHeight: 17 },
 
-  // 소개문 아래 카테고리별 부가 정보(이용시간/요금 등) — 라벨 칸을 고정 너비로
-  // 잡아서(장소 상세 화면의 infoLabel과 동일한 방침) 값이 항목마다 같은 위치에서 시작합니다.
-  placeExtraInfo: {
+  // 부가 정보 아래 접근성 아이콘 — 부가 정보가 실제로 표시될 때만(renderExtraInfo가
+  // 뭔가를 그렸을 때만) placeExtraInfo와 같은 방식의 구분선을 넣어 섹션을 나눕니다.
+  placeAccessibility: {
     marginTop: spacing.sm,
     paddingTop: spacing.sm,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    gap: spacing.xs,
   },
-  placeExtraInfoRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm },
-  placeExtraInfoLabel: { width: 64, fontSize: 11, fontFamily: fontFamily.semiBold, color: colors.textTertiary },
-  placeExtraInfoValue: { flex: 1, fontSize: 11, fontFamily: fontFamily.regular, color: colors.textSecondary },
   });
 }

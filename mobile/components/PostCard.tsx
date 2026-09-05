@@ -1,7 +1,7 @@
 import { useRouter } from "expo-router";
 import { CaretDownIcon, CaretUpIcon, ChatCircleTextIcon, XIcon } from "phosphor-react-native";
 import React, { useState } from "react";
-import { ActivityIndicator, Image, LayoutChangeEvent, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, LayoutChangeEvent, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
@@ -10,6 +10,7 @@ import { useAuth } from "../services/AuthContext";
 import { Alert } from "../services/crossPlatformAlert";
 import { useTheme } from "../services/ThemeContext";
 import { PostComment, PostItem } from "../types";
+import { FadeImage } from "./FadeImage";
 import { PhotoCarousel } from "./PhotoCarousel";
 
 /**
@@ -87,7 +88,7 @@ export function PostCard({ item, bodyNumberOfLines }: { item: PostItem; bodyNumb
   const renderComment = (comment: PostComment, isReply: boolean) => (
     <View key={comment.id} style={[styles.commentRow2, isReply && styles.replyRow]}>
       {comment.avatar_url ? (
-        <Image source={{ uri: comment.avatar_url }} style={styles.commentAvatar} />
+        <FadeImage source={{ uri: comment.avatar_url }} style={styles.commentAvatar} />
       ) : (
         <View style={styles.commentAvatarPlaceholder}>
           <Text style={styles.commentAvatarPlaceholderText}>{comment.username.charAt(0).toUpperCase()}</Text>
@@ -115,7 +116,7 @@ export function PostCard({ item, bodyNumberOfLines }: { item: PostItem; bodyNumb
             {photoWidth > 0 && (
               <PhotoCarousel pageWidth={photoWidth} pageCount={item.photo_urls.length}>
                 {item.photo_urls.map((url) => (
-                  <Image
+                  <FadeImage
                     key={url}
                     source={{ uri: url }}
                     style={{ width: photoWidth, height: photoWidth, backgroundColor: colors.background }}
@@ -128,7 +129,7 @@ export function PostCard({ item, bodyNumberOfLines }: { item: PostItem; bodyNumb
         <View style={styles.cardContent}>
           <View style={styles.cardHeader}>
             {item.avatar_url ? (
-              <Image source={{ uri: item.avatar_url }} style={styles.avatar} />
+              <FadeImage source={{ uri: item.avatar_url }} style={styles.avatar} />
             ) : (
               <View style={styles.avatarPlaceholder}>
                 <Text style={styles.avatarPlaceholderText}>{item.username.charAt(0).toUpperCase()}</Text>

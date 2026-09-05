@@ -12,6 +12,8 @@ import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, TouchableOpac
 import { Alert } from "../services/crossPlatformAlert";
 import DraggableFlatList, { ScaleDecorator } from "react-native-draggable-flatlist";
 import { AttractionCard } from "../components/AttractionCard";
+import { EXTRA_INFO_LABELS_BY_CATEGORY } from "../components/ExtraInfoList";
+import { FadeInView } from "../components/FadeInView";
 import { SaveCourseModal, SaveCourseParams } from "../components/SaveCourseModal";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
@@ -21,7 +23,7 @@ import { useAuth } from "../services/AuthContext";
 import { useCourseContext } from "../services/CourseContext";
 import { useTheme } from "../services/ThemeContext";
 import { storage } from "../services/storage";
-import { CourseStop } from "../types";
+import { Attraction, CourseStop } from "../types";
 
 export default function ResultsScreen() {
   const router = useRouter();
@@ -33,6 +35,13 @@ export default function ResultsScreen() {
   const [saveModalVisible, setSaveModalVisible] = useState(false);
   const [orderChanged, setOrderChanged] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
+  // 홈 화면 카드와 같은 부가 정보(이용시간/요금 등). 코스 생성 응답에는 안
+  // 실려 있어서(별도 API 절약), 여기서 스톱 개수만큼만 따로 조회합니다.
+  const [extraInfoMap, setExtraInfoMap] = useState<Record<string, Attraction["extra_info"]>>({});
+  // 소개문(추천 이유)은 이미 코스와 함께 와 있지만, 부가 정보는 따로 로딩되기
+  // 때문에 카드를 먼저 보여줬다가 부가 정보만 나중에 툭 튀어나오지 않도록,
+  // 부가 정보까지 다 준비된 뒤에야(홈 화면과 같은 방식) 목록을 부드럽게 보여줍니다.
+  const [extraInfoReady, setExtraInfoReady] = useState(false);
 
   useEffect(() => {
     // 앱을 재시작해 컨텍스트가 비어 있는 경우, 마지막으로 캐싱된 코스를 오프라인으로 복원
@@ -45,6 +54,24 @@ export default function ResultsScreen() {
       });
     }
   }, [course]);
+
+  useEffect(() => {
+    if (!course) return;
+    setExtraInfoReady(false);
+    const targets = course.stops
+      .map((s) => s.attraction)
+      .filter((a) => (a.extra_info?.length ?? 0) === 0 && EXTRA_INFO_LABELS_BY_CATEGORY[a.category]);
+    if (targets.length === 0) {
+      setExtraInfoReady(true);
+      return;
+    }
+    api
+      .getExtraInfo(targets.map((a) => ({ contentId: a.content_id, category: a.category })))
+      .then(setExtraInfoMap)
+      .catch(() => {})
+      .finally(() => setExtraInfoReady(true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [course?.course_id]);
 
   const openSaveModal = () => {
     if (!session) {
@@ -163,58 +190,65 @@ export default function ResultsScreen() {
         )}
       </View>
 
-      <DraggableFlatList
-        style={{ flex: 1 }}
-        containerStyle={{ flex: 1 }}
-        data={course.stops}
-        keyExtractor={(item) => item.attraction.content_id}
-        contentContainerStyle={{ paddingBottom: 90 }}
-        onDragEnd={handleDragEnd}
-        renderItem={({ item, drag, isActive, getIndex }) => (
-          <ScaleDecorator>
-            <Pressable
-              onLongPress={Platform.OS === "web" ? undefined : drag}
-              disabled={isActive}
-              style={isActive ? styles.dragging : undefined}
-            >
-              <AttractionCard
-                stop={item}
-                userType={course.generated_for}
-                actions={
-                  Platform.OS === "web" ? (
-                    <View style={styles.moveButtonGroup}>
-                      <Pressable
-                        style={styles.moveButton}
-                        disabled={getIndex() === 0}
-                        onPress={() => handleMoveStop(getIndex() ?? 0, -1)}
-                        accessibilityLabel="위로 순서 이동"
-                      >
-                        <CaretUpIcon
-                          size={14}
-                          color={getIndex() === 0 ? colors.textTertiary : colors.primary}
-                          weight="bold"
-                        />
-                      </Pressable>
-                      <Pressable
-                        style={styles.moveButton}
-                        disabled={getIndex() === course.stops.length - 1}
-                        onPress={() => handleMoveStop(getIndex() ?? 0, 1)}
-                        accessibilityLabel="아래로 순서 이동"
-                      >
-                        <CaretDownIcon
-                          size={14}
-                          color={getIndex() === course.stops.length - 1 ? colors.textTertiary : colors.primary}
-                          weight="bold"
-                        />
-                      </Pressable>
-                    </View>
-                  ) : undefined
-                }
-              />
-            </Pressable>
-          </ScaleDecorator>
-        )}
-      />
+      {extraInfoReady ? (
+        <FadeInView duration={250} style={{ flex: 1 }}>
+          <DraggableFlatList
+            style={{ flex: 1 }}
+            containerStyle={{ flex: 1 }}
+            data={course.stops}
+            keyExtractor={(item) => item.attraction.content_id}
+            contentContainerStyle={{ paddingBottom: 90 }}
+            onDragEnd={handleDragEnd}
+            renderItem={({ item, drag, isActive, getIndex }) => (
+              <ScaleDecorator>
+                <Pressable
+                  onLongPress={Platform.OS === "web" ? undefined : drag}
+                  disabled={isActive}
+                  style={isActive ? styles.dragging : undefined}
+                >
+                  <AttractionCard
+                    stop={item}
+                    userType={course.generated_for}
+                    extraInfo={extraInfoMap[item.attraction.content_id]}
+                    actions={
+                      Platform.OS === "web" ? (
+                        <View style={styles.moveButtonGroup}>
+                          <Pressable
+                            style={styles.moveButton}
+                            disabled={getIndex() === 0}
+                            onPress={() => handleMoveStop(getIndex() ?? 0, -1)}
+                            accessibilityLabel="위로 순서 이동"
+                          >
+                            <CaretUpIcon
+                              size={14}
+                              color={getIndex() === 0 ? colors.textTertiary : colors.primary}
+                              weight="bold"
+                            />
+                          </Pressable>
+                          <Pressable
+                            style={styles.moveButton}
+                            disabled={getIndex() === course.stops.length - 1}
+                            onPress={() => handleMoveStop(getIndex() ?? 0, 1)}
+                            accessibilityLabel="아래로 순서 이동"
+                          >
+                            <CaretDownIcon
+                              size={14}
+                              color={getIndex() === course.stops.length - 1 ? colors.textTertiary : colors.primary}
+                              weight="bold"
+                            />
+                          </Pressable>
+                        </View>
+                      ) : undefined
+                    }
+                  />
+                </Pressable>
+              </ScaleDecorator>
+            )}
+          />
+        </FadeInView>
+      ) : (
+        <ActivityIndicator style={{ marginTop: 20 }} color={colors.primary} />
+      )}
 
       <Pressable
         style={styles.mapButton}

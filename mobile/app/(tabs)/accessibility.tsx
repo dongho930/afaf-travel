@@ -1,8 +1,9 @@
 import { useRouter } from "expo-router";
 import { NotePencilIcon, XIcon, type Icon } from "phosphor-react-native";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   Image,
   Modal,
   Pressable,
@@ -14,6 +15,7 @@ import {
 } from "react-native";
 import { Alert } from "../../services/crossPlatformAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { FadeInView } from "../../components/FadeInView";
 import { ProfileButton } from "../../components/ProfileButton";
 import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
@@ -67,6 +69,48 @@ function tierLabel(score: number, colors: ThemeColors): { label: string; color: 
   if (score >= 80) return { label: "우수", color: colors.primary };
   if (score >= 60) return { label: "보통", color: colors.warning };
   return { label: "주의", color: colors.danger };
+}
+
+// 카테고리 탭 하나. 선택 상태가 바뀔 때 개수/라벨 글자색과 아래 점(dot)이
+// 즉시 뚝 바뀌지 않고 짧게(200ms) 보간되도록 각 탭이 자기만의 progress 값을
+// 갖습니다(아이콘 자체 색은 phosphor 아이콘이 Animated 색 보간을 지원하지
+// 않아 그대로 즉시 전환).
+function CategoryTabButton({
+  meta,
+  isSelected,
+  count,
+  onPress,
+  styles,
+  colors,
+}: {
+  meta: (typeof CATEGORY_META)[number];
+  isSelected: boolean;
+  count: number | "-";
+  onPress: () => void;
+  styles: ReturnType<typeof makeStyles>;
+  colors: ThemeColors;
+}) {
+  const progress = useRef(new Animated.Value(isSelected ? 1 : 0)).current;
+  useEffect(() => {
+    Animated.timing(progress, { toValue: isSelected ? 1 : 0, duration: 200, useNativeDriver: false }).start();
+  }, [isSelected, progress]);
+
+  const textColor = progress.interpolate({ inputRange: [0, 1], outputRange: [colors.textTertiary, colors.primary] });
+  const CategoryIcon = meta.icon;
+
+  return (
+    <Pressable style={({ pressed }) => [styles.categoryTab, pressed && styles.pressedFeedback]} onPress={onPress}>
+      <CategoryIcon size={24} color={isSelected ? colors.primary : colors.textTertiary} weight="bold" />
+      <Animated.Text style={[styles.categoryCount, { color: textColor }]}>{count}개</Animated.Text>
+      <Animated.Text
+        style={[styles.categoryLabel, { color: textColor, fontFamily: isSelected ? fontFamily.bold : fontFamily.regular }]}
+      >
+        {meta.label}
+      </Animated.Text>
+      {meta.isMock && <Text style={styles.mockBadge}>참고용</Text>}
+      <Animated.View style={[styles.categoryDot, { backgroundColor: colors.primary, opacity: progress }]} />
+    </Pressable>
+  );
 }
 
 /**
@@ -215,28 +259,20 @@ export default function AccessibilityScreen() {
           <ProfileButton />
         </View>
         <View style={styles.grid}>
-          {CATEGORY_META.map((c) => {
-            const isSelected = c.key === selectedCategory;
-            const CategoryIcon = c.icon;
-            return (
-              <Pressable
-                key={c.key}
-                style={styles.categoryTab}
-                onPress={() => {
-                  setSelectedCategory(c.key);
-                  setVisiblePlacesCount(PLACES_PAGE_SIZE); // 카테고리를 바꾸면 다시 5개부터
-                }}
-              >
-                <CategoryIcon size={24} color={isSelected ? colors.primary : colors.textTertiary} weight="bold" />
-                <Text style={[styles.categoryCount, isSelected && styles.categoryCountActive]}>
-                  {counts[c.key] ?? "-"}개
-                </Text>
-                <Text style={[styles.categoryLabel, isSelected && styles.categoryLabelActive]}>{c.label}</Text>
-                {c.isMock && <Text style={styles.mockBadge}>참고용</Text>}
-                <View style={[styles.categoryDot, isSelected && styles.categoryDotActive]} />
-              </Pressable>
-            );
-          })}
+          {CATEGORY_META.map((c) => (
+            <CategoryTabButton
+              key={c.key}
+              meta={c}
+              isSelected={c.key === selectedCategory}
+              count={counts[c.key] ?? "-"}
+              styles={styles}
+              colors={colors}
+              onPress={() => {
+                setSelectedCategory(c.key);
+                setVisiblePlacesCount(PLACES_PAGE_SIZE); // 카테고리를 바꾸면 다시 5개부터
+              }}
+            />
+          ))}
         </View>
 
         <View style={styles.legendRow}>
@@ -254,42 +290,45 @@ export default function AccessibilityScreen() {
           </View>
         </View>
 
-        <View style={styles.sectionTitleRow}>
-          <selectedMeta.icon size={16} color={colors.text} weight="bold" />
-          <Text style={styles.sectionTitle}>{selectedMeta.label} 주요 여행지</Text>
-        </View>
+        <FadeInView key={`places-title-${selectedCategory}`} duration={200} translateY={6}>
+          <View style={styles.sectionTitleRow}>
+            <selectedMeta.icon size={16} color={colors.text} weight="bold" />
+            <Text style={styles.sectionTitle}>{selectedMeta.label} 주요 여행지</Text>
+          </View>
+        </FadeInView>
         {selectedPlaces.length ? (
           selectedPlaces.slice(0, visiblePlacesCount).map((place) => {
             const tier = tierLabel(place.score, colors);
             return (
-              <Pressable
-                key={place.content_id || place.name}
-                style={styles.placeRow}
-                onPress={() => {
-                  if (!place.content_id) {
-                    Alert.alert(
-                      "잠시만요",
-                      "이 목록은 아직 예전 데이터라 상세 페이지 연결 정보가 없어요. 통계를 새로고침한 뒤 다시 시도해주세요."
-                    );
-                    return;
-                  }
-                  router.push({
-                    pathname: "/attraction-detail",
-                    params: { contentId: place.content_id, name: place.name },
-                  });
-                }}
-              >
-                <View style={[styles.scoreBadge, { backgroundColor: tier.color }]}>
-                  <Text style={styles.scoreBadgeText}>{place.score}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.placeName}>{place.name}</Text>
-                  <Text style={styles.placeAddress} numberOfLines={1}>
-                    {place.address}
-                  </Text>
-                </View>
-                <View style={[styles.tierBar, { backgroundColor: tier.color }]} />
-              </Pressable>
+              <FadeInView key={place.content_id || place.name} duration={250}>
+                <Pressable
+                  style={({ pressed }) => [styles.placeRow, pressed && styles.pressedFeedback]}
+                  onPress={() => {
+                    if (!place.content_id) {
+                      Alert.alert(
+                        "잠시만요",
+                        "이 목록은 아직 예전 데이터라 상세 페이지 연결 정보가 없어요. 통계를 새로고침한 뒤 다시 시도해주세요."
+                      );
+                      return;
+                    }
+                    router.push({
+                      pathname: "/attraction-detail",
+                      params: { contentId: place.content_id, name: place.name },
+                    });
+                  }}
+                >
+                  <View style={[styles.scoreBadge, { backgroundColor: tier.color }]}>
+                    <Text style={styles.scoreBadgeText}>{place.score}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.placeName}>{place.name}</Text>
+                    <Text style={styles.placeAddress} numberOfLines={1}>
+                      {place.address}
+                    </Text>
+                  </View>
+                  <View style={[styles.tierBar, { backgroundColor: tier.color }]} />
+                </Pressable>
+              </FadeInView>
             );
           })
         ) : (
@@ -300,7 +339,7 @@ export default function AccessibilityScreen() {
 
         {visiblePlacesCount < selectedPlaces.length && (
           <Pressable
-            style={styles.moreButton}
+            style={({ pressed }) => [styles.moreButton, pressed && styles.pressedFeedback]}
             onPress={() => setVisiblePlacesCount((c) => c + PLACES_PAGE_SIZE)}
           >
             <Text style={styles.moreButtonText}>더보기</Text>
@@ -310,39 +349,48 @@ export default function AccessibilityScreen() {
         <View style={styles.divider} />
 
         <View style={styles.reportHeaderRow}>
-          <View style={styles.reportTitleRow}>
-            <NotePencilIcon size={16} color={colors.text} weight="bold" />
-            <Text style={styles.sectionTitle}>{selectedMeta.label} 최근 제보</Text>
-          </View>
-          <Pressable style={styles.reportButton} onPress={openReportModal}>
+          <FadeInView key={`reports-title-${selectedCategory}`} duration={200} translateY={6}>
+            <View style={styles.reportTitleRow}>
+              <NotePencilIcon size={16} color={colors.text} weight="bold" />
+              <Text style={styles.sectionTitle}>{selectedMeta.label} 최근 제보</Text>
+            </View>
+          </FadeInView>
+          <Pressable
+            style={({ pressed }) => [styles.reportButton, pressed && styles.pressedFeedback]}
+            onPress={openReportModal}
+          >
             <Text style={styles.reportButtonText}>제보하기</Text>
           </Pressable>
         </View>
 
         {loadingReports ? (
-          <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} />
+          <FadeInView duration={200} translateY={0}>
+            <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} />
+          </FadeInView>
         ) : reports.length === 0 ? (
           <Text style={styles.emptyText}>아직 {selectedMeta.label} 관련 제보가 없어요. 첫 제보를 남겨보세요!</Text>
         ) : (
           reports.map((r) => (
-            <View key={r.id} style={styles.reportCard}>
-              <View style={styles.reportCardHeader}>
-                {r.avatar_url ? (
-                  <Image source={{ uri: r.avatar_url }} style={styles.reportAvatar} />
-                ) : (
-                  <View style={styles.reportAvatarPlaceholder}>
-                    <Text style={styles.reportAvatarPlaceholderText}>
-                      {r.username.charAt(0).toUpperCase()}
-                    </Text>
-                  </View>
-                )}
-                <Text style={styles.reportAuthor}>{r.username}</Text>
-                <Text style={styles.reportPlaceName} numberOfLines={1}>
-                  · {r.place_name}
-                </Text>
+            <FadeInView key={r.id} duration={250}>
+              <View style={styles.reportCard}>
+                <View style={styles.reportCardHeader}>
+                  {r.avatar_url ? (
+                    <Image source={{ uri: r.avatar_url }} style={styles.reportAvatar} />
+                  ) : (
+                    <View style={styles.reportAvatarPlaceholder}>
+                      <Text style={styles.reportAvatarPlaceholderText}>
+                        {r.username.charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
+                  <Text style={styles.reportAuthor}>{r.username}</Text>
+                  <Text style={styles.reportPlaceName} numberOfLines={1}>
+                    · {r.place_name}
+                  </Text>
+                </View>
+                <Text style={styles.reportBody}>{r.body}</Text>
               </View>
-              <Text style={styles.reportBody}>{r.body}</Text>
-            </View>
+            </FadeInView>
           ))
         )}
       </ScrollView>
@@ -362,7 +410,10 @@ export default function AccessibilityScreen() {
               {selectedPlace ? (
                 <View style={styles.selectedPlaceChip}>
                   <Text style={styles.selectedPlaceChipText}>{selectedPlace.name}</Text>
-                  <Pressable onPress={() => setSelectedPlace(null)}>
+                  <Pressable
+                    style={({ pressed }) => pressed && styles.pressedFeedback}
+                    onPress={() => setSelectedPlace(null)}
+                  >
                     <XIcon size={13} color={colors.primary} weight="bold" />
                   </Pressable>
                 </View>
@@ -379,7 +430,7 @@ export default function AccessibilityScreen() {
                   {placeSearchResults.map((p) => (
                     <Pressable
                       key={p.content_id}
-                      style={styles.searchResultRow}
+                      style={({ pressed }) => [styles.searchResultRow, pressed && styles.pressedFeedback]}
                       onPress={() => {
                         setSelectedPlace(p);
                         setPlaceSearchResults([]);
@@ -402,7 +453,11 @@ export default function AccessibilityScreen() {
                   return (
                     <Pressable
                       key={c.key}
-                      style={[styles.reportCategoryChip, chipSelected && styles.reportCategoryChipSelected]}
+                      style={({ pressed }) => [
+                        styles.reportCategoryChip,
+                        chipSelected && styles.reportCategoryChipSelected,
+                        pressed && styles.pressedFeedback,
+                      ]}
                       onPress={() => setReportCategory(c.key)}
                     >
                       <ChipIcon size={12} color={chipSelected ? colors.onPrimary : colors.textSecondary} weight="bold" />
@@ -430,11 +485,18 @@ export default function AccessibilityScreen() {
               />
 
               <View style={styles.modalButtonRow}>
-                <Pressable style={styles.modalCancelButton} onPress={() => setReportModalVisible(false)}>
+                <Pressable
+                  style={({ pressed }) => [styles.modalCancelButton, pressed && styles.pressedFeedback]}
+                  onPress={() => setReportModalVisible(false)}
+                >
                   <Text style={styles.modalCancelButtonText}>취소</Text>
                 </Pressable>
                 <Pressable
-                  style={[styles.modalSubmitButton, submittingReport && styles.buttonDisabled]}
+                  style={({ pressed }) => [
+                    styles.modalSubmitButton,
+                    submittingReport && styles.buttonDisabled,
+                    pressed && !submittingReport && styles.pressedFeedback,
+                  ]}
                   onPress={handleSubmitReport}
                   disabled={submittingReport}
                 >
@@ -455,6 +517,9 @@ export default function AccessibilityScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
+  // Pressable은 TouchableOpacity와 달리 기본 눌림 피드백이 없어서, 눌렀을 때
+  // 살짝 옅어지도록 공통으로 얹어주는 스타일입니다.
+  pressedFeedback: { opacity: 0.6 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   container: { padding: spacing.xl, paddingBottom: spacing.xxl + spacing.sm },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.xl },
@@ -463,11 +528,8 @@ function makeStyles(colors: ThemeColors) {
   grid: { flexDirection: "row", flexWrap: "wrap", rowGap: spacing.lg, marginBottom: spacing.xl - 4 },
   categoryTab: { width: "33.33%", alignItems: "center", gap: spacing.xs + 2 },
   categoryCount: { fontSize: 13, fontFamily: fontFamily.extraBold, color: colors.textTertiary, fontVariant: ["tabular-nums"] },
-  categoryCountActive: { color: colors.primary },
   categoryLabel: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary },
-  categoryLabelActive: { color: colors.primary, fontFamily: fontFamily.bold },
-  categoryDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: "transparent", marginTop: -4 },
-  categoryDotActive: { backgroundColor: colors.primary },
+  categoryDot: { width: 4, height: 4, borderRadius: 2, marginTop: -4 },
   mockBadge: { fontSize: 10, color: colors.warning, fontFamily: fontFamily.semiBold },
 
   legendRow: { flexDirection: "row", gap: spacing.lg, marginBottom: spacing.xl },

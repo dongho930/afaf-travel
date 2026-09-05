@@ -48,7 +48,11 @@ export function BottomTabBar() {
         const isActive = tab.path === "/" ? pathname === "/" : pathname.startsWith(tab.path);
         const tintColor = isActive ? colors.primary : colors.textTertiary;
         return (
-          <Pressable key={tab.path} style={styles.tabButton} onPress={() => router.push(tab.path)}>
+          <Pressable
+            key={tab.path}
+            style={({ pressed }) => [styles.tabButton, pressed && styles.tabButtonPressed]}
+            onPress={() => router.push(tab.path)}
+          >
             <tab.Icon color={tintColor} size={22} />
             <Text style={[styles.label, { color: tintColor }]}>{tab.label}</Text>
           </Pressable>
@@ -65,5 +69,6 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
   },
   tabButton: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.xs, paddingVertical: 2 },
+  tabButtonPressed: { opacity: 0.6 },
   label: { fontSize: 11, fontFamily: fontFamily.semiBold },
 });

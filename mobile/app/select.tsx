@@ -1,6 +1,6 @@
 import { useRouter } from "expo-router";
 import { CheckIcon } from "phosphor-react-native";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -13,6 +13,8 @@ import {
 import { Alert } from "../services/crossPlatformAlert";
 
 import { AccessibilityIcons } from "../components/AccessibilityIcons";
+import { EXTRA_INFO_LABELS_BY_CATEGORY, renderExtraInfo } from "../components/ExtraInfoList";
+import { FadeInView } from "../components/FadeInView";
 import { PhotoCardHeader } from "../components/PhotoCardHeader";
 import { getCongestionDisplay } from "../constants/congestion";
 import { fontFamily } from "../constants/fonts";
@@ -22,7 +24,7 @@ import { api } from "../services/api";
 import { useCourseContext } from "../services/CourseContext";
 import { storage } from "../services/storage";
 import { useTheme } from "../services/ThemeContext";
-import { PlaceCandidate, UserType } from "../types";
+import { Attraction, PlaceCandidate, UserType } from "../types";
 
 /**
  * /input에서 추천받은 장소 후보(recommendations) 중, 사용자가 실제로 가고 싶은
@@ -36,6 +38,29 @@ export default function SelectPlacesScreen() {
   const { userType, sigunguCd, recommendations, pendingQueryText, setCourse } = useCourseContext();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // 홈 화면 카드와 같은 부가 정보(이용시간/요금 등). 추천 후보 응답에는 안
+  // 실려 있어서(별도 API 절약), 여기서 후보 개수만큼만 따로 조회합니다.
+  const [extraInfoMap, setExtraInfoMap] = useState<Record<string, Attraction["extra_info"]>>({});
+  // 소개문(추천 이유)은 이미 후보와 함께 와 있지만, 부가 정보는 따로 로딩되기
+  // 때문에 카드를 먼저 보여줬다가 부가 정보만 나중에 툭 튀어나오지 않도록,
+  // 부가 정보까지 다 준비된 뒤에야(홈 화면과 같은 방식) 목록을 부드럽게 보여줍니다.
+  const [extraInfoReady, setExtraInfoReady] = useState(false);
+
+  useEffect(() => {
+    setExtraInfoReady(false);
+    const targets = recommendations
+      .map((c) => c.attraction)
+      .filter((a) => (a.extra_info?.length ?? 0) === 0 && EXTRA_INFO_LABELS_BY_CATEGORY[a.category]);
+    if (targets.length === 0) {
+      setExtraInfoReady(true);
+      return;
+    }
+    api
+      .getExtraInfo(targets.map((a) => ({ contentId: a.content_id, category: a.category })))
+      .then(setExtraInfoMap)
+      .catch(() => {})
+      .finally(() => setExtraInfoReady(true));
+  }, [recommendations]);
 
   const toggle = (contentId: string) => {
     setSelectedIds((prev) => {
@@ -87,20 +112,27 @@ export default function SelectPlacesScreen() {
         "{pendingQueryText}" 요청에 맞춰 추천된 장소예요. 선택한 곳들로 코스를 만들어드려요.
       </Text>
 
-      <FlatList
-        data={recommendations}
-        keyExtractor={(item) => item.attraction.content_id}
-        contentContainerStyle={{ paddingBottom: 110 }}
-        showsVerticalScrollIndicator={false}
-        renderItem={({ item }) => (
-          <PlaceOptionCard
-            candidate={item}
-            userType={userType}
-            selected={selectedIds.has(item.attraction.content_id)}
-            onToggle={() => toggle(item.attraction.content_id)}
+      {extraInfoReady ? (
+        <FadeInView duration={250} style={{ flex: 1 }}>
+          <FlatList
+            data={recommendations}
+            keyExtractor={(item) => item.attraction.content_id}
+            contentContainerStyle={{ paddingBottom: 110 }}
+            showsVerticalScrollIndicator={false}
+            renderItem={({ item }) => (
+              <PlaceOptionCard
+                candidate={item}
+                userType={userType}
+                selected={selectedIds.has(item.attraction.content_id)}
+                onToggle={() => toggle(item.attraction.content_id)}
+                extraInfo={extraInfoMap[item.attraction.content_id]}
+              />
+            )}
           />
-        )}
-      />
+        </FadeInView>
+      ) : (
+        <ActivityIndicator style={{ marginTop: 20 }} color={colors.primary} />
+      )}
 
       <View style={styles.footer}>
         <Text style={styles.selectionCount}>{selectedIds.size}곳 선택됨</Text>
@@ -127,16 +159,20 @@ function PlaceOptionCard({
   userType,
   selected,
   onToggle,
+  extraInfo,
 }: {
   candidate: PlaceCandidate;
   userType: UserType;
   selected: boolean;
   onToggle: () => void;
+  // 홈 화면 카드와 같은 형식의 부가 정보(이용시간/요금 등).
+  extraInfo?: Attraction["extra_info"];
 }) {
   const router = useRouter();
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const { attraction, reason } = candidate;
+  const placeWithExtraInfo = extraInfo?.length ? { ...attraction, extra_info: extraInfo } : attraction;
   return (
     <Pressable
       style={[styles.card, selected && styles.cardSelected]}
@@ -163,7 +199,17 @@ function PlaceOptionCard({
       <View style={styles.body}>
         <Text style={styles.category}>{attraction.category}</Text>
         <Text style={styles.reason}>{reason}</Text>
-        <AccessibilityIcons features={attraction.accessibility} userType={userType} />
+        {(() => {
+          const extraInfoNode = renderExtraInfo(placeWithExtraInfo, colors);
+          return (
+            <>
+              {extraInfoNode}
+              <View style={extraInfoNode ? styles.accessibilityDivider : undefined}>
+                <AccessibilityIcons features={attraction.accessibility} userType={userType} />
+              </View>
+            </>
+          );
+        })()}
         <Pressable
           style={styles.detailButton}
           onPress={() =>
@@ -217,6 +263,9 @@ function makeStyles(colors: ThemeColors) {
   body: { padding: spacing.md + 2 },
   category: { fontSize: 12, color: colors.primary, fontFamily: fontFamily.semiBold },
   reason: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: spacing.xs + 2, lineHeight: 18 },
+  // 부가 정보 아래 접근성 아이콘 — 부가 정보가 실제로 표시될 때만 구분선을 넣어
+  // 섹션을 나눕니다 (홈 화면 카드와 동일한 방식).
+  accessibilityDivider: { marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border },
   detailButton: { alignSelf: "flex-start", marginTop: spacing.sm + 2 },
   detailButtonText: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.primary },
   footer: {

@@ -1,8 +1,9 @@
 import { useRouter } from "expo-router";
 import { CheckIcon, MapPinIcon, MicrophoneIcon, SparkleIcon, type Icon } from "phosphor-react-native";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   FlatList,
   Modal,
   Pressable,
@@ -14,6 +15,7 @@ import {
 } from "react-native";
 import { Alert } from "../../services/crossPlatformAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { FadeInView } from "../../components/FadeInView";
 import { ProfileButton } from "../../components/ProfileButton";
 import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
@@ -51,6 +53,49 @@ try {
   VoiceInputButton = require("../../components/VoiceInputButton").VoiceInputButton;
 } catch {
   VoiceInputButton = null;
+}
+
+// 접근성 유형 탭 하나. 선택 상태가 바뀔 때 라벨 글자색과 아래 점(dot)이
+// 즉시 뚝 바뀌지 않고 짧게(200ms) 보간되도록 각 탭이 자기만의 progress 값을
+// 갖습니다(아이콘 자체 색은 phosphor 아이콘이 Animated 색 보간을 지원하지
+// 않아 그대로 즉시 전환 — 다른 탭 화면과 동일한 처리 방식).
+function TypeTabButton({
+  option,
+  isSelected,
+  onPress,
+  styles,
+  colors,
+}: {
+  option: (typeof OPTIONS)[number];
+  isSelected: boolean;
+  onPress: () => void;
+  styles: ReturnType<typeof makeStyles>;
+  colors: ThemeColors;
+}) {
+  const progress = useRef(new Animated.Value(isSelected ? 1 : 0)).current;
+  useEffect(() => {
+    Animated.timing(progress, { toValue: isSelected ? 1 : 0, duration: 200, useNativeDriver: false }).start();
+  }, [isSelected, progress]);
+
+  const textColor = progress.interpolate({ inputRange: [0, 1], outputRange: [colors.textTertiary, colors.primary] });
+  const TypeIcon = option.icon;
+
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.typeTab, pressed && styles.pressedFeedback]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${USER_TYPE_LABELS[option.type]}, ${option.desc}`}
+    >
+      <TypeIcon size={24} color={isSelected ? colors.primary : colors.textTertiary} weight="bold" />
+      <Animated.Text
+        style={[styles.typeLabel, { color: textColor, fontFamily: isSelected ? fontFamily.bold : fontFamily.regular }]}
+      >
+        {USER_TYPE_LABELS[option.type]}
+      </Animated.Text>
+      <Animated.View style={[styles.typeDot, { backgroundColor: colors.primary, opacity: progress }]} />
+    </Pressable>
+  );
 }
 
 /**
@@ -144,32 +189,25 @@ export default function PlannerScreen() {
             </View>
             <Text style={[styles.fieldLabel, styles.typeFieldLabel]}>접근성 유형</Text>
             <View style={styles.typeGrid}>
-              {OPTIONS.map((opt) => {
-                const TypeIcon = opt.icon;
-                const isSelected = userType === opt.type;
-                return (
-                  <Pressable
-                    key={opt.type}
-                    style={styles.typeTab}
-                    onPress={() => handleSelectType(opt.type)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${USER_TYPE_LABELS[opt.type]}, ${opt.desc}`}
-                  >
-                    <TypeIcon size={24} color={isSelected ? colors.primary : colors.textTertiary} weight="bold" />
-                    <Text style={[styles.typeLabel, isSelected && styles.typeLabelActive]}>
-                      {USER_TYPE_LABELS[opt.type]}
-                    </Text>
-                    <View style={[styles.typeDot, isSelected && styles.typeDotActive]} />
-                  </Pressable>
-                );
-              })}
+              {OPTIONS.map((opt) => (
+                <TypeTabButton
+                  key={opt.type}
+                  option={opt}
+                  isSelected={userType === opt.type}
+                  styles={styles}
+                  colors={colors}
+                  onPress={() => handleSelectType(opt.type)}
+                />
+              ))}
             </View>
 
             {selectedOption && (
-              <View style={styles.typeDescRow}>
-                <selectedOption.icon size={21} color={colors.primary} weight="bold" />
-                <Text style={styles.typeDescText}>{selectedOption.desc}</Text>
-              </View>
+              <FadeInView key={`type-desc-${userType}`} duration={200} translateY={6}>
+                <View style={styles.typeDescRow}>
+                  <selectedOption.icon size={21} color={colors.primary} weight="bold" />
+                  <Text style={styles.typeDescText}>{selectedOption.desc}</Text>
+                </View>
+              </FadeInView>
             )}
 
             <Text style={styles.fieldLabel}>지역</Text>
@@ -180,7 +218,9 @@ export default function PlannerScreen() {
             </TouchableOpacity>
 
             <Text style={styles.fieldLabel}>어떤 여행을 원하세요?</Text>
-            <Text style={styles.hint}>예: "{exampleQuery}"</Text>
+            <FadeInView key={`hint-${userType}`} duration={200} translateY={4}>
+              <Text style={styles.hint}>예: "{exampleQuery}"</Text>
+            </FadeInView>
             <TextInput
               style={styles.input}
               multiline
@@ -287,12 +327,11 @@ function makeStyles(colors: ThemeColors) {
   fieldLabel: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.text, marginBottom: spacing.sm + 2, marginTop: spacing.xs },
   typeFieldLabel: { marginBottom: spacing.xxl },
 
+  pressedFeedback: { opacity: 0.6 },
   typeGrid: { flexDirection: "row", flexWrap: "wrap", rowGap: spacing.lg, marginBottom: spacing.lg },
   typeTab: { width: "25%", alignItems: "center", gap: spacing.xs + 2 },
   typeLabel: { fontSize: 11.5, fontFamily: fontFamily.regular, color: colors.textTertiary, textAlign: "center" },
-  typeLabelActive: { color: colors.primary, fontFamily: fontFamily.bold },
-  typeDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: "transparent", marginTop: -4 },
-  typeDotActive: { backgroundColor: colors.primary },
+  typeDot: { width: 4, height: 4, borderRadius: 2, marginTop: -4 },
 
   regionButton: {
     flexDirection: "row",
@@ -310,7 +349,7 @@ function makeStyles(colors: ThemeColors) {
   regionButtonChevron: { fontSize: 13, color: colors.primary, fontFamily: fontFamily.semiBold },
   typeDescRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     gap: spacing.xs + 2,
     marginBottom: spacing.xl - 4,
   },

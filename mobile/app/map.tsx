@@ -345,7 +345,7 @@ export default function MapScreen() {
           </ScrollView>
 
           <Pressable
-            style={styles.navButton}
+            style={({ pressed }) => [styles.navButton, pressed && styles.pressedFeedback]}
             onPress={() => {
               const first = course.stops[0]?.attraction;
               if (!first) return;
@@ -389,6 +389,7 @@ export default function MapScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
+  pressedFeedback: { opacity: 0.6 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, backgroundColor: colors.background },
   emptyText: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary, textAlign: "center", lineHeight: 20 },
   fullOverlay: {

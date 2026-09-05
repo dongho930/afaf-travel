@@ -12,9 +12,10 @@ import {
   UsersIcon,
   UsersThreeIcon,
 } from "phosphor-react-native";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   FlatList,
   Modal,
   StyleSheet,
@@ -25,7 +26,9 @@ import {
 } from "react-native";
 import { Alert } from "../../services/crossPlatformAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { AnimatedChip } from "../../components/AnimatedChip";
 import { DateRangePickerModal } from "../../components/DateRangePickerModal";
+import { FadeInView } from "../../components/FadeInView";
 import { ProfileButton } from "../../components/ProfileButton";
 import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
@@ -64,6 +67,50 @@ const REPORT_CATEGORY_META: Record<ReportCategory, { icon: Icon; label: string }
 
 type StatSection = "trips" | "reviews" | "reports" | "visited";
 
+// 상단 통계 탭 하나(방문한 여행지/저장한 경로/리뷰 작성/접근성 제보). 선택
+// 상태가 바뀔 때 숫자/라벨 글자색과 아래 점(dot)이 즉시 뚝 바뀌지 않고
+// 짧게(200ms) 보간되도록 각 탭이 자기만의 progress 값을 갖습니다(아이콘 색은
+// 다른 탭 화면과 동일하게 즉시 전환).
+function StatTabButton({
+  icon: TabIcon,
+  value,
+  label,
+  isActive,
+  onPress,
+  styles,
+  colors,
+}: {
+  icon: Icon;
+  value: number;
+  label: string;
+  isActive: boolean;
+  onPress: () => void;
+  styles: ReturnType<typeof makeStyles>;
+  colors: ThemeColors;
+}) {
+  const progress = useRef(new Animated.Value(isActive ? 1 : 0)).current;
+  useEffect(() => {
+    Animated.timing(progress, { toValue: isActive ? 1 : 0, duration: 200, useNativeDriver: false }).start();
+  }, [isActive, progress]);
+
+  const textColor = progress.interpolate({ inputRange: [0, 1], outputRange: [colors.textTertiary, colors.primary] });
+
+  return (
+    <TouchableOpacity style={styles.statTab} onPress={onPress}>
+      <TabIcon size={24} color={isActive ? colors.primary : colors.textTertiary} weight="bold" />
+      <View style={styles.statTextGroup}>
+        <Animated.Text style={[styles.statValue, { color: textColor }]}>{value}</Animated.Text>
+        <Animated.Text
+          style={[styles.statLabel, { color: textColor, fontFamily: isActive ? fontFamily.bold : fontFamily.regular }]}
+        >
+          {label}
+        </Animated.Text>
+      </View>
+      <Animated.View style={[styles.statDot, { backgroundColor: colors.primary, opacity: progress }]} />
+    </TouchableOpacity>
+  );
+}
+
 function formatDateRange(start?: string | null, end?: string | null): string | null {
   if (!start && !end) return null;
   if (start && end) return `${start} ~ ${end}`;
@@ -101,6 +148,16 @@ export default function TripsScreen() {
   const [editingVisitedDate, setEditingVisitedDate] = useState<string | null>(null);
   const [visitedDateModalVisible, setVisitedDateModalVisible] = useState(false);
 
+  // FlatList는 화면 밖으로 나간 행을 가상화로 언마운트했다가 스크롤로
+  // 되돌아오면 다시 마운트합니다. 한 번이라도 보여준 행은 기억해뒀다가 그
+  // 다음부터는(같은 방문/섹션 안에서는) 애니메이션 없이 바로 보여줘서 스크롤할
+  // 때마다 깜빡이지 않게 하고, 탭에 새로 들어오거나 다른 섹션(리뷰/제보/방문)
+  // 으로 바꿀 때는 이 기록을 비워서 그 목록이 다시 한 번 페이드인되게 합니다.
+  const animatedRowIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    animatedRowIdsRef.current = new Set();
+  }, [activeSection]);
+
   const [editingTrip, setEditingTrip] = useState<TripSummary | null>(null);
   const [editName, setEditName] = useState("");
   const [editCategory, setEditCategory] = useState<CourseCategory>("가족");
@@ -133,6 +190,7 @@ export default function TripsScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      animatedRowIdsRef.current = new Set();
       load();
     }, [load])
   );
@@ -367,7 +425,9 @@ export default function TripsScreen() {
   const StatsHeader = (
     <View style={styles.headerArea}>
       <View style={styles.header}>
-        <Text style={styles.title}>{TOP_TITLE[activeSection]}</Text>
+        <FadeInView key={`top-title-${activeSection}`} duration={200} translateY={6}>
+          <Text style={styles.title}>{TOP_TITLE[activeSection]}</Text>
+        </FadeInView>
         <ProfileButton />
       </View>
 
@@ -379,32 +439,36 @@ export default function TripsScreen() {
             { key: "reviews", icon: ChatCircleTextIcon, value: reviewCount, label: "리뷰 작성" },
             { key: "reports", icon: userTypeIcon.wheelchair, value: reportCount, label: "접근성 제보" },
           ];
-          return tabs.map((t) => {
-            const isActive = activeSection === t.key;
-            const TabIcon = t.icon;
-            return (
-              <TouchableOpacity key={t.key} style={styles.statTab} onPress={() => selectSection(t.key)}>
-                <TabIcon size={24} color={isActive ? colors.primary : colors.textTertiary} weight="bold" />
-                <View style={styles.statTextGroup}>
-                  <Text style={[styles.statValue, isActive && styles.statValueActive]}>{t.value}</Text>
-                  <Text style={[styles.statLabel, isActive && styles.statLabelActive]}>{t.label}</Text>
-                </View>
-                <View style={[styles.statDot, isActive && styles.statDotActive]} />
-              </TouchableOpacity>
-            );
-          });
+          return tabs.map((t) => (
+            <StatTabButton
+              key={t.key}
+              icon={t.icon}
+              value={t.value}
+              label={t.label}
+              isActive={activeSection === t.key}
+              styles={styles}
+              colors={colors}
+              onPress={() => selectSection(t.key)}
+            />
+          ));
         })()}
       </View>
 
       <View style={styles.sectionTitleRow}>
-        <Text style={styles.sectionTitle}>{SECTION_TITLE[activeSection]}</Text>
+        <FadeInView key={`section-title-${activeSection}`} duration={200} translateY={6}>
+          <Text style={styles.sectionTitle}>{SECTION_TITLE[activeSection]}</Text>
+        </FadeInView>
         {activeSection !== "trips" && (
           <TouchableOpacity onPress={() => setActiveSection("trips")}>
             <Text style={styles.backLink}>← 여행 목록으로</Text>
           </TouchableOpacity>
         )}
       </View>
-      {sectionLoading && <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} />}
+      {sectionLoading && (
+        <FadeInView duration={200} translateY={0}>
+          <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} />
+        </FadeInView>
+      )}
     </View>
   );
 
@@ -602,7 +666,13 @@ export default function TripsScreen() {
             </View>
           ) : null
         }
-        renderItem={renderItem}
+        renderItem={(info) => {
+          const rowKey = keyExtractor(info.item);
+          const alreadyShown = animatedRowIdsRef.current.has(rowKey);
+          animatedRowIdsRef.current.add(rowKey);
+          const node = renderItem(info);
+          return alreadyShown ? node : <FadeInView duration={250}>{node}</FadeInView>;
+        }}
       />
 
       <Modal visible={!!editingTrip} animationType="slide" transparent onRequestClose={() => setEditingTrip(null)}>
@@ -626,15 +696,20 @@ export default function TripsScreen() {
             <Text style={styles.fieldLabel}>분류</Text>
             <View style={styles.categoryRow}>
               {COURSE_CATEGORIES.map((c) => (
-                <TouchableOpacity
+                <AnimatedChip
                   key={c}
-                  style={[styles.categoryChip, editCategory === c && styles.categoryChipSelected]}
+                  selected={editCategory === c}
                   onPress={() => setEditCategory(c)}
-                >
-                  <Text style={[styles.categoryChipText, editCategory === c && styles.categoryChipTextSelected]}>
-                    {c}
-                  </Text>
-                </TouchableOpacity>
+                  label={c}
+                  style={styles.categoryChip}
+                  textStyle={styles.categoryChipText}
+                  backgroundColor={colors.surface}
+                  selectedBackgroundColor={colors.primary}
+                  borderColor={colors.border}
+                  selectedBorderColor={colors.primary}
+                  textColor={colors.textSecondary}
+                  selectedTextColor={colors.onPrimary}
+                />
               ))}
             </View>
             {editCategory === "기타" && (
@@ -711,11 +786,8 @@ function makeStyles(colors: ThemeColors) {
   statTab: { flex: 1, alignItems: "center", gap: spacing.sm + 2 },
   statTextGroup: { alignItems: "center", gap: 2 },
   statValue: { fontSize: 15, fontFamily: fontFamily.extraBold, color: colors.textTertiary, fontVariant: ["tabular-nums"] },
-  statValueActive: { color: colors.primary },
   statLabel: { fontSize: 11, fontFamily: fontFamily.regular, color: colors.textTertiary, textAlign: "center" },
-  statLabelActive: { color: colors.primary, fontFamily: fontFamily.bold },
-  statDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: "transparent", marginTop: -2 },
-  statDotActive: { backgroundColor: colors.primary },
+  statDot: { width: 4, height: 4, borderRadius: 2, marginTop: -2 },
 
   sectionTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.xs },
   sectionTitle: { fontSize: 16, fontFamily: fontFamily.extraBold, color: colors.text },

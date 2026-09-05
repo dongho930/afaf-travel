@@ -33,6 +33,7 @@ import {
 import { Alert } from "../services/crossPlatformAlert";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AccessibilityIcons } from "../components/AccessibilityIcons";
+import { FadeInView } from "../components/FadeInView";
 import { PostCard } from "../components/PostCard";
 import { SaveCourseModal, SaveCourseParams } from "../components/SaveCourseModal";
 import { fontFamily } from "../constants/fonts";
@@ -366,19 +367,31 @@ export default function AttractionDetailScreen() {
       </View>
 
       <View style={styles.actionButtonRow}>
-        <Pressable style={styles.directionsButton} onPress={handleOpenDirections}>
+        <Pressable
+          style={({ pressed }) => [styles.directionsButton, pressed && styles.pressedFeedback]}
+          onPress={handleOpenDirections}
+        >
           <MapTrifoldIcon size={16} color={colors.primary} weight="bold" />
           <Text style={styles.directionsButtonText}>길찾기</Text>
         </Pressable>
-        <Pressable style={styles.directionsButton} onPress={() => setTransitModalVisible(true)}>
+        <Pressable
+          style={({ pressed }) => [styles.directionsButton, pressed && styles.pressedFeedback]}
+          onPress={() => setTransitModalVisible(true)}
+        >
           <TrainIcon size={16} color={colors.primary} weight="bold" />
           <Text style={styles.directionsButtonText}>교통편 예약</Text>
         </Pressable>
-        <Pressable style={styles.directionsButton} onPress={handleOpenPosts}>
+        <Pressable
+          style={({ pressed }) => [styles.directionsButton, pressed && styles.pressedFeedback]}
+          onPress={handleOpenPosts}
+        >
           <NotebookIcon size={16} color={colors.primary} weight="bold" />
           <Text style={styles.directionsButtonText}>게시물</Text>
         </Pressable>
-        <Pressable style={styles.directionsButton} onPress={openSaveModal}>
+        <Pressable
+          style={({ pressed }) => [styles.directionsButton, pressed && styles.pressedFeedback]}
+          onPress={openSaveModal}
+        >
           <FloppyDiskIcon size={16} color={colors.primary} weight="bold" />
           <Text style={styles.directionsButtonText}>저장</Text>
         </Pressable>
@@ -403,40 +416,42 @@ export default function AttractionDetailScreen() {
       )}
 
       {nearby.length > 0 && (
-        <View style={styles.nearbySection}>
-          <View style={styles.nearbySectionTitleRow}>
-            <MapPinIcon size={14} color={colors.text} weight="bold" />
-            <Text style={styles.nearbySectionTitle}>근처 가볼 만한 곳</Text>
+        <FadeInView duration={300}>
+          <View style={styles.nearbySection}>
+            <View style={styles.nearbySectionTitleRow}>
+              <MapPinIcon size={14} color={colors.text} weight="bold" />
+              <Text style={styles.nearbySectionTitle}>근처 가볼 만한 곳</Text>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nearbyRow}>
+              {nearby.map((n) => (
+                <Pressable
+                  key={n.content_id}
+                  style={({ pressed }) => [styles.nearbyCard, pressed && styles.pressedFeedback]}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/attraction-detail",
+                      params: { contentId: n.content_id, name: n.name },
+                    })
+                  }
+                >
+                  {n.image_url ? (
+                    <Image source={{ uri: n.image_url }} style={styles.nearbyImage} />
+                  ) : (
+                    <View style={[styles.nearbyImage, styles.nearbyImagePlaceholder]}>
+                      <MapPinIcon size={24} color={colors.primary} weight="bold" />
+                    </View>
+                  )}
+                  <Text style={styles.nearbyName} numberOfLines={1}>
+                    {n.name}
+                  </Text>
+                  <Text style={styles.nearbyMeta}>
+                    {n.category} · {n.distance_km}km
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nearbyRow}>
-            {nearby.map((n) => (
-              <Pressable
-                key={n.content_id}
-                style={styles.nearbyCard}
-                onPress={() =>
-                  router.push({
-                    pathname: "/attraction-detail",
-                    params: { contentId: n.content_id, name: n.name },
-                  })
-                }
-              >
-                {n.image_url ? (
-                  <Image source={{ uri: n.image_url }} style={styles.nearbyImage} />
-                ) : (
-                  <View style={[styles.nearbyImage, styles.nearbyImagePlaceholder]}>
-                    <MapPinIcon size={24} color={colors.primary} weight="bold" />
-                  </View>
-                )}
-                <Text style={styles.nearbyName} numberOfLines={1}>
-                  {n.name}
-                </Text>
-                <Text style={styles.nearbyMeta}>
-                  {n.category} · {n.distance_km}km
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
+        </FadeInView>
       )}
 
       <View style={styles.divider} />
@@ -517,7 +532,8 @@ export default function AttractionDetailScreen() {
         <Text style={styles.emptyReviewText}>아직 리뷰가 없어요. 첫 리뷰를 남겨보세요!</Text>
       ) : (
         reviews.map((r) => (
-          <View key={r.id} style={styles.reviewCard}>
+          <FadeInView key={r.id} duration={250}>
+          <View style={styles.reviewCard}>
             <View style={styles.reviewCardHeader}>
               <View style={styles.reviewAuthorRow}>
                 {r.avatar_url ? (
@@ -546,6 +562,7 @@ export default function AttractionDetailScreen() {
               </ScrollView>
             )}
           </View>
+          </FadeInView>
         ))
       )}
     </ScrollView>
@@ -659,6 +676,8 @@ export default function AttractionDetailScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
+  // Pressable은 기본 눌림 피드백이 없어서, 눌렀을 때 살짝 옅어지도록 공통으로 얹습니다.
+  pressedFeedback: { opacity: 0.6 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, backgroundColor: colors.background },
   emptyText: { fontSize: 15, fontFamily: fontFamily.regular, color: colors.textTertiary, textAlign: "center" },
   container: { padding: spacing.xl - 4, paddingBottom: spacing.xxl + spacing.xl, backgroundColor: colors.background },

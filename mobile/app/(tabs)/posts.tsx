@@ -1,8 +1,9 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import { ListBulletsIcon, PlusIcon } from "phosphor-react-native";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { FadeInView } from "../../components/FadeInView";
 import { PostCard } from "../../components/PostCard";
 import { ProfileButton } from "../../components/ProfileButton";
 import { Alert } from "../../services/crossPlatformAlert";
@@ -32,6 +33,13 @@ export default function PostsScreen() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  // FlatList는 화면 밖으로 멀리 나간 카드를 가상화로 언마운트했다가 스크롤로
+  // 되돌아오면 다시 마운트합니다. 매번 다시 마운트될 때마다 페이드인이 또
+  // 재생되면 스크롤할 때마다 깜빡이는 것처럼 보이므로, 한 번이라도 렌더링된
+  // 게시물 id는 기억해뒀다가 그 다음부터는(같은 방문 안에서는) 애니메이션 없이
+  // 바로 보여줍니다. 다만 이 기록은 탭에 들어올 때마다(useFocusEffect) 비워서,
+  // 게시물 탭에 새로 들어올 때는 지금 불러온 게시물들이 다시 한 번 페이드인되게 합니다.
+  const animatedPostIdsRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(() => {
     setLoading(true);
@@ -47,6 +55,7 @@ export default function PostsScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      animatedPostIdsRef.current = new Set();
       load();
     }, [load])
   );
@@ -122,7 +131,17 @@ export default function PostsScreen() {
             <Text style={styles.emptyHint}>첫 게시물을 남겨보세요!</Text>
           </View>
         }
-        renderItem={({ item }) => <PostCard item={item} bodyNumberOfLines={4} />}
+        renderItem={({ item }) => {
+          const alreadyShown = animatedPostIdsRef.current.has(item.id);
+          animatedPostIdsRef.current.add(item.id);
+          return alreadyShown ? (
+            <PostCard item={item} bodyNumberOfLines={4} />
+          ) : (
+            <FadeInView duration={300}>
+              <PostCard item={item} bodyNumberOfLines={4} />
+            </FadeInView>
+          );
+        }}
       />
 
       <View style={styles.fabContainer} pointerEvents="box-none">

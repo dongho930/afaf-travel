@@ -7,25 +7,31 @@ import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
 import { useTheme } from "../services/ThemeContext";
-import { CourseStop, UserType } from "../types";
+import { Attraction, CourseStop, UserType } from "../types";
 import { AccessibilityIcons } from "./AccessibilityIcons";
+import { renderExtraInfo } from "./ExtraInfoList";
 import { PhotoCardHeader } from "./PhotoCardHeader";
 
 export function AttractionCard({
   stop,
   userType,
   actions,
+  extraInfo,
 }: {
   stop: CourseStop;
   userType?: UserType;
   // 사진 위가 아니라 사진 아래 본문(추천 방문 시간 옆)에 넣을 보조 액션 —
   // 예: 결과 화면(results.tsx)에서 웹 전용 순서 위/아래 버튼.
   actions?: React.ReactNode;
+  // 홈 화면 카드와 같은 형식의 부가 정보(이용시간/요금 등). 코스 생성 응답에는
+  // 포함되지 않아서(별도 API 절약), 호출한 화면이 따로 조회해서 넘겨줍니다.
+  extraInfo?: Attraction["extra_info"];
 }) {
   const router = useRouter();
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const { attraction } = stop;
+  const placeWithExtraInfo = extraInfo?.length ? { ...attraction, extra_info: extraInfo } : attraction;
 
   return (
     <Pressable
@@ -60,8 +66,17 @@ export function AttractionCard({
           {actions}
         </View>
         <Text style={styles.reason}>{stop.reason}</Text>
-
-        <AccessibilityIcons features={attraction.accessibility} userType={userType} />
+        {(() => {
+          const extraInfoNode = renderExtraInfo(placeWithExtraInfo, colors);
+          return (
+            <>
+              {extraInfoNode}
+              <View style={extraInfoNode ? styles.accessibilityDivider : undefined}>
+                <AccessibilityIcons features={attraction.accessibility} userType={userType} />
+              </View>
+            </>
+          );
+        })()}
 
         {attraction.nearby_medical_info && (
           <View style={styles.medicalRow}>
@@ -110,6 +125,9 @@ function makeStyles(colors: ThemeColors) {
   timeRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   time: { fontSize: 13, fontFamily: fontFamily.semiBold, color: colors.text },
   reason: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: spacing.xs, lineHeight: 18 },
+  // 부가 정보 아래 접근성 아이콘 — 부가 정보가 실제로 표시될 때만 구분선을 넣어
+  // 섹션을 나눕니다 (홈 화면 카드와 동일한 방식).
+  accessibilityDivider: { marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border },
   medicalRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs, marginTop: spacing.sm },
   medical: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textSecondary, flexShrink: 1 },
   detailButtonText: {
