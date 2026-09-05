@@ -89,6 +89,17 @@ export interface RegionOption {
   name: string;
 }
 
+// 홈 화면 '인기 여행지' 지역 칩 — 매일 다시 계산되는 인기도 순위 한 줄.
+export interface RegionPopularityItem {
+  city_name: string;
+  rank: number;
+  score: number;
+  review_count: number;
+  post_count: number;
+  save_count: number;
+  avg_rating: number | null;
+}
+
 export interface CourseResponse {
   course_id: string;
   title: string;

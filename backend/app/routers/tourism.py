@@ -3,6 +3,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Query
 
 from app.models.schemas import AccessibilitySummary, Attraction, NearbyAttraction, RegionOption, UserType
+from app.services.region_popularity_service import read_region_popularity, refresh_region_popularity
 from app.services.sigungu_codes import list_signgu_by_area
 from app.services.supabase_service import get_cached_accessibility_stats, save_accessibility_stats
 from app.services.tour_api import tour_api_client
@@ -204,3 +205,24 @@ async def refresh_overview_cache(region: str = Query(default="경기도")):
     보입니다 (매번 실시간으로 조회하면 시간제한 때문에 일부만 뜰 수 있음).
     """
     return await tour_api_client.refresh_overview_cache(region)
+
+
+@router.get("/region-popularity")
+async def region_popularity(limit: int = Query(default=5, le=20)):
+    """
+    홈 화면 지역 칩(예전엔 '수원/용인/성남/고양/안양' 5개 고정)용. 최근 리뷰/게시물/
+    저장된 코스 수 + 평점을 기준으로 매일 새로 계산해둔 캐시 테이블에서 상위
+    N개 도시만 가볍게 읽어옵니다. 실시간 계산은 하지 않습니다 — 갱신은
+    /region-popularity/refresh(하루 한 번, 수동 또는 외부 스케줄러)가 담당합니다.
+    """
+    return await read_region_popularity(limit)
+
+
+@router.get("/region-popularity/refresh")
+async def refresh_region_popularity_cache(limit: int = Query(default=5, le=20)):
+    """
+    최근 14일 리뷰/게시물/저장된 코스를 다시 집계해서 지역 인기도 캐시 테이블을
+    새로 씁니다. congestion-cache/refresh, overview-cache/refresh와 같은 패턴 —
+    하루 한 번 정도 호출해두면(수동 또는 외부 스케줄러) 홈 화면은 항상 캐시만 읽습니다.
+    """
+    return await refresh_region_popularity(limit)

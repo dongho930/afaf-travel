@@ -1,0 +1,20 @@
+name: Region popularity refresh
+
+# 홈 화면 '인기 여행지' 지역 칩을 매일 다시 계산하기 위한 트리거입니다.
+# Render Cron Job은 웹 서비스와 별도로 과금돼서(Starter 요금이 하나 더 붙음),
+# 대신 GitHub Actions의 무료 스케줄 워크플로우로 백엔드의 refresh 엔드포인트만
+# curl로 호출합니다 — 실제 계산은 백엔드(Render)에서 하고, 여긴 그냥 "지금 해줘"
+# 신호만 보내는 역할이라 비용이 들지 않습니다.
+on:
+  schedule:
+    # UTC 15:00 = KST 00:00(자정). GitHub Actions 스케줄도 UTC 기준입니다.
+    - cron: "0 15 * * *"
+  workflow_dispatch: {} # Actions 탭에서 수동 실행 버튼으로도 바로 테스트 가능
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call region-popularity refresh endpoint
+        run: |
+          curl -fsS "https://afaf-travel.onrender.com/api/tourism/region-popularity/refresh"

@@ -14,6 +14,7 @@ import {
   PostComment,
   PostItem,
   RegionOption,
+  RegionPopularityItem,
   ReportCategory,
   Review,
   SavedCourseDetail,
@@ -79,6 +80,11 @@ export const api = {
   // 지역 선택 UI용: 시/도 안의 시/군/구 목록 (예: 경기도 → 수원시 팔달구, ...)
   listRegions: (province: string = "경기도") =>
     request<RegionOption[]>(`/api/tourism/regions?province=${encodeURIComponent(province)}`),
+
+  // 홈 화면 지역 칩 — 최근 리뷰/게시물/저장된 코스 수 + 평점 기준으로 매일 다시
+  // 계산해둔 캐시에서 상위 N개 도시만 가볍게 읽어옵니다(실시간 계산 아님).
+  getRegionPopularity: (limit: number = 5) =>
+    request<RegionPopularityItem[]>(`/api/tourism/region-popularity?limit=${limit}`),
 
   // 1단계: 질의에 맞는 장소 후보 추천 (아직 코스 순서/시간은 정하지 않음)
   recommendPlaces: (params: {

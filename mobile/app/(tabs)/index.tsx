@@ -35,7 +35,9 @@ import { useCourseContext } from "../../services/CourseContext";
 import { useTheme } from "../../services/ThemeContext";
 import { Attraction, RegionOption } from "../../types";
 
-const REGION_CHIPS = ["전체", "수원", "용인", "성남", "고양", "안양"];
+// 서버(region-popularity, 매일 다시 계산되는 실사용 인기도 랭킹)에서 지역 칩을
+// 아직 못 받아왔거나 요청이 실패했을 때 보여줄 기본값입니다.
+const FALLBACK_REGION_CHIPS = ["전체", "수원", "용인", "성남", "고양", "안양"];
 const CATEGORY_CHIPS = ["전체", "관광지", "문화시설", "레포츠", "숙박", "음식점"];
 // 인기 여행지 목록에서 아예 제외할 카테고리 (필터 칩으로도 고를 수 없고, '전체'를
 // 선택해도 안 보입니다). 나중에 다시 보이게 하려면 이 배열을 비우면 됩니다.
@@ -54,6 +56,10 @@ export default function HomeScreen() {
   const [totalAccessibleCount, setTotalAccessibleCount] = useState<number | null>(null);
   const [supportedRegionCount, setSupportedRegionCount] = useState<number | null>(null);
   const [regionOptions, setRegionOptions] = useState<RegionOption[]>([]);
+  // 지역 칩 목록 — 서버의 인기도 랭킹이 도착하기 전까지는 기본값을 보여주다가,
+  // 받아오면 "전체" + 실제 상위 도시로 교체합니다. 실패해도 기본값이 계속
+  // 보이니 화면이 비어 보이는 일은 없습니다.
+  const [regionChips, setRegionChips] = useState<string[]>(FALLBACK_REGION_CHIPS);
   const [popularPlaces, setPopularPlaces] = useState<Attraction[]>([]);
   const [loadingPlaces, setLoadingPlaces] = useState(true);
   // 스크롤로 다음 묶음을 자동으로 불러오는 동안, 카드가 소개문 없이 먼저
@@ -151,6 +157,17 @@ export default function HomeScreen() {
       })
       .catch(() => setSupportedRegionCount(null))
       .finally(markStatSettled);
+
+    // 지역 칩 — 매일 새로 계산되는 실사용 인기도 랭킹(리뷰/게시물/저장 수 + 평점)
+    // 상위 5개 도시로 교체합니다. 실패하거나 아직 데이터가 없으면 기본값이
+    // 그대로 남아있으니(위 useState 초기값) 화면엔 영향 없습니다.
+    api
+      .getRegionPopularity(5)
+      .then((rows) => {
+        if (rows.length === 0) return;
+        setRegionChips(["전체", ...rows.map((r) => r.city_name)]);
+      })
+      .catch(() => {});
   }, []);
 
   // 히어로가 먼저 등장한 뒤(revealStage 1) 통계까지 결론이 나면, 통계 카드가
@@ -554,7 +571,7 @@ export default function HomeScreen() {
             </View>
 
             <HorizontalScrollWeb contentContainerStyle={styles.chipRow}>
-              {REGION_CHIPS.map((chip) => (
+              {regionChips.map((chip) => (
                 <AnimatedChip
                   key={chip}
                   selected={selectedRegion === chip}
