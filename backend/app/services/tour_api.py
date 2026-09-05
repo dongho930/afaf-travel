@@ -1093,16 +1093,21 @@ class TourApiClient:
         ldong_regn_cd: str,
         content_type_id: int,
         num_of_rows: int,
+        offset: int = 0,
     ) -> list[Attraction]:
         # areaBasedList2(관광지 목록) 자체를 캐싱합니다 — 지금까지 이 조회에
         # 캐시가 없어서, 화면을 열 때마다(카테고리 5개 기준) 매번 새로 호출하다가
         # 하루 API 호출 한도를 순식간에 다 써버리는 문제가 있었습니다. 관광지
         # 목록 자체는 자주 안 바뀌므로 하루 단위로 넉넉하게 캐싱하고, 캐시가
         # 없을 때만 실제로 API를 부릅니다.
+        #
+        # offset은 이 캐시된 전체 목록 안에서의 시작 위치입니다 — 홈 화면이
+        # 스크롤로 다음 페이지를 요청할 때(예: offset=6, offset=12, ...), 매번
+        # 전체 목록을 다시 보내는 대신 그 구간만 잘라 돌려줍니다.
         cached_items = await get_cached_attraction_list(ldong_regn_cd, content_type_id)
         if cached_items is not None:
             attractions = [self._attraction_from_cache_dict(d) for d in cached_items]
-            return attractions[:num_of_rows]
+            return attractions[offset : offset + num_of_rows]
 
         try:
             # 캐시가 없을 때는 이번에 요청받은 개수만 받아오지 않고, 전수조사용
@@ -1116,7 +1121,7 @@ class TourApiClient:
             await save_attraction_list_cache(
                 ldong_regn_cd, content_type_id, [self._attraction_to_cache_dict(a) for a in attractions]
             )
-            return attractions[:num_of_rows]
+            return attractions[offset : offset + num_of_rows]
         except Exception as exc:
             # 특정 카테고리 조회가 실패해도 다른 카테고리 결과는 살립니다 — 다만
             # 예전엔 원인을 그냥 삼켜버려서, 5개 카테고리가 전부 실패해 목록이
@@ -1182,6 +1187,7 @@ class TourApiClient:
         limit: int = 20,
         sigungu_cd: int | None = None,
         include_overview: bool = True,
+        offset: int = 0,
     ) -> list[Attraction]:
         """
         무장애 여행 정보 기준으로 1차 필터링된 관광지 목록 조회.
@@ -1198,6 +1204,12 @@ class TourApiClient:
         보니 뒤쪽(예: '더보기'로 나중에 보이는) 항목은 시간 안에 못 채워지는
         문제가 있었습니다. 목록 자체는 빠르게 받고, 소개문은 실제로 화면에 보이는
         6개씩만 get_overviews_for_ids()로 따로 채우는 방식과 짝을 이룹니다.
+
+        offset은 예전엔 없었는데, 홈 화면이 스크롤할 때마다 이미 받은 만큼(offset)
+        건너뛰고 딱 필요한 만큼(limit)만 서버에 요청하는 진짜 페이지네이션을 위해
+        추가했습니다. 예전에는 한 번에 최대 1500개를 통째로 받아서 화면단에서만
+        나눠 보여줬는데, 그러면 홈 화면을 열 때마다(또는 필터를 바꿀 때마다)
+        거의 안 쓰이는 데이터까지 매번 전부 내려받아 응답이 느렸습니다.
         """
         if self.use_mock:
             results = [a.model_copy(deep=True) for a in _MOCK_ATTRACTIONS]
@@ -1216,7 +1228,7 @@ class TourApiClient:
                 results = [a for a in results if a.accessibility.has_visual_accessibility]
             elif user_type == "hearing":
                 results = [a for a in results if a.accessibility.has_hearing_accessibility]
-            results = results[:limit]
+            results = results[offset : offset + limit]
             for a in results:
                 a.accessibility_benefits = _accessibility_benefit_labels(a.accessibility)
                 # 목업 모드에는 실제 집중률/API 소개문이 없어 표시용 예시 값을 넣습니다.
@@ -1230,16 +1242,21 @@ class TourApiClient:
 
         target_signgu_nm = signgu_name(sigungu_cd) if sigungu_cd is not None else None
         # 시/군/구로 걸러낼 예정이면, 걸러지고 남는 양이 부족하지 않도록 시/도 전체를
-        # 훨씬 넉넉하게(약 6배) 받아옵니다.
+        # 훨씬 넉넉하게(약 6배) 받아옵니다. offset도 같은 배율로 밀어줘야 페이지가
+        # 바뀔 때마다 이전 페이지와 겹치거나 건너뛰는 구간 없이 이어집니다.
         fetch_limit = limit * 6 if target_signgu_nm else limit
+        fetch_offset = offset * 6 if target_signgu_nm else offset
 
         # 카테고리(lclsSystm1)가 아니라 contentTypeId 기준으로 여러 카테고리를 동시에 조회해서
         # 숙박에만 치우치지 않고 관광지/음식점/문화시설/레포츠가 골고루 섞이도록 합니다.
         per_type_rows = max(6, fetch_limit // len(_DEFAULT_CONTENT_TYPE_IDS))
+        per_type_offset = fetch_offset // len(_DEFAULT_CONTENT_TYPE_IDS)
         async with httpx.AsyncClient(timeout=15) as client:
             results_per_type = await asyncio.gather(
                 *(
-                    self._fetch_by_content_type(client, ldong_regn_cd, content_type_id, per_type_rows)
+                    self._fetch_by_content_type(
+                        client, ldong_regn_cd, content_type_id, per_type_rows, per_type_offset
+                    )
                     for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
                 )
             )

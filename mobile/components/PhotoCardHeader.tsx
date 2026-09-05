@@ -1,10 +1,11 @@
 import { LinearGradient } from "expo-linear-gradient";
 import { ImageSquareIcon, StarIcon } from "phosphor-react-native";
 import React from "react";
-import { Image, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { CongestionDisplay } from "../constants/congestion";
 import { fontFamily } from "../constants/fonts";
 import { radius, spacing } from "../constants/tokens";
+import { FadeImage } from "./FadeImage";
 
 // 사진이 없는 카드를 위한 자리표시 배경색입니다. 라이트/다크 테마와 무관하게
 // 항상 어두운 톤으로 고정해서, 위에 얹는 흰 글자가 어떤 테마에서도 읽힙니다.
@@ -42,7 +43,7 @@ export function PhotoCardHeader({
   return (
     <View style={[styles.photo, { height }]}>
       {imageUrl ? (
-        <Image source={{ uri: imageUrl }} style={StyleSheet.absoluteFill} />
+        <FadeImage source={{ uri: imageUrl }} style={StyleSheet.absoluteFill} />
       ) : (
         <View style={[StyleSheet.absoluteFill, styles.photoPlaceholder]}>
           <ImageSquareIcon size={28} color="rgba(255,255,255,0.35)" weight="light" />

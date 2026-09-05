@@ -43,6 +43,7 @@ async def list_attractions(
     region: str = Query(default="경기도"),
     user_type: UserType = Query(default=UserType.GENERAL),
     limit: int = Query(default=20, le=1500),
+    offset: int = Query(default=0, ge=0, description="이미 받아온 개수만큼 건너뛰고 그 다음부터 조회 (페이지네이션)"),
     sigungu_cd: int | None = Query(default=None, description="특정 시/군/구로 좁혀서 조회 (선택)"),
     include_overview: bool = Query(
         default=True,
@@ -58,7 +59,7 @@ async def list_attractions(
     try:
         return await asyncio.wait_for(
             tour_api_client.search_accessible_attractions(
-                region, user_type.value, limit, sigungu_cd, include_overview
+                region, user_type.value, limit, sigungu_cd, include_overview, offset
             ),
             timeout=25.0,
         )

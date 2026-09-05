@@ -53,10 +53,11 @@ export const api = {
     userType: UserType,
     sigunguCd?: number | null,
     limit: number = 20,
-    includeOverview: boolean = true
+    includeOverview: boolean = true,
+    offset: number = 0
   ) =>
     request<Attraction[]>(
-      `/api/tourism/attractions?region=${encodeURIComponent(region)}&user_type=${userType}&limit=${limit}&include_overview=${includeOverview}` +
+      `/api/tourism/attractions?region=${encodeURIComponent(region)}&user_type=${userType}&limit=${limit}&include_overview=${includeOverview}&offset=${offset}` +
         (sigunguCd ? `&sigungu_cd=${sigunguCd}` : "")
     ),
 

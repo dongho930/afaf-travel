@@ -105,16 +105,33 @@ export default function HomeScreen() {
     if (statsSettledCountRef.current >= 2) setStatsSettled(true);
   };
   const PLACES_PAGE_SIZE = 6;
+  // 서버에 한 번에 요청하는 개수(카드 6개씩 5묶음 분량). 예전에는 화면을 열
+  // 때마다 최대 1500개를 통째로 받아서 화면단에서만 6개씩 나눠 보여줬는데,
+  // 실제로 스크롤해서 다 보는 사람은 드물다 보니 응답 크기/처리 시간 대부분이
+  // 낭비였습니다. 이제는 이만큼만 받고, 사용자가 스크롤로 다 소진하면 그때
+  // 서버에 다음 묶음을 요청합니다(아래 offsetRef/hasMoreRef).
+  const PLACES_FETCH_PAGE_SIZE = 30;
   const [visiblePlacesCount, setVisiblePlacesCount] = useState(PLACES_PAGE_SIZE);
   // '더보기'를 빠르게 여러 번 눌러도 안전하게 순서대로 진행되도록, 화면이 아직
   // 리렌더링하기 전이라도 항상 최신 값을 즉시 참조할 수 있는 ref를 같이 둡니다.
   // (state만 쓰면, 리렌더링 전에 또 누를 때 예전 값을 기준으로 계산해서
   // 같은 구간을 중복 조회하거나 건너뛰는 문제가 있었습니다.)
   const visiblePlacesCountRef = React.useRef(PLACES_PAGE_SIZE);
+  // 지금까지 서버에서 몇 개(원본 기준, 카테고리 제외 필터 전)를 받아왔는지와,
+  // 서버에 더 받아올 게 남아있는지(마지막 응답이 요청한 만큼 꽉 찼는지)를
+  // 추적합니다. 지역/무장애 필터가 바뀔 때마다 0/true로 리셋됩니다.
+  const offsetRef = React.useRef(0);
+  const hasMoreRef = React.useRef(true);
   // 스크롤로 하단 근처에 도달할 때마다 자동으로 다음 묶음을 불러오는데, 그
   // 짧은 순간 onScroll이 여러 번 연달아 발생해도 한 번에 여러 묶음이 확
   // 늘어나지 않도록 막는 잠금 플래그입니다.
   const isLoadingMoreRef = React.useRef(false);
+
+  // 선택된 지역 칩("수원" 등)에 해당하는 시/군/구 코드. 목록 조회(최초 1회/필터
+  // 변경 시)와 '더보기'로 다음 페이지를 요청할 때 둘 다 같은 지역 기준으로
+  // 서버에 물어봐야 하므로 한 곳에 모아둡니다.
+  const getMatchedRegionCode = () =>
+    selectedRegion !== "전체" ? (regionOptions.find((r) => r.name.includes(selectedRegion))?.code ?? null) : null;
 
   React.useEffect(() => {
     // '무장애 여행지' 개수는 휠체어/유모차/고령자·임산부를 모두 합친(중복 제거) 실제 계산값입니다.
@@ -148,20 +165,31 @@ export default function HomeScreen() {
   React.useEffect(() => {
     // 선택된 지역 칩("수원" 등)에 해당하는 시/군/구 코드를 찾아서 필터링합니다.
     // "전체"거나 아직 지역 목록을 못 받아왔으면 코드 없이(경기도 전체) 조회합니다.
-    const matchedRegion =
-      selectedRegion !== "전체" ? regionOptions.find((r) => r.name.includes(selectedRegion)) : null;
+    const matchedRegionCode = getMatchedRegionCode();
 
     setLoadingPlaces(true);
     setVisiblePlacesCount(PLACES_PAGE_SIZE);
     visiblePlacesCountRef.current = PLACES_PAGE_SIZE;
+    // 필터가 바뀌면 처음부터 다시 세어야 하므로 페이지 진행 상태를 리셋합니다.
+    offsetRef.current = PLACES_FETCH_PAGE_SIZE;
+    hasMoreRef.current = true;
     // 목록 자체는 소개문 없이(include_overview=false) 빠르게 받되, 처음 보이는
     // 6개의 소개문까지 받아온 뒤에야 카드를 화면에 내보냅니다(그래야 카드가
     // 소개문 없이 먼저 뜨고 나중에 문구만 툭 튀어나오는 일이 없습니다). 나머지는
     // '더보기'(자동 스크롤 로드) 시점에 그때 새로 보이는 6개씩만 채워서, 한
-    // 번에 50개를 다 채우려다 뒤쪽이 6초 제한에 밀리는 문제를 피합니다.
+    // 번에 다 채우려다 뒤쪽이 시간제한에 밀리는 문제를 피합니다. 목록 자체도
+    // 처음엔 한 묶음(PLACES_FETCH_PAGE_SIZE)만 받고, 사용자가 스크롤로 이
+    // 묶음을 다 소진하면 그때 다음 묶음을 서버에 요청합니다(handleShowMorePlaces).
     api
-      .listAttractions("경기도", wheelchairOnly ? "wheelchair" : "general", matchedRegion?.code ?? null, 1500, false)
+      .listAttractions(
+        "경기도",
+        wheelchairOnly ? "wheelchair" : "general",
+        matchedRegionCode,
+        PLACES_FETCH_PAGE_SIZE,
+        false
+      )
       .then((places) => {
+        hasMoreRef.current = places.length === PLACES_FETCH_PAGE_SIZE;
         // 축제/공연/행사, 여행코스, 쇼핑은 인기 여행지 목록에서 아예 제외합니다.
         const filtered = places.filter((p) => !EXCLUDED_CATEGORIES.includes(p.category));
         // 사진이 있는 관광지들의 사진 URL을 후보 목록으로 저장해두고, 그중
@@ -292,15 +320,52 @@ export default function HomeScreen() {
   // 내보냅니다 — 카드가 먼저 뜨고 소개문이 나중에 튀어나오는 걸 막기 위함입니다.
   const handleShowMorePlaces = async () => {
     // '더보기'도 카테고리 필터가 적용된 목록(filteredPlaces) 기준으로 다음
-    // 항목들을 계산해야 합니다. 필터링 전(원본 50개) 기준으로 계산하면, 화면에
+    // 항목들을 계산해야 합니다. 필터링 전(원본 목록) 기준으로 계산하면, 화면에
     // 실제로 새로 나타나는 카드(필터링된 목록 기준)와 소개문을 요청하는 카드
     // (필터링 전 목록 기준)가 서로 어긋나서 — 필터가 좁을수록 화면엔 보이는데
     // 소개문은 영영 요청조차 안 되는 카드가 생겼습니다.
-    const filtered =
-      selectedCategory === "전체" ? popularPlaces : popularPlaces.filter((p) => p.category === selectedCategory);
+    let rawPlaces = popularPlaces;
+    let filtered =
+      selectedCategory === "전체" ? rawPlaces : rawPlaces.filter((p) => p.category === selectedCategory);
     const start = visiblePlacesCountRef.current;
+
+    // 지금 갖고 있는(카테고리 필터 적용된) 목록을 이미 다 보여준 상태인데 서버에
+    // 더 받아올 게 남아있으면, 화면단에서 나눠 보여줄 데이터 자체가 없으니 먼저
+    // 다음 묶음을 서버에 요청해서 popularPlaces를 채웁니다.
+    if (start >= filtered.length && hasMoreRef.current) {
+      setLoadingMore(true);
+      try {
+        const nextRaw = await api.listAttractions(
+          "경기도",
+          wheelchairOnly ? "wheelchair" : "general",
+          getMatchedRegionCode(),
+          PLACES_FETCH_PAGE_SIZE,
+          false,
+          offsetRef.current
+        );
+        hasMoreRef.current = nextRaw.length === PLACES_FETCH_PAGE_SIZE;
+        offsetRef.current += PLACES_FETCH_PAGE_SIZE;
+        const nextFiltered = nextRaw.filter((p) => !EXCLUDED_CATEGORIES.includes(p.category));
+        if (nextFiltered.length > 0) {
+          rawPlaces = [...rawPlaces, ...nextFiltered];
+          setPopularPlaces(rawPlaces);
+          const newImageUrls = nextFiltered.map((p) => p.image_url).filter((url): url is string => !!url);
+          if (newImageUrls.length > 0) {
+            setHeroImageCandidates((prev) => [...prev, ...newImageUrls]);
+          }
+          filtered =
+            selectedCategory === "전체" ? rawPlaces : rawPlaces.filter((p) => p.category === selectedCategory);
+        }
+      } catch {
+        // 다음 묶음을 못 받아와도(네트워크 오류 등) 이번 스크롤에서는 그냥
+        // 아무 것도 새로 보여주지 않고 넘어갑니다 — 다음 스크롤 때 다시 시도됩니다.
+      } finally {
+        setLoadingMore(false);
+      }
+    }
+
     const nextCount = Math.min(start + PLACES_PAGE_SIZE, filtered.length);
-    if (nextCount <= start) return; // 이미 이 카테고리를 끝까지 다 보여준 상태면 아무것도 안 함
+    if (nextCount <= start) return; // 서버에도 더 없고, 이 카테고리를 끝까지 다 보여준 상태
 
     const newlyRevealed = filtered.slice(start, nextCount);
     const newlyRevealedIds = newlyRevealed.filter((p) => !p.overview).map((p) => p.content_id);
@@ -335,7 +400,9 @@ export default function HomeScreen() {
   // 같은 구간을 중복으로 이어받지 않게 합니다.
   const handleScroll = ({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (loadingPlaces || isLoadingMoreRef.current) return;
-    if (visiblePlacesCountRef.current >= filteredPlaces.length) return;
+    // 지금까지 받아온 목록을 다 보여준 상태라도, 서버에 더 받아올 게 남아있으면
+    // (hasMoreRef) 계속 진행해서 handleShowMorePlaces가 다음 묶음을 요청하게 합니다.
+    if (visiblePlacesCountRef.current >= filteredPlaces.length && !hasMoreRef.current) return;
     const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
     const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
     if (distanceFromBottom > 300) return;

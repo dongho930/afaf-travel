@@ -1,37 +1,13 @@
-import React, { useRef } from "react";
-import { Animated } from "react-native";
+import { Image, ImageProps } from "expo-image";
+import React from "react";
 
 /**
- * 실제 이미지 다운로드가 끝난(onLoad/onError) 뒤에야 opacity 0→1로 부드럽게
- * 나타나게 하는 Image입니다. 카드 전체를 마운트 시점에 페이드인시키는
- * FadeInView와 달리, 사진 자체의 다운로드 완료 시점에 맞춰 페이드하므로
- * 네트워크가 느려 카드보다 사진이 늦게 도착해도 뚝 튀어나오지 않습니다.
+ * 사진 다운로드가 끝나면 부드럽게(opacity 0→1) 나타나는 이미지입니다. RN 기본
+ * Image 대신 expo-image를 씁니다 — 디스크 캐시가 있어서 같은 사진을 다시 볼 때
+ * 네트워크를 다시 타지 않고, 화면에 실제로 표시되는 크기에 맞춰 디코딩해서
+ * 메모리도 덜 씁니다. 페이드 자체도 expo-image의 transition 옵션이 처리하므로
+ * 별도 Animated.Value 없이 얇은 래퍼로만 남겨둡니다(호출부 교체 없이 그대로 사용).
  */
-export function FadeImage({
-  style,
-  onLoad,
-  onError,
-  duration = 250,
-  ...rest
-}: React.ComponentProps<typeof Animated.Image> & { duration?: number }) {
-  const opacity = useRef(new Animated.Value(0)).current;
-
-  const reveal = () => {
-    Animated.timing(opacity, { toValue: 1, duration, useNativeDriver: true }).start();
-  };
-
-  return (
-    <Animated.Image
-      {...rest}
-      style={[style, { opacity }]}
-      onLoad={(e) => {
-        reveal();
-        onLoad?.(e);
-      }}
-      onError={(e) => {
-        reveal();
-        onError?.(e);
-      }}
-    />
-  );
+export function FadeImage({ style, duration = 250, ...rest }: ImageProps & { duration?: number }) {
+  return <Image {...rest} style={style} transition={duration} cachePolicy="memory-disk" />;
 }

@@ -1,18 +1,10 @@
 import * as FileSystem from "expo-file-system/legacy";
+import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { CameraIcon } from "phosphor-react-native";
 import React, { useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Image,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Alert } from "../services/crossPlatformAlert";
 import { api } from "../services/api";
 import { useAuth } from "../services/AuthContext";

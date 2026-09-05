@@ -1,3 +1,4 @@
+import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
@@ -18,7 +19,6 @@ import {
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Image,
   Linking,
   Modal,
   Platform,
@@ -631,7 +631,7 @@ export default function AttractionDetailScreen() {
                   {findingRoute === tm.mode ? (
                     <ActivityIndicator color={colors.onPrimary} size="small" />
                   ) : (
-                    <Image source={{ uri: tm.icon }} style={styles.travelModeIcon} resizeMode="contain" />
+                    <Image source={{ uri: tm.icon }} style={styles.travelModeIcon} contentFit="contain" />
                   )}
                 </View>
                 <Text style={styles.travelModeLabel}>{tm.label}</Text>

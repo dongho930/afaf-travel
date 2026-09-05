@@ -1,18 +1,8 @@
+import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { NotePencilIcon, XIcon, type Icon } from "phosphor-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  Animated,
-  Image,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { ActivityIndicator, Animated, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Alert } from "../../services/crossPlatformAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { FadeInView } from "../../components/FadeInView";

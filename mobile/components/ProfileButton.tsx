@@ -1,6 +1,7 @@
 import { useFocusEffect, useRouter } from "expo-router";
+import { Image } from "expo-image";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Animated, Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Animated, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { api } from "../services/api";
@@ -82,6 +83,7 @@ export function ProfileButton() {
           <Image
             source={{ uri: profile.avatar_url }}
             style={styles.avatar}
+            cachePolicy="memory-disk"
             onLoad={() => setImageLoaded(true)}
             onError={() => {
               setAvatarFailed(true);
