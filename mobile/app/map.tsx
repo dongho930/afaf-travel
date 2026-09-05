@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { WebView, WebViewMessageEvent } from "react-native-webview";
 import { AttractionCard } from "../components/AttractionCard";
+import { HorizontalScrollWeb } from "../components/HorizontalScrollWeb";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
@@ -313,11 +314,7 @@ export default function MapScreen() {
 
       {legSummaries.length > 0 && routeDrawn && (
         <View style={styles.bottomArea}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.legScroll}
-          >
+          <HorizontalScrollWeb contentContainerStyle={styles.legScroll}>
             {legSummaries.map((leg, idx) => (
               <View key={idx} style={styles.legCard}>
                 <Text style={styles.legRoute} numberOfLines={1}>
@@ -342,7 +339,7 @@ export default function MapScreen() {
                 )}
               </View>
             ))}
-          </ScrollView>
+          </HorizontalScrollWeb>
 
           <Pressable
             style={({ pressed }) => [styles.navButton, pressed && styles.pressedFeedback]}

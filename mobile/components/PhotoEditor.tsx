@@ -7,7 +7,6 @@ import {
   LayoutChangeEvent,
   Modal,
   Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -24,6 +23,7 @@ import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
 import { useTheme } from "../services/ThemeContext";
 import { flattenPhotoWeb } from "../utils/flattenPhotoWeb";
+import { HorizontalScrollWeb } from "./HorizontalScrollWeb";
 import { PHOTO_FILTER_PRESETS, PhotoFilterPreset } from "../utils/photoFilters";
 import { WebFrame } from "./WebFrame";
 
@@ -359,7 +359,7 @@ export function PhotoEditor({
           </View>
 
           {activeTab === "filter" ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.toolbarRow}>
+            <HorizontalScrollWeb style={styles.toolbarRow}>
               {PHOTO_FILTER_PRESETS.map((preset) => (
                 <TouchableOpacity
                   key={preset.id}
@@ -373,9 +373,9 @@ export function PhotoEditor({
                   </Text>
                 </TouchableOpacity>
               ))}
-            </ScrollView>
+            </HorizontalScrollWeb>
           ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.toolbarRow}>
+            <HorizontalScrollWeb style={styles.toolbarRow}>
               <TouchableOpacity style={styles.toolbarTile} onPress={() => setAddingText(true)}>
                 <TextTIcon size={20} color={EDITOR_TEXT} weight="bold" />
               </TouchableOpacity>
@@ -384,7 +384,7 @@ export function PhotoEditor({
                   <Text style={styles.stickerEmoji}>{s}</Text>
                 </TouchableOpacity>
               ))}
-            </ScrollView>
+            </HorizontalScrollWeb>
           )}
         </View>
 

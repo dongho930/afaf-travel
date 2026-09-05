@@ -34,6 +34,7 @@ import { Alert } from "../services/crossPlatformAlert";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AccessibilityIcons } from "../components/AccessibilityIcons";
 import { FadeInView } from "../components/FadeInView";
+import { HorizontalScrollWeb } from "../components/HorizontalScrollWeb";
 import { PostCard } from "../components/PostCard";
 import { SaveCourseModal, SaveCourseParams } from "../components/SaveCourseModal";
 import { fontFamily } from "../constants/fonts";
@@ -422,7 +423,7 @@ export default function AttractionDetailScreen() {
               <MapPinIcon size={14} color={colors.text} weight="bold" />
               <Text style={styles.nearbySectionTitle}>근처 가볼 만한 곳</Text>
             </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nearbyRow}>
+            <HorizontalScrollWeb contentContainerStyle={styles.nearbyRow}>
               {nearby.map((n) => (
                 <Pressable
                   key={n.content_id}
@@ -449,7 +450,7 @@ export default function AttractionDetailScreen() {
                   </Text>
                 </Pressable>
               ))}
-            </ScrollView>
+            </HorizontalScrollWeb>
           </View>
         </FadeInView>
       )}
@@ -484,7 +485,7 @@ export default function AttractionDetailScreen() {
           editable={!!session}
         />
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoPickerRow}>
+        <HorizontalScrollWeb style={styles.photoPickerRow}>
           {photoDrafts.map((p) => (
             <View key={p.uri} style={styles.photoThumbWrap}>
               <Image source={{ uri: p.uri }} style={styles.photoThumb} />
@@ -513,7 +514,7 @@ export default function AttractionDetailScreen() {
               )}
             </TouchableOpacity>
           )}
-        </ScrollView>
+        </HorizontalScrollWeb>
 
         <TouchableOpacity
           style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
@@ -555,11 +556,11 @@ export default function AttractionDetailScreen() {
             </View>
             <Text style={styles.reviewBody}>{r.body}</Text>
             {r.photo_urls && r.photo_urls.length > 0 && (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.reviewPhotoRow}>
+              <HorizontalScrollWeb style={styles.reviewPhotoRow}>
                 {r.photo_urls.map((url) => (
                   <Image key={url} source={{ uri: url }} style={styles.reviewPhoto} />
                 ))}
-              </ScrollView>
+              </HorizontalScrollWeb>
             )}
           </View>
           </FadeInView>

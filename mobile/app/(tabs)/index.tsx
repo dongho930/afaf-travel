@@ -23,6 +23,7 @@ import { AnimatedChip } from "../../components/AnimatedChip";
 import { AppLogo } from "../../components/AppLogo";
 import { EXTRA_INFO_LABELS_BY_CATEGORY, renderExtraInfo as renderExtraInfoRow } from "../../components/ExtraInfoList";
 import { FadeInView } from "../../components/FadeInView";
+import { HorizontalScrollWeb } from "../../components/HorizontalScrollWeb";
 import { PhotoCardHeader } from "../../components/PhotoCardHeader";
 import { ProfileButton } from "../../components/ProfileButton";
 import { getCongestionDisplay } from "../../constants/congestion";
@@ -427,7 +428,7 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+        <HorizontalScrollWeb contentContainerStyle={styles.chipRow}>
           {REGION_CHIPS.map((chip) => (
             <AnimatedChip
               key={chip}
@@ -444,9 +445,9 @@ export default function HomeScreen() {
               selectedTextColor={colors.onPrimary}
             />
           ))}
-        </ScrollView>
+        </HorizontalScrollWeb>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+        <HorizontalScrollWeb contentContainerStyle={styles.chipRow}>
           {CATEGORY_CHIPS.map((chip) => (
             <AnimatedChip
               key={chip}
@@ -463,7 +464,7 @@ export default function HomeScreen() {
               selectedTextColor={colors.onPrimary}
             />
           ))}
-        </ScrollView>
+        </HorizontalScrollWeb>
 
         {loadingPlaces ? (
           <ActivityIndicator style={{ marginTop: 20 }} color={colors.primary} />
