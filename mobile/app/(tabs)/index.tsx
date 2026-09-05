@@ -81,6 +81,15 @@ export default function HomeScreen() {
   const heroInitializedRef = useRef(false);
   const heroOpacityA = useRef(new Animated.Value(1)).current;
   const heroOpacityB = useRef(new Animated.Value(0)).current;
+  // 배지/제목/설명/검색창 묶음은 배경 사진이 아예 없을 때는 숨겨뒀다가, 첫
+  // 사진이 크로스페이드로 나타나는 타이밍에 맞춰 함께 부드럽게 나타납니다.
+  const heroContentOpacity = useRef(new Animated.Value(0)).current;
+  // 인기 여행지 지역/카테고리 칩은 앱 진입 후 첫 여행지 카드 묶음이 준비되기
+  // 전까지 숨겨뒀다가, 카드가 처음 나타날 때 함께 보여줍니다. 이후 사용자가
+  // 칩을 눌러 필터를 바꿔 재조회하는 동안에는(loadingPlaces가 다시 true여도)
+  // 계속 보이게 하기 위해 "최초 1회"만 이 값을 true로 바꿉니다.
+  const firstLoadDoneRef = useRef(false);
+  const [chipsReady, setChipsReady] = useState(false);
   const PLACES_PAGE_SIZE = 6;
   const [visiblePlacesCount, setVisiblePlacesCount] = useState(PLACES_PAGE_SIZE);
   // '더보기'를 빠르게 여러 번 눌러도 안전하게 순서대로 진행되도록, 화면이 아직
@@ -137,14 +146,18 @@ export default function HomeScreen() {
         setHeroImageCandidates(imageUrls);
         if (!heroInitializedRef.current && imageUrls.length > 0) {
           heroInitializedRef.current = true;
-          heroOpacityA.setValue(0);
+          // 히어로 박스 전체(사진+글자)를 아래 heroContentOpacity로 한 번에
+          // 나타내므로, 사진 레이어 자체는 처음부터 바로 보이는 상태(1)로
+          // 둡니다 — 안 그러면 박스가 나타난 뒤 사진이 한 번 더 페이드인되어
+          // 두 단계로 나뉘어 보입니다.
+          heroOpacityA.setValue(1);
           heroOpacityB.setValue(0);
           setHero({
             a: imageUrls[Math.floor(Math.random() * imageUrls.length)],
             b: null,
             visible: "a",
           });
-          Animated.timing(heroOpacityA, { toValue: 1, duration: 900, useNativeDriver: true }).start();
+          Animated.timing(heroContentOpacity, { toValue: 1, duration: 900, useNativeDriver: true }).start();
         }
 
         const firstBatch = filtered.slice(0, PLACES_PAGE_SIZE);
@@ -161,7 +174,13 @@ export default function HomeScreen() {
         }); // 소개문/부가 정보를 못 받아와도 카드는 그냥 보여줍니다(각 헬퍼가 실패 시 빈 맵을 돌려줌).
       })
       .catch(() => setPopularPlaces([]))
-      .finally(() => setLoadingPlaces(false));
+      .finally(() => {
+        setLoadingPlaces(false);
+        if (!firstLoadDoneRef.current) {
+          firstLoadDoneRef.current = true;
+          setChipsReady(true);
+        }
+      });
   }, [wheelchairOnly, selectedRegion, regionOptions]);
 
   // 히어로 배경 사진을 3초마다 후보 목록에서 무작위로 다시 골라 바꿉니다.
@@ -364,7 +383,7 @@ export default function HomeScreen() {
           <ProfileButton />
         </View>
 
-        <View style={styles.hero}>
+        <Animated.View style={[styles.hero, { opacity: heroContentOpacity }]}>
           <Animated.Image
             source={hero.a ? { uri: hero.a } : undefined}
             style={[styles.heroImageLayer, { opacity: heroOpacityA }]}
@@ -398,19 +417,21 @@ export default function HomeScreen() {
               </Pressable>
             </View>
           </View>
-        </View>
+        </Animated.View>
 
         <View style={styles.statsRow}>
-          {stats.map((s) => {
-            const StatIcon = s.icon;
-            return (
-              <View key={s.label} style={styles.statCard}>
-                <StatIcon size={26} color={colors.primary} weight="bold" />
-                <AnimatedCountUpText value={s.value} style={styles.statValue} />
-                <Text style={styles.statLabel}>{s.label}</Text>
-              </View>
-            );
-          })}
+          {stats
+            .filter((s) => s.value !== null)
+            .map((s) => {
+              const StatIcon = s.icon;
+              return (
+                <FadeInView key={s.label} style={styles.statCard}>
+                  <StatIcon size={26} color={colors.primary} weight="bold" />
+                  <AnimatedCountUpText value={s.value} style={styles.statValue} />
+                  <Text style={styles.statLabel}>{s.label}</Text>
+                </FadeInView>
+              );
+            })}
         </View>
 
         <View style={styles.sectionHeader}>
@@ -428,43 +449,47 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        <HorizontalScrollWeb contentContainerStyle={styles.chipRow}>
-          {REGION_CHIPS.map((chip) => (
-            <AnimatedChip
-              key={chip}
-              selected={selectedRegion === chip}
-              onPress={() => setSelectedRegion(chip)}
-              label={chip}
-              style={styles.chip}
-              textStyle={styles.chipText}
-              backgroundColor={colors.surface}
-              selectedBackgroundColor={colors.primary}
-              borderColor={colors.border}
-              selectedBorderColor={colors.primary}
-              textColor={colors.textSecondary}
-              selectedTextColor={colors.onPrimary}
-            />
-          ))}
-        </HorizontalScrollWeb>
+        {chipsReady && (
+          <FadeInView>
+            <HorizontalScrollWeb contentContainerStyle={styles.chipRow}>
+              {REGION_CHIPS.map((chip) => (
+                <AnimatedChip
+                  key={chip}
+                  selected={selectedRegion === chip}
+                  onPress={() => setSelectedRegion(chip)}
+                  label={chip}
+                  style={styles.chip}
+                  textStyle={styles.chipText}
+                  backgroundColor={colors.surface}
+                  selectedBackgroundColor={colors.primary}
+                  borderColor={colors.border}
+                  selectedBorderColor={colors.primary}
+                  textColor={colors.textSecondary}
+                  selectedTextColor={colors.onPrimary}
+                />
+              ))}
+            </HorizontalScrollWeb>
 
-        <HorizontalScrollWeb contentContainerStyle={styles.chipRow}>
-          {CATEGORY_CHIPS.map((chip) => (
-            <AnimatedChip
-              key={chip}
-              selected={selectedCategory === chip}
-              onPress={() => setSelectedCategory(chip)}
-              label={chip}
-              style={styles.chip}
-              textStyle={styles.chipText}
-              backgroundColor={colors.surface}
-              selectedBackgroundColor={colors.primary}
-              borderColor={colors.border}
-              selectedBorderColor={colors.primary}
-              textColor={colors.textSecondary}
-              selectedTextColor={colors.onPrimary}
-            />
-          ))}
-        </HorizontalScrollWeb>
+            <HorizontalScrollWeb contentContainerStyle={styles.chipRow}>
+              {CATEGORY_CHIPS.map((chip) => (
+                <AnimatedChip
+                  key={chip}
+                  selected={selectedCategory === chip}
+                  onPress={() => setSelectedCategory(chip)}
+                  label={chip}
+                  style={styles.chip}
+                  textStyle={styles.chipText}
+                  backgroundColor={colors.surface}
+                  selectedBackgroundColor={colors.primary}
+                  borderColor={colors.border}
+                  selectedBorderColor={colors.primary}
+                  textColor={colors.textSecondary}
+                  selectedTextColor={colors.onPrimary}
+                />
+              ))}
+            </HorizontalScrollWeb>
+          </FadeInView>
+        )}
 
         {loadingPlaces ? (
           <ActivityIndicator style={{ marginTop: 20 }} color={colors.primary} />
