@@ -434,23 +434,23 @@ export default function HomeScreen() {
             })}
         </View>
 
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>인기 여행지</Text>
-          <TouchableOpacity
-            style={styles.toggleRow}
-            onPress={() => setWheelchairOnly((v) => !v)}
-            accessibilityRole="switch"
-            accessibilityState={{ checked: wheelchairOnly }}
-          >
-            <Text style={styles.toggleLabel}>무장애만</Text>
-            <View style={[styles.toggleTrack, wheelchairOnly && styles.toggleTrackOn]}>
-              <View style={[styles.toggleThumb, wheelchairOnly && styles.toggleThumbOn]} />
-            </View>
-          </TouchableOpacity>
-        </View>
-
         {chipsReady && (
           <FadeInView>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>인기 여행지</Text>
+              <TouchableOpacity
+                style={styles.toggleRow}
+                onPress={() => setWheelchairOnly((v) => !v)}
+                accessibilityRole="switch"
+                accessibilityState={{ checked: wheelchairOnly }}
+              >
+                <Text style={styles.toggleLabel}>무장애만</Text>
+                <View style={[styles.toggleTrack, wheelchairOnly && styles.toggleTrackOn]}>
+                  <View style={[styles.toggleThumb, wheelchairOnly && styles.toggleThumbOn]} />
+                </View>
+              </TouchableOpacity>
+            </View>
+
             <HorizontalScrollWeb contentContainerStyle={styles.chipRow}>
               {REGION_CHIPS.map((chip) => (
                 <AnimatedChip
