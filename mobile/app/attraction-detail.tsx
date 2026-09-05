@@ -15,7 +15,7 @@ import {
   TrainIcon,
   XIcon,
 } from "phosphor-react-native";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -98,6 +98,10 @@ export default function AttractionDetailScreen() {
   const [attraction, setAttraction] = useState<Attraction | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [nearby, setNearby] = useState<NearbyAttraction[]>([]);
+  const [nearbyLoaded, setNearbyLoaded] = useState(false);
+  // 화면 등장 연출 단계: 0=아무것도 안보임 1=제목 2=글(소개) 3=근처 가볼 만한 곳 4=방문자 리뷰.
+  // 위 순서대로 하나씩 페이드인 되도록, 데이터가 준비될 때마다 한 단계씩 올립니다.
+  const [stage, setStage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [ratingInput, setRatingInput] = useState(5);
   const [bodyInput, setBodyInput] = useState("");
@@ -115,6 +119,8 @@ export default function AttractionDetailScreen() {
   const load = useCallback(() => {
     if (!contentId) return;
     setLoading(true);
+    setNearbyLoaded(false);
+    setStage(0);
     Promise.all([api.getAttractionDetail(contentId), api.getReviews(contentId)])
       .then(([detail, reviewList]) => {
         setAttraction(detail);
@@ -125,6 +131,7 @@ export default function AttractionDetailScreen() {
           setBodyInput(mine.body);
           setPhotoDrafts((mine.photo_urls || []).map((url) => ({ uri: url, payload: url })));
         }
+        setStage(1);
       })
       .catch(() => Alert.alert("불러오기 실패", "관광지 정보를 불러오지 못했어요."))
       .finally(() => setLoading(false));
@@ -133,8 +140,29 @@ export default function AttractionDetailScreen() {
     api
       .getNearbyAttractions(contentId)
       .then(setNearby)
-      .catch(() => setNearby([]));
+      .catch(() => setNearby([]))
+      .finally(() => setNearbyLoaded(true));
   }, [contentId, session]);
+
+  // 제목 -> 글 -> 근처 가볼 만한 곳 -> 방문자 리뷰 순으로 한 단계씩 페이드인.
+  // 근처(3단계) 이후로는 데이터가 실제로 준비된 뒤에만 다음 단계로 넘어갑니다.
+  useEffect(() => {
+    if (stage !== 1) return;
+    const t = setTimeout(() => setStage(2), 180);
+    return () => clearTimeout(t);
+  }, [stage]);
+
+  useEffect(() => {
+    if (stage !== 2 || !nearbyLoaded) return;
+    const t = setTimeout(() => setStage(3), 180);
+    return () => clearTimeout(t);
+  }, [stage, nearbyLoaded]);
+
+  useEffect(() => {
+    if (stage !== 3) return;
+    const t = setTimeout(() => setStage(4), 180);
+    return () => clearTimeout(t);
+  }, [stage]);
 
   useFocusEffect(
     useCallback(() => {
@@ -337,6 +365,8 @@ export default function AttractionDetailScreen() {
   return (
     <>
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+      {stage >= 1 && (
+      <FadeInView duration={280}>
       {attraction.image_url ? (
         <Image source={{ uri: attraction.image_url }} style={styles.heroImage} />
       ) : null}
@@ -397,7 +427,11 @@ export default function AttractionDetailScreen() {
           <Text style={styles.directionsButtonText}>저장</Text>
         </Pressable>
       </View>
+      </FadeInView>
+      )}
 
+      {stage >= 2 && (
+      <FadeInView duration={280}>
       {!!attraction.overview && <Text style={styles.overview}>{attraction.overview}</Text>}
 
       <AccessibilityIcons features={attraction.accessibility} />
@@ -415,8 +449,10 @@ export default function AttractionDetailScreen() {
           ))}
         </View>
       )}
+      </FadeInView>
+      )}
 
-      {nearby.length > 0 && (
+      {stage >= 3 && nearby.length > 0 && (
         <FadeInView duration={300}>
           <View style={styles.nearbySection}>
             <View style={styles.nearbySectionTitleRow}>
@@ -455,6 +491,8 @@ export default function AttractionDetailScreen() {
         </FadeInView>
       )}
 
+      {stage >= 4 && (
+      <FadeInView duration={300}>
       <View style={styles.divider} />
 
       <View style={styles.sectionTitleRow}>
@@ -565,6 +603,8 @@ export default function AttractionDetailScreen() {
           </View>
           </FadeInView>
         ))
+      )}
+      </FadeInView>
       )}
     </ScrollView>
 
