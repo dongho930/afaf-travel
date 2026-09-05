@@ -90,6 +90,20 @@ export default function HomeScreen() {
   // 계속 보이게 하기 위해 "최초 1회"만 이 값을 true로 바꿉니다.
   const firstLoadDoneRef = useRef(false);
   const [chipsReady, setChipsReady] = useState(false);
+  // 히어로 문구 → 통계(무장애 여행지/지원 지역) → 인기 여행지 순서로 등장시키기
+  // 위한 단계값입니다. 각 데이터는 원래대로 전부 동시에 미리 불러오되, "화면에
+  // 보여주는 시점"만 이 값으로 강제 순서를 매깁니다(0: 아직 아무것도 안 보임,
+  // 1: 히어로 등장 완료 → 통계 표시 허용, 2: 통계까지 등장 → 인기 여행지 섹션 표시 허용).
+  const [revealStage, setRevealStage] = useState(0);
+  // 통계 두 API가 성공하든 실패하든(둘 다 "값 없음"으로 끝날 수도 있음) 일단
+  // 결론이 나야 다음 단계로 넘어갈 수 있습니다. 값이 나오는지 여부가 아니라
+  // "두 요청이 다 끝났는지"로 판단해서, 둘 다 실패해도 순서가 영영 안 막히게 합니다.
+  const statsSettledCountRef = useRef(0);
+  const [statsSettled, setStatsSettled] = useState(false);
+  const markStatSettled = () => {
+    statsSettledCountRef.current += 1;
+    if (statsSettledCountRef.current >= 2) setStatsSettled(true);
+  };
   const PLACES_PAGE_SIZE = 6;
   const [visiblePlacesCount, setVisiblePlacesCount] = useState(PLACES_PAGE_SIZE);
   // '더보기'를 빠르게 여러 번 눌러도 안전하게 순서대로 진행되도록, 화면이 아직
@@ -107,7 +121,8 @@ export default function HomeScreen() {
     api
       .getAccessibilitySummary("경기도")
       .then((s) => setTotalAccessibleCount(s.total_accessible_count))
-      .catch(() => setTotalAccessibleCount(null));
+      .catch(() => setTotalAccessibleCount(null))
+      .finally(markStatSettled);
 
     // '지원 지역' 개수는 실제 시/군/구 목록의 개수이자, 지역 칩(수원/용인/...)을
     // 실제 시군구 코드로 변환하는 데도 이 목록을 그대로 씁니다.
@@ -117,8 +132,18 @@ export default function HomeScreen() {
         setRegionOptions(regions);
         setSupportedRegionCount(regions.length);
       })
-      .catch(() => setSupportedRegionCount(null));
+      .catch(() => setSupportedRegionCount(null))
+      .finally(markStatSettled);
   }, []);
+
+  // 히어로가 먼저 등장한 뒤(revealStage 1) 통계까지 결론이 나면, 통계 카드가
+  // 실제로 페이드인할 시간(FadeInView 기본 300ms)만큼 살짝 기다렸다가 다음
+  // 단계(인기 여행지 섹션 표시 허용)로 넘어갑니다.
+  React.useEffect(() => {
+    if (revealStage !== 1 || !statsSettled) return;
+    const timer = setTimeout(() => setRevealStage(2), 350);
+    return () => clearTimeout(timer);
+  }, [revealStage, statsSettled]);
 
   React.useEffect(() => {
     // 선택된 지역 칩("수원" 등)에 해당하는 시/군/구 코드를 찾아서 필터링합니다.
@@ -144,20 +169,28 @@ export default function HomeScreen() {
         // 후보 목록에서 3초마다 다시 무작위로 골라 배경을 크로스페이드로 바꿉니다.
         const imageUrls = filtered.map((p) => p.image_url).filter((url): url is string => !!url);
         setHeroImageCandidates(imageUrls);
-        if (!heroInitializedRef.current && imageUrls.length > 0) {
+        if (!heroInitializedRef.current) {
           heroInitializedRef.current = true;
-          // 히어로 박스 전체(사진+글자)를 아래 heroContentOpacity로 한 번에
-          // 나타내므로, 사진 레이어 자체는 처음부터 바로 보이는 상태(1)로
-          // 둡니다 — 안 그러면 박스가 나타난 뒤 사진이 한 번 더 페이드인되어
-          // 두 단계로 나뉘어 보입니다.
-          heroOpacityA.setValue(1);
-          heroOpacityB.setValue(0);
-          setHero({
-            a: imageUrls[Math.floor(Math.random() * imageUrls.length)],
-            b: null,
-            visible: "a",
+          // 사진이 하나도 없는 경우(전부 이미지 URL 없음)에도 히어로 문구
+          // 자체는 떠야 합니다 — 안 그러면 통계/인기 여행지 등장 순서가
+          // 영영 다음 단계로 못 넘어갑니다. 이때는 사진 레이어 없이 배경색만으로 보여집니다.
+          if (imageUrls.length > 0) {
+            // 히어로 박스 전체(사진+글자)를 아래 heroContentOpacity로 한 번에
+            // 나타내므로, 사진 레이어 자체는 처음부터 바로 보이는 상태(1)로
+            // 둡니다 — 안 그러면 박스가 나타난 뒤 사진이 한 번 더 페이드인되어
+            // 두 단계로 나뉘어 보입니다.
+            heroOpacityA.setValue(1);
+            heroOpacityB.setValue(0);
+            setHero({
+              a: imageUrls[Math.floor(Math.random() * imageUrls.length)],
+              b: null,
+              visible: "a",
+            });
+          }
+          Animated.timing(heroContentOpacity, { toValue: 1, duration: 900, useNativeDriver: true }).start(() => {
+            // 통계는 히어로가 다 나타난 뒤에만 등장 허용(이미 2단계 이상이면 유지).
+            setRevealStage((s) => Math.max(s, 1));
           });
-          Animated.timing(heroContentOpacity, { toValue: 1, duration: 900, useNativeDriver: true }).start();
         }
 
         const firstBatch = filtered.slice(0, PLACES_PAGE_SIZE);
@@ -419,22 +452,24 @@ export default function HomeScreen() {
           </View>
         </Animated.View>
 
-        <View style={styles.statsRow}>
-          {stats
-            .filter((s) => s.value !== null)
-            .map((s) => {
-              const StatIcon = s.icon;
-              return (
-                <FadeInView key={s.label} style={styles.statCard}>
-                  <StatIcon size={26} color={colors.primary} weight="bold" />
-                  <AnimatedCountUpText value={s.value} style={styles.statValue} />
-                  <Text style={styles.statLabel}>{s.label}</Text>
-                </FadeInView>
-              );
-            })}
-        </View>
+        {revealStage >= 1 && (
+          <View style={styles.statsRow}>
+            {stats
+              .filter((s) => s.value !== null)
+              .map((s) => {
+                const StatIcon = s.icon;
+                return (
+                  <FadeInView key={s.label} style={styles.statCard}>
+                    <StatIcon size={26} color={colors.primary} weight="bold" />
+                    <AnimatedCountUpText value={s.value} style={styles.statValue} />
+                    <Text style={styles.statLabel}>{s.label}</Text>
+                  </FadeInView>
+                );
+              })}
+          </View>
+        )}
 
-        {chipsReady && (
+        {revealStage >= 2 && chipsReady && (
           <FadeInView>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>인기 여행지</Text>
@@ -491,7 +526,7 @@ export default function HomeScreen() {
           </FadeInView>
         )}
 
-        {loadingPlaces ? (
+        {revealStage >= 2 && (loadingPlaces ? (
           <ActivityIndicator style={{ marginTop: 20 }} color={colors.primary} />
         ) : filteredPlaces.length === 0 ? (
           <Text style={styles.emptyText}>표시할 여행지를 찾지 못했어요.</Text>
@@ -543,7 +578,7 @@ export default function HomeScreen() {
             ))}
             {loadingMore && <ActivityIndicator style={{ marginTop: spacing.sm }} color={colors.primary} />}
           </>
-        )}
+        ))}
       </ScrollView>
     </SafeAreaView>
   );
