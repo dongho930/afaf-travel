@@ -8,8 +8,8 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, TouchableOpa
 import { Alert } from "../services/crossPlatformAlert";
 import { api } from "../services/api";
 import { useAuth } from "../services/AuthContext";
+import { useProfile } from "../services/ProfileContext";
 import { useTheme } from "../services/ThemeContext";
-import { UserProfile } from "../types";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
@@ -26,10 +26,12 @@ import { radius, spacing } from "../constants/tokens";
 export default function ProfileScreen() {
   const router = useRouter();
   const { session, signOut, changePassword } = useAuth();
+  // 프로필은 앱 전체가 공유합니다(ProfileContext) — 이 화면에서 바꾼 내용이
+  // 각 탭 상단의 프로필 버튼에도 곧바로 반영되고, 화면에 들어올 때마다 다시
+  // 조회하느라 기다릴 필요도 없습니다.
+  const { profile, loaded, refresh, applyLocalChange } = useProfile();
   const { colors } = useTheme();
   const styles = makeStyles(colors);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   const [usernameEditing, setUsernameEditing] = useState(false);
@@ -46,20 +48,16 @@ export default function ProfileScreen() {
       router.replace("/login");
       return;
     }
-    loadProfile();
+    // 이미 갖고 있는 값으로 화면을 먼저 그리고, 최신 값은 뒤에서 조용히 받아옵니다.
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
-  const loadProfile = () => {
-    setLoading(true);
-    api
-      .getMyProfile()
-      .then((p) => {
-        setProfile(p);
-        setUsernameDraft(p?.username ?? "");
-      })
-      .catch(() => Alert.alert("불러오기 실패", "프로필 정보를 불러오지 못했어요."))
-      .finally(() => setLoading(false));
-  };
+  // 아이디 입력칸의 초기값은 실제 프로필 값을 따라갑니다 (편집 중일 때는
+  // 사용자가 입력하던 내용을 덮어쓰지 않도록 건드리지 않습니다).
+  useEffect(() => {
+    if (!usernameEditing) setUsernameDraft(profile?.username ?? "");
+  }, [profile?.username, usernameEditing]);
 
   const handlePickAvatar = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -85,7 +83,7 @@ export default function ProfileScreen() {
       const fileExt = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
 
       const { avatar_url: avatarUrl } = await api.uploadAvatar(base64, fileExt);
-      setProfile((prev) => (prev ? { ...prev, avatar_url: avatarUrl } : prev));
+      applyLocalChange({ avatar_url: avatarUrl });
     } catch (err) {
       Alert.alert("업로드 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
     } finally {
@@ -101,7 +99,7 @@ export default function ProfileScreen() {
     setIsSavingUsername(true);
     try {
       await api.updateProfile({ username: usernameDraft.trim() });
-      setProfile((prev) => (prev ? { ...prev, username: usernameDraft.trim() } : prev));
+      applyLocalChange({ username: usernameDraft.trim() });
       setUsernameEditing(false);
     } catch (err) {
       Alert.alert("변경 실패", "이미 사용 중인 아이디이거나 오류가 발생했어요.\n" + String(err));
@@ -135,7 +133,9 @@ export default function ProfileScreen() {
     }
   };
 
-  if (loading) {
+  // 아직 한 번도 못 불러온 상태(앱을 켜자마자 바로 이 화면에 들어온 경우)에만
+  // 로딩을 보여줍니다. 이미 값이 있으면 그걸 그대로 그리고 갱신은 뒤에서 합니다.
+  if (!loaded) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color={colors.primary} />

@@ -11,6 +11,7 @@ import { WebFrame } from "../components/WebFrame";
 import { fontFamily, fontsToLoad } from "../constants/fonts";
 import { AuthProvider } from "../services/AuthContext";
 import { CourseProvider } from "../services/CourseContext";
+import { ProfileProvider } from "../services/ProfileContext";
 import { ThemeProvider, useTheme } from "../services/ThemeContext";
 
 // 폰트(Pretendard)를 다 불러오기 전까지 스플래시 화면을 유지합니다 — 그래야
@@ -96,9 +97,11 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <ThemeProvider>
           <AuthProvider>
-            <CourseProvider>
-              <ThemedApp />
-            </CourseProvider>
+            <ProfileProvider>
+              <CourseProvider>
+                <ThemedApp />
+              </CourseProvider>
+            </ProfileProvider>
           </AuthProvider>
         </ThemeProvider>
       </SafeAreaProvider>
