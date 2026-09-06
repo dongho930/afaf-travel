@@ -27,6 +27,7 @@ import datetime
 
 from app.config import get_settings
 from app.models.schemas import CourseResponse, CourseStop
+from app.services.memory_cache import TTLCache
 
 settings = get_settings()
 
@@ -35,6 +36,14 @@ if settings.supabase_url and settings.supabase_service_key:
     from supabase import create_client
 
     _client = create_client(settings.supabase_url, settings.supabase_service_key)
+
+# 관광지 목록 캐시(attraction_list_cache)는 한 행에 카테고리 하나의 목록이 통째로
+# 들어있어 덩치가 큽니다. 홈 화면 한 번 열 때마다 카테고리 5개를 조회하니, 매번
+# DB에서 그 큰 JSON들을 다시 받아오지 않도록 몇 분간 메모리에 들고 있습니다.
+# (DB 캐시 자체의 유효기간은 아래 기본값 24시간이라, 이 몇 분은 신선도에 사실상
+# 영향이 없습니다.)
+_ATTRACTION_LIST_DEFAULT_MAX_AGE_HOURS = 24.0
+_attraction_list_memcache: TTLCache[list[dict]] = TTLCache(ttl_seconds=300.0)
 
 
 async def save_course(
@@ -889,15 +898,29 @@ async def update_visited_place_date(visited_id: str, user_id: str, visited_at: s
 
 
 async def get_cached_attraction_list(
-    ldong_regn_cd: str, content_type_id: int, max_age_hours: float = 24.0
+    ldong_regn_cd: str,
+    content_type_id: int,
+    max_age_hours: float = _ATTRACTION_LIST_DEFAULT_MAX_AGE_HOURS,
 ) -> Optional[list[dict]]:
     """
     areaBasedList2(관광지 목록) 캐시를 조회합니다. max_age_hours보다 오래됐거나
     캐시가 아예 없으면 None을 반환해서(=live 재조회 필요), 갱신 로직이 자연스럽게
     이어지게 합니다.
+
+    이 캐시 행 하나에는 그 카테고리의 관광지 목록이 통째로(수백~수천 건) 들어
+    있는데, 홈 화면은 그중 앞의 몇 개만 씁니다. 요청이 올 때마다 이 큰 JSON을
+    Supabase에서 다시 내려받아 파싱하는 게 부담이라, 몇 분 동안은 프로세스
+    메모리에 들고 있다가 그대로 재사용합니다 (DB 캐시 자체의 유효기간
+    max_age_hours보다 훨씬 짧아서, 신선도에는 사실상 영향이 없습니다).
     """
     if _client is None:
         return None
+
+    memo_key = (ldong_regn_cd, content_type_id, max_age_hours)
+    memoized = _attraction_list_memcache.get(memo_key)
+    if memoized is not None:
+        return memoized
+
     try:
         result = (
             _client.table("attraction_list_cache")
@@ -915,7 +938,9 @@ async def get_cached_attraction_list(
         age_hours = (datetime.datetime.now(datetime.timezone.utc) - fetched_at).total_seconds() / 3600
         if age_hours > max_age_hours:
             return None
-        return row.get("items") or []
+        items = row.get("items") or []
+        _attraction_list_memcache.set(memo_key, items)
+        return items
     except Exception as e:
         print(f"[supabase] 관광지 목록 캐시 조회 실패: {e}")
         return None
@@ -925,6 +950,11 @@ async def save_attraction_list_cache(ldong_regn_cd: str, content_type_id: int, i
     """areaBasedList2로 새로 조회한 관광지 목록을 캐시에 upsert합니다."""
     if _client is None:
         return
+    # 방금 받아온 목록이니 곧바로 메모리 캐시에도 올려둡니다 — 뒤이어 들어오는
+    # 요청들이 같은 목록을 DB에서 다시 받아오지 않게 하기 위함입니다.
+    _attraction_list_memcache.set(
+        (ldong_regn_cd, content_type_id, _ATTRACTION_LIST_DEFAULT_MAX_AGE_HOURS), items
+    )
     try:
         _client.table("attraction_list_cache").upsert(
             {

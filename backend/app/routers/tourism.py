@@ -3,12 +3,20 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Query
 
 from app.models.schemas import AccessibilitySummary, Attraction, NearbyAttraction, RegionOption, UserType
+from app.services.memory_cache import TTLCache
 from app.services.region_popularity_service import read_region_popularity, refresh_region_popularity
 from app.services.sigungu_codes import list_signgu_by_area
 from app.services.supabase_service import get_cached_accessibility_stats, save_accessibility_stats
 from app.services.tour_api import tour_api_client
 
 router = APIRouter(prefix="/api/tourism", tags=["tourism"])
+
+# 홈 화면 '인기 여행지'는 대부분의 사용자가 똑같은 조건(경기도/일반/첫 페이지)으로
+# 시작하는데, 그때마다 편의시설·혼잡도·평점을 처음부터 다시 채우면 그 시간이
+# 그대로 사람이 기다리는 시간이 됩니다. 완성된 응답을 잠깐 들고 있다가 같은
+# 조건이면 바로 돌려줍니다. 평점처럼 우리 DB에서 바뀌는 값도 몇 분이면 충분히
+# 빨리 반영되고, 관광지 목록 자체는 원래 하루 단위로 캐싱하던 데이터입니다.
+_ATTRACTIONS_CACHE = TTLCache[list[Attraction]](ttl_seconds=300.0)
 
 
 def _is_regression(existing: dict | None, data: dict) -> bool:
@@ -57,15 +65,33 @@ async def list_attractions(
     # 있지만, 혹시 모를 다른 지점에서 멈추더라도 화면이 무한 로딩에 빠지지 않도록
     # 전체 요청에도 상한선을 둡니다. 시간 안에 못 끝나면 빈 목록보다는 명확한
     # 에러를 주는 게 낫습니다 — 앱에서 "잠시 후 다시 시도해주세요"로 안내할 수 있게.
+    #
+    # 같은 조건의 결과는 몇 분간 재사용합니다(_ATTRACTIONS_CACHE). 같은 조건을
+    # 동시에 여러 명이 물어보면 그중 한 번만 실제로 계산하고 나머지는 그 결과를
+    # 같이 기다립니다 — 앱을 동시에 켠 사용자들이 각자 무거운 조회를 처음부터
+    # 돌리지 않게 하기 위함입니다.
+    cache_key = (region, user_type.value, limit, offset, sigungu_cd, include_overview)
     try:
-        return await asyncio.wait_for(
-            tour_api_client.search_accessible_attractions(
-                region, user_type.value, limit, sigungu_cd, include_overview, offset
+        results = await _ATTRACTIONS_CACHE.get_or_compute(
+            cache_key,
+            lambda: asyncio.wait_for(
+                tour_api_client.search_accessible_attractions(
+                    region, user_type.value, limit, sigungu_cd, include_overview, offset
+                ),
+                timeout=25.0,
             ),
-            timeout=25.0,
+            # 빈 목록은 캐시하지 않습니다 — 외부 API가 잠깐 말썽이라 아무것도 못
+            # 받아온 경우일 수 있는데, 그걸 몇 분간 계속 돌려주면 그동안 화면이
+            # 계속 비어 보입니다. 다음 요청 때 다시 시도하게 둡니다.
+            cache_if=lambda items: len(items) > 0,
         )
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="관광지 목록을 불러오는 데 시간이 너무 오래 걸렸어요. 잠시 후 다시 시도해주세요.")
+
+    # 캐시에 들어있는 객체를 그대로 돌려주면, 나중에 어딘가에서 그 객체를 손대는
+    # 코드가 생겼을 때 다음 요청들까지 오염됩니다. 복사본을 돌려줘서 캐시에 담긴
+    # 원본은 건드릴 수 없게 합니다.
+    return [a.model_copy(deep=True) for a in results]
 
 
 @router.get("/attractions/overviews")

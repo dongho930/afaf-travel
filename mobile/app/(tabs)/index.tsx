@@ -136,7 +136,13 @@ export default function HomeScreen() {
   // 선택된 지역 칩("수원" 등)에 해당하는 시/군/구 코드. 목록 조회(최초 1회/필터
   // 변경 시)와 '더보기'로 다음 페이지를 요청할 때 둘 다 같은 지역 기준으로
   // 서버에 물어봐야 하므로 한 곳에 모아둡니다.
-  const getMatchedRegionCode = () =>
+  //
+  // 아래 목록 조회 useEffect는 regionOptions가 아니라 "실제로 서버에 보낼 값"인
+  // 이 코드를 의존성으로 씁니다. 예전엔 regionOptions를 그대로 의존성에 넣어둬서,
+  // 앱을 켤 때(지역이 '전체'라 어차피 보낼 코드는 null) 지역 목록 응답이 도착하는
+  // 순간 똑같은 조건의 목록 조회가 한 번 더 나갔습니다 — 가장 무거운 API를
+  // 콜드스타트마다 두 번 부르던 셈이라, 실제로 값이 달라질 때만 다시 조회합니다.
+  const matchedRegionCode =
     selectedRegion !== "전체" ? (regionOptions.find((r) => r.name.includes(selectedRegion))?.code ?? null) : null;
 
   React.useEffect(() => {
@@ -180,10 +186,8 @@ export default function HomeScreen() {
   }, [revealStage, statsSettled]);
 
   React.useEffect(() => {
-    // 선택된 지역 칩("수원" 등)에 해당하는 시/군/구 코드를 찾아서 필터링합니다.
-    // "전체"거나 아직 지역 목록을 못 받아왔으면 코드 없이(경기도 전체) 조회합니다.
-    const matchedRegionCode = getMatchedRegionCode();
-
+    // 지역 코드(matchedRegionCode)는 위에서 계산해둡니다. "전체"거나 아직 지역
+    // 목록을 못 받아왔으면 null이라, 코드 없이(경기도 전체) 조회합니다.
     setLoadingPlaces(true);
     setVisiblePlacesCount(PLACES_PAGE_SIZE);
     visiblePlacesCountRef.current = PLACES_PAGE_SIZE;
@@ -259,7 +263,7 @@ export default function HomeScreen() {
           setChipsReady(true);
         }
       });
-  }, [wheelchairOnly, selectedRegion, regionOptions]);
+  }, [wheelchairOnly, selectedRegion, matchedRegionCode]);
 
   // 히어로 배경 사진을 3초마다 후보 목록에서 무작위로 다시 골라 바꿉니다.
   // 지금 보이지 않는(opacity 0) 레이어에 다음 사진을 미리 얹어두고, 두
@@ -355,7 +359,7 @@ export default function HomeScreen() {
         const nextRaw = await api.listAttractions(
           "경기도",
           wheelchairOnly ? "wheelchair" : "general",
-          getMatchedRegionCode(),
+          matchedRegionCode,
           PLACES_FETCH_PAGE_SIZE,
           false,
           offsetRef.current
