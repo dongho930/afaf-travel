@@ -42,6 +42,8 @@ export function BottomTabBar() {
         styles.container,
         { paddingBottom: Math.max(insets.bottom, 8), backgroundColor: colors.surface, borderTopColor: colors.border },
       ]}
+      // 화면을 못 보는 사용자에게 여기가 '탭 모음'이라는 것을 알려줍니다.
+      accessibilityRole="tablist"
     >
       {TAB_ROUTES.map((tab) => {
         const isActive = tab.path === "/" ? pathname === "/" : pathname.startsWith(tab.path);
@@ -52,6 +54,19 @@ export function BottomTabBar() {
             key={tab.path}
             style={({ pressed }) => [styles.tabButton, pressed && styles.tabButtonPressed]}
             onPress={() => router.push(tab.path)}
+            // 아이콘과 글자를 따로 읽지 않고 한 덩어리로 읽게 묶습니다.
+            accessible
+            // "탭"이라고 알려주고, 지금 보고 있는 탭인지("선택됨")도 함께 전합니다.
+            // 어느 탭에 있는지는 지금까지 색깔로만 표시돼서 화면을 못 보면 알 수 없었습니다.
+            accessibilityRole="tab"
+            // 선택 여부는 두 가지 방식으로 함께 넘깁니다. 앱(네이티브)은
+            // accessibilityState를 보고, 웹(react-native-web)은 그걸 아예 무시하고
+            // aria-selected만 봅니다 — 하나만 쓰면 한쪽에서 "선택됨"이 안 읽힙니다.
+            accessibilityState={{ selected: isActive }}
+            aria-selected={isActive}
+            accessibilityLabel={tab.label}
+            // 이미 보고 있는 탭에 "이동합니다"라고 하면 어색하므로 그때는 힌트를 빼둡니다.
+            accessibilityHint={isActive ? undefined : `${tab.label} 화면으로 이동합니다`}
           >
             <TabIcon color={tintColor} size={22} />
             <Text style={[styles.label, { color: tintColor }]}>{tab.label}</Text>
