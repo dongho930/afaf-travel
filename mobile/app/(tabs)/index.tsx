@@ -211,8 +211,11 @@ export default function HomeScreen() {
 
   React.useEffect(() => {
     // '무장애 여행지' 개수는 휠체어/유모차/고령자·임산부를 모두 합친(중복 제거) 실제 계산값입니다.
+    // 여기서 쓰는 건 이 숫자 하나뿐이라 목록은 빼고 받아옵니다(include_places=false).
+    // 예전에는 6개 카테고리 × 최대 200곳(약 240KB)을 통째로 받아서 숫자 하나만
+    // 꺼내 쓰고 나머지는 버렸습니다 — 홈 화면을 열 때마다 매번요.
     api
-      .getAccessibilitySummary("경기도")
+      .getAccessibilitySummary("경기도", false)
       .then((s) => setTotalAccessibleCount(s.total_accessible_count))
       .catch(() => setTotalAccessibleCount(null))
       .finally(markStatSettled);

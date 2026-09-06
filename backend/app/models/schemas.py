@@ -298,7 +298,9 @@ class AccessibilitySummary(BaseModel):
     hearing_count: int  # 청각장애 편의시설(수화안내/자막비디오가이드 등) 보유 장소 수 — 실제 데이터
     family_count: int = 0  # 영유아가족 편의시설(유모차/수유실/유아용보조의자 등) 보유 장소 수
     pregnant_count: int = 0  # 임산부 편의시설(수유실/유아용의자/경사로/엘리베이터/화장실) 보유 장소 수
-    top_wheelchair_places: list[AccessibilityPlaceScore]
+    # include_places=False면 이 목록들이 아예 안 실려 오므로 기본값을 둡니다
+    # (나머지 top_*는 원래부터 default_factory=list였습니다).
+    top_wheelchair_places: list[AccessibilityPlaceScore] = Field(default_factory=list)
     top_senior_places: list[AccessibilityPlaceScore] = Field(default_factory=list)
     top_visual_places: list[AccessibilityPlaceScore] = Field(default_factory=list)
     top_hearing_places: list[AccessibilityPlaceScore] = Field(default_factory=list)
@@ -310,6 +312,26 @@ class AccessibilitySummary(BaseModel):
     # (accessibility_stats에 컬럼이 아직 없는 환경에서는 None)
     total_candidates: int | None = None
     # 진단용(선택): wheelchair_count 등이 왜 그렇게 나왔는지 원인 확인용 정보.
+    # (아래 top_* 목록들은 include_places=False면 전부 빈 목록으로 옵니다 —
+    #  접근성 탭은 /accessibility-places로 필요한 만큼만 따로 받아옵니다.)
     # 카테고리별 후보 수, 무장애 정보 등록 여부(no_record/has_record), API 실패 건수 등.
     # 화면에는 표시하지 않아도 되고, 디버깅 때 응답 JSON에서 바로 확인하기 위한 용도입니다.
     debug: dict | None = None
+
+
+class AccessibilityPlacePage(BaseModel):
+    """
+    '접근성' 탭 주요 여행지 목록의 한 페이지 (/accessibility-places 응답).
+
+    예전에는 요약(/accessibility-summary)이 6개 카테고리 × 최대 200곳을 한 번에
+    다 보냈습니다(240KB 남짓). 화면에는 고른 카테고리 하나를 5곳씩만 보여주므로
+    대부분이 낭비였고, 홈 화면 '인기 여행지'와 같은 방식으로 나눠 받게 했습니다.
+    """
+    category: str
+    # 이 카테고리에 저장된 전체 개수. 앱이 '더보기'를 언제까지 보여줄지 판단합니다.
+    # 통계의 wheelchair_count(예: 491)와는 다릅니다 — 목록은 상위 200곳까지만
+    # 저장하기 때문에 total은 그 상한(200)에서 멈춥니다.
+    total: int
+    offset: int
+    limit: int
+    items: list[AccessibilityPlaceScore] = Field(default_factory=list)

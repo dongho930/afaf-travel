@@ -399,17 +399,34 @@ async def get_saved_course_detail(course_id: str, user_id: str) -> Optional[dict
         return None
 
 
-async def get_cached_accessibility_stats(region: str) -> Optional[dict]:
+# accessibility_stats에서 '개수'만 읽을 때 쓰는 컬럼 목록.
+#
+# 이 테이블의 top_*_places 6개 컬럼에는 카테고리마다 최대 200곳씩(이름·주소·
+# 이미지·편의시설 목록까지) 들어 있어서 한 행이 240KB를 넘습니다. 숫자만
+# 필요한 곳(홈 화면 통계, 퇴보 방지 판단)에서 select("*")로 통째로 읽으면
+# 그 240KB를 매번 Supabase에서 내려받게 됩니다.
+_ACCESSIBILITY_COUNT_COLUMNS = (
+    "region,wheelchair_count,senior_count,total_accessible_count,visual_count,"
+    "hearing_count,family_count,pregnant_count,total_candidates"
+)
+
+
+async def get_cached_accessibility_stats(region: str, columns: str = "*") -> Optional[dict]:
     """
     '접근성' 탭/홈 화면 통계용으로 미리 계산해둔 고정 값을 조회합니다.
     아직 한 번도 계산해서 저장한 적이 없으면(캐시 없음) None을 반환합니다.
+
+    columns로 필요한 컬럼만 골라 읽을 수 있습니다 — 기본값 "*"는 top_*_places
+    6개(총 240KB 남짓)까지 전부 가져오므로, 숫자만 필요하면
+    _ACCESSIBILITY_COUNT_COLUMNS를, 특정 카테고리 목록만 필요하면 그 컬럼명을
+    넘기세요.
     """
     if _client is None:
         return None
     try:
         result = await _execute(
             _client.table("accessibility_stats")
-            .select("*")
+            .select(columns)
             .eq("region", region)
             .limit(1)
         )

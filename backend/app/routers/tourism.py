@@ -2,11 +2,22 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.models.schemas import AccessibilitySummary, Attraction, NearbyAttraction, RegionOption, UserType
+from app.models.schemas import (
+    AccessibilityPlacePage,
+    AccessibilitySummary,
+    Attraction,
+    NearbyAttraction,
+    RegionOption,
+    UserType,
+)
 from app.services.memory_cache import TTLCache
 from app.services.region_popularity_service import read_region_popularity, refresh_region_popularity
 from app.services.sigungu_codes import list_signgu_by_area
-from app.services.supabase_service import get_cached_accessibility_stats, save_accessibility_stats
+from app.services.supabase_service import (
+    _ACCESSIBILITY_COUNT_COLUMNS,
+    get_cached_accessibility_stats,
+    save_accessibility_stats,
+)
 from app.services.tour_api import tour_api_client
 
 router = APIRouter(prefix="/api/tourism", tags=["tourism"])
@@ -266,16 +277,42 @@ async def congestion_forecast(content_id: str):
     return forecast
 
 
+# 접근성 탭의 카테고리 이름 -> accessibility_stats의 목록 컬럼명.
+# 앱이 보내는 category 값을 그대로 컬럼명으로 쓰면 임의 컬럼을 읽힐 수 있으므로,
+# 허용된 카테고리만 이 표를 통해 매핑합니다.
+_TOP_PLACES_COLUMN = {
+    "wheelchair": "top_wheelchair_places",
+    "senior": "top_senior_places",
+    "visual": "top_visual_places",
+    "hearing": "top_hearing_places",
+    "family": "top_family_places",
+    "pregnant": "top_pregnant_places",
+}
+
+
 @router.get("/accessibility-summary", response_model=AccessibilitySummary)
-async def accessibility_summary(region: str = Query(default="경기도")):
+async def accessibility_summary(
+    region: str = Query(default="경기도"),
+    include_places: bool = Query(
+        default=True,
+        description="False면 top_*_places 6개 목록을 빼고 숫자만 돌려줍니다. "
+        "접근성 탭은 목록을 /accessibility-places로 5개씩 따로 받아오므로 False를 씁니다. "
+        "기본값이 True인 것은 이미 배포된 구버전 앱이 이 목록을 그대로 쓰고 있기 때문입니다.",
+    ),
+):
     """
     '접근성' 탭/홈 화면 통계용 요약 정보.
     매번 다시 계산하지 않고, 미리 계산해서 저장해둔(캐시된) 고정 값을 읽어서
     돌려줍니다 — 그래야 요청할 때마다 숫자가 들쭉날쭉하지 않고 일정합니다.
     아직 한 번도 계산한 적이 없으면(캐시 없음) 그 자리에서 한 번 계산해 저장하고
     돌려줍니다 (최초 1회만 오래 걸립니다 — 전수조사라 수 분 소요될 수 있어요).
+
+    include_places=False면 목록을 빼고 숫자만 읽습니다. 목록 6개는 카테고리마다
+    최대 200곳씩 들어 있어 응답이 240KB를 넘는데, 화면에는 5곳씩만 보여주기
+    때문에 대부분이 낭비였습니다. DB에서도 그 컬럼을 아예 안 읽습니다.
     """
-    cached = await get_cached_accessibility_stats(region)
+    columns = "*" if include_places else _ACCESSIBILITY_COUNT_COLUMNS
+    cached = await get_cached_accessibility_stats(region, columns=columns)
     if cached:
         return AccessibilitySummary(**cached)
 
@@ -283,7 +320,51 @@ async def accessibility_summary(region: str = Query(default="경기도")):
     # debug는 이번 계산 과정을 들여다보기 위한 진단용 필드라 캐시 테이블에는 저장하지
     # 않습니다 (accessibility_stats 테이블에 debug 컬럼이 없으면 저장이 실패할 수 있음).
     await save_accessibility_stats(region, {k: v for k, v in data.items() if k != "debug"})
+    if not include_places:
+        data = {k: v for k, v in data.items() if not k.startswith("top_")}
     return AccessibilitySummary(**data)
+
+
+@router.get("/accessibility-places", response_model=AccessibilityPlacePage)
+async def accessibility_places(
+    region: str = Query(default="경기도"),
+    category: str = Query(
+        default="wheelchair",
+        description="wheelchair | senior | visual | hearing | family | pregnant",
+    ),
+    offset: int = Query(default=0, ge=0, description="이미 받아온 개수만큼 건너뛰고 그 다음부터"),
+    limit: int = Query(default=20, ge=1, le=200),
+):
+    """
+    접근성 탭의 '주요 여행지' 목록을 카테고리별로 조금씩 나눠서 돌려줍니다.
+
+    예전에는 /accessibility-summary가 6개 카테고리 × 최대 200곳을 한 번에 다
+    실어 보냈습니다(240KB 남짓). 정작 화면에는 고른 카테고리 하나를 5곳씩만
+    보여주기 때문에, 받아온 것의 대부분이 쓰이지 않고 버려졌습니다. 홈 화면
+    '인기 여행지'에 적용한 것과 같은 방식으로, 필요한 만큼만 받아옵니다.
+
+    통계 계산 자체는 하지 않습니다 — 미리 계산해둔 캐시(accessibility_stats)에서
+    해당 카테고리 컬럼만 읽어 잘라 보냅니다. 캐시가 아직 없으면 빈 목록을
+    돌려주는데, /accessibility-summary가 그 자리에서 계산해 캐시를 채우므로
+    (앱은 요약을 먼저 받고 목록을 요청합니다) 다음 요청부터는 정상적으로 나옵니다.
+    """
+    column = _TOP_PLACES_COLUMN.get(category)
+    if column is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"알 수 없는 카테고리예요: {category} "
+            f"(가능한 값: {', '.join(_TOP_PLACES_COLUMN)})",
+        )
+
+    cached = await get_cached_accessibility_stats(region, columns=column)
+    places = (cached or {}).get(column) or []
+    return AccessibilityPlacePage(
+        category=category,
+        total=len(places),
+        offset=offset,
+        limit=limit,
+        items=places[offset : offset + limit],
+    )
 
 
 @router.get("/accessibility-summary/refresh", response_model=AccessibilitySummary)

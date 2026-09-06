@@ -3,6 +3,7 @@ import { getAccessToken } from "./authToken";
 import { bumpDataVersion } from "./dataVersion";
 import {
   AccessibilityReport,
+  AccessibilityPlacePage,
   AccessibilitySummary,
   Attraction,
   AttractionSearchResult,
@@ -287,8 +288,28 @@ export const api = {
   listTripCourses: (tripId: string) => request<SavedCourseSummary[]>(`/api/trips/${tripId}/courses`),
 
   // '접근성' 탭용 요약 정보
-  getAccessibilitySummary: (region: string = "경기도") =>
-    request<AccessibilitySummary>(`/api/tourism/accessibility-summary?region=${encodeURIComponent(region)}`),
+  // includePlaces=false면 숫자만 받아옵니다(응답 약 240KB -> 0.3KB). 목록은
+  // 화면에 실제로 보여줄 만큼만 getAccessibilityPlaces()로 따로 받습니다.
+  // 기본값이 true인 것은 이 함수를 쓰는 다른 화면(홈 통계)이 아직 목록을
+  // 기대할 수 있기 때문입니다.
+  getAccessibilitySummary: (region: string = "경기도", includePlaces: boolean = true) =>
+    request<AccessibilitySummary>(
+      `/api/tourism/accessibility-summary?region=${encodeURIComponent(region)}` +
+        (includePlaces ? "" : "&include_places=false")
+    ),
+
+  // 접근성 탭 '주요 여행지' — 카테고리 하나를 offset/limit으로 나눠서 받아옵니다
+  // (홈 화면 '인기 여행지'의 서버 페이지네이션과 같은 방식).
+  getAccessibilityPlaces: (
+    category: ReportCategory,
+    offset: number = 0,
+    limit: number = 20,
+    region: string = "경기도"
+  ) =>
+    request<AccessibilityPlacePage>(
+      `/api/tourism/accessibility-places?region=${encodeURIComponent(region)}` +
+        `&category=${encodeURIComponent(category)}&offset=${offset}&limit=${limit}`
+    ),
 
   // 관광지 상세 (주소/혼잡도/이점 태그/소개문 포함)
   getAttractionDetail: (contentId: string) =>

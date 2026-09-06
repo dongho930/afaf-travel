@@ -181,12 +181,30 @@ export interface AccessibilitySummary {
   hearing_count: number;
   family_count: number;
   pregnant_count: number;
+  // 이 목록들은 getAccessibilitySummary(region, false)로 부르면 전부 빈 배열로
+  // 옵니다. 접근성 탭은 고른 카테고리 하나만 getAccessibilityPlaces()로 조금씩
+  // 받아오기 때문입니다 — 6개 카테고리 × 최대 200곳을 한 번에 받으면 응답이
+  // 240KB를 넘는데, 화면에는 5곳씩만 보여줘서 대부분이 버려졌습니다.
   top_wheelchair_places: AccessibilityPlaceScore[];
   top_senior_places: AccessibilityPlaceScore[];
   top_visual_places: AccessibilityPlaceScore[];
   top_hearing_places: AccessibilityPlaceScore[];
   top_family_places: AccessibilityPlaceScore[];
   top_pregnant_places: AccessibilityPlaceScore[];
+}
+
+/** 접근성 탭 '주요 여행지' 목록의 한 페이지 (/api/tourism/accessibility-places) */
+export interface AccessibilityPlacePage {
+  category: string;
+  /**
+   * 이 카테고리에 저장된 전체 개수 — '더보기'를 언제까지 보여줄지 판단합니다.
+   * 통계의 wheelchair_count(예: 491)와는 다릅니다. 목록은 상위 200곳까지만
+   * 저장하므로 total은 그 상한에서 멈춥니다.
+   */
+  total: number;
+  offset: number;
+  limit: number;
+  items: AccessibilityPlaceScore[];
 }
 
 export type ReportCategory = "wheelchair" | "visual" | "hearing" | "senior" | "family" | "pregnant";

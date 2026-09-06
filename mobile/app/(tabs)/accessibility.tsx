@@ -36,16 +36,6 @@ const CATEGORY_META: { key: CategoryKey; icon: Icon; label: string; isMock: bool
   { key: "pregnant_count", icon: userTypeIcon.pregnant, label: "임산부", isMock: false },
 ];
 
-// 각 카테고리를 선택했을 때 어떤 필드의 목록을 보여줄지 매핑합니다.
-const TOP_PLACES_FIELD: Record<CategoryKey, keyof AccessibilitySummary> = {
-  wheelchair_count: "top_wheelchair_places",
-  visual_count: "top_visual_places",
-  hearing_count: "top_hearing_places",
-  senior_count: "top_senior_places",
-  family_count: "top_family_places",
-  pregnant_count: "top_pregnant_places",
-};
-
 // 통계 필드 키(CategoryKey) ↔ 제보 API가 쓰는 카테고리 코드(ReportCategory) 매핑.
 const REPORT_CATEGORY_MAP: Record<CategoryKey, ReportCategory> = {
   wheelchair_count: "wheelchair",
@@ -56,7 +46,13 @@ const REPORT_CATEGORY_MAP: Record<CategoryKey, ReportCategory> = {
   pregnant_count: "pregnant",
 };
 
+// 화면에 한 번에 더 보여주는 개수 ('더보기' 한 번에 늘어나는 양).
 const PLACES_PAGE_SIZE = 5;
+// 서버에 한 번에 요청하는 개수. 표시 단위(5)보다 크게 잡아서, '더보기'를 네 번
+// 누를 동안은 서버를 다시 부르지 않습니다 (홈 화면의 PLACES_FETCH_PAGE_SIZE와
+// 같은 방식). 예전에는 6개 카테고리 × 최대 200곳을 처음에 통째로 받아왔는데,
+// 응답이 240KB나 되면서 정작 쓰이는 건 고른 카테고리의 앞 5곳뿐이었습니다.
+const PLACES_FETCH_PAGE_SIZE = 20;
 
 // 유형별 편의시설 항목 수. 서버가 점수를 매길 때 세는 항목 수와 같아야 합니다
 // (backend/app/services/tour_api.py의 fields_by_category / *_score 함수 참고).
@@ -231,6 +227,20 @@ export default function AccessibilityScreen() {
   const [selectedCategory, setSelectedCategory] = useState<CategoryKey>("wheelchair_count");
   const [visiblePlacesCount, setVisiblePlacesCount] = useState(PLACES_PAGE_SIZE);
 
+  // 고른 카테고리의 '주요 여행지'를 서버에서 조금씩 받아옵니다.
+  //   places       : 지금까지 받아온 목록 (이어붙임)
+  //   placesTotal  : 이 카테고리에 저장된 전체 개수 ('더보기'를 언제 감출지 판단)
+  //   loadingPlaces: 첫 페이지 로딩 중 (카테고리를 막 바꿨을 때)
+  const [places, setPlaces] = useState<AccessibilityPlaceScore[]>([]);
+  const [placesTotal, setPlacesTotal] = useState(0);
+  const [loadingPlaces, setLoadingPlaces] = useState(true);
+  const [loadingMorePlaces, setLoadingMorePlaces] = useState(false);
+  // 다음에 요청할 offset. 화면을 다시 그리게 할 필요가 없는 값이라 ref로 둡니다.
+  const placesOffsetRef = useRef(0);
+  // 카테고리를 빠르게 연달아 바꿀 때, 먼저 보낸 요청이 늦게 도착해서 나중 것을
+  // 덮어쓰는 걸 막습니다 (응답이 올 때 아직 그 카테고리인지 확인).
+  const placesRequestRef = useRef(0);
+
   const [reports, setReports] = useState<AccessibilityReport[]>([]);
   const [loadingReports, setLoadingReports] = useState(true);
 
@@ -243,13 +253,78 @@ export default function AccessibilityScreen() {
   const [reportBody, setReportBody] = useState("");
   const [submittingReport, setSubmittingReport] = useState(false);
 
+  // 숫자만 받아옵니다(include_places=false). 목록은 아래에서 고른 카테고리만
+  // 따로 받아오므로, 여기서 6개 카테고리 목록을 다 받을 이유가 없습니다.
   useEffect(() => {
     api
-      .getAccessibilitySummary("경기도")
+      .getAccessibilitySummary("경기도", false)
       .then(setSummary)
       .catch(() => setSummary(null))
       .finally(() => setLoading(false));
   }, []);
+
+  // 카테고리가 바뀌면 그 카테고리의 첫 묶음을 새로 받아옵니다.
+  useEffect(() => {
+    const requestId = ++placesRequestRef.current;
+    const category = REPORT_CATEGORY_MAP[selectedCategory];
+    setLoadingPlaces(true);
+    setPlaces([]);
+    setPlacesTotal(0);
+    placesOffsetRef.current = 0;
+
+    api
+      .getAccessibilityPlaces(category, 0, PLACES_FETCH_PAGE_SIZE)
+      .then((page) => {
+        // 그 사이에 카테고리를 또 바꿨으면 이 응답은 버립니다.
+        if (requestId !== placesRequestRef.current) return;
+        setPlaces(page.items);
+        setPlacesTotal(page.total);
+        placesOffsetRef.current = page.items.length;
+      })
+      .catch(() => {
+        if (requestId !== placesRequestRef.current) return;
+        setPlaces([]);
+        setPlacesTotal(0);
+      })
+      .finally(() => {
+        if (requestId !== placesRequestRef.current) return;
+        setLoadingPlaces(false);
+      });
+  }, [selectedCategory]);
+
+  // '더보기': 이미 받아둔 목록으로 채울 수 있으면 그냥 더 보여주고, 다 썼으면
+  // 다음 묶음을 서버에서 받아옵니다.
+  const showMorePlaces = useCallback(() => {
+    const next = visiblePlacesCount + PLACES_PAGE_SIZE;
+
+    // 받아둔 것으로 충분하거나, 이미 전부 받아왔으면 서버를 부르지 않습니다.
+    if (next <= places.length || places.length >= placesTotal) {
+      setVisiblePlacesCount(next);
+      return;
+    }
+
+    const requestId = placesRequestRef.current;
+    const category = REPORT_CATEGORY_MAP[selectedCategory];
+    setLoadingMorePlaces(true);
+    api
+      .getAccessibilityPlaces(category, placesOffsetRef.current, PLACES_FETCH_PAGE_SIZE)
+      .then((page) => {
+        if (requestId !== placesRequestRef.current) return;
+        setPlaces((prev) => [...prev, ...page.items]);
+        setPlacesTotal(page.total);
+        placesOffsetRef.current += page.items.length;
+        setVisiblePlacesCount(next);
+      })
+      .catch(() => {
+        // 더 못 받아왔어도 이미 보고 있던 목록은 그대로 둡니다.
+        if (requestId !== placesRequestRef.current) return;
+        setVisiblePlacesCount(next);
+      })
+      .finally(() => {
+        if (requestId !== placesRequestRef.current) return;
+        setLoadingMorePlaces(false);
+      });
+  }, [visiblePlacesCount, places.length, placesTotal, selectedCategory]);
 
   const loadReports = useCallback((categoryKey: CategoryKey) => {
     setLoadingReports(true);
@@ -350,8 +425,8 @@ export default function AccessibilityScreen() {
     : ({} as Record<CategoryKey, number>);
 
   const selectedMeta = CATEGORY_META.find((c) => c.key === selectedCategory)!;
-  const selectedPlaces: AccessibilityPlaceScore[] =
-    (summary?.[TOP_PLACES_FIELD[selectedCategory]] as AccessibilityPlaceScore[] | undefined) ?? [];
+  // 목록은 이제 요약이 아니라 /accessibility-places에서 조금씩 받아옵니다.
+  const selectedPlaces: AccessibilityPlaceScore[] = places;
 
   return (
     // edges=["top"]로 화면 상단만 안전영역 처리합니다 (홈 화면과 동일한 방식).
@@ -477,21 +552,30 @@ export default function AccessibilityScreen() {
               </FadeInView>
             );
           })
+        ) : loadingPlaces ? (
+          // 카테고리를 막 바꿔서 아직 받아오는 중. "없어요"라고 단정하면 안 됩니다.
+          <Text style={styles.emptyText} accessibilityLiveRegion="polite">
+            {selectedMeta.label} 주요 여행지를 불러오는 중이에요.
+          </Text>
         ) : (
           <Text style={styles.emptyText}>
             {selectedMeta.label} 관련 편의시설 정보가 있는 장소가 아직 없어요.
           </Text>
         )}
 
-        {visiblePlacesCount < selectedPlaces.length && (
+        {visiblePlacesCount < placesTotal && (
           <Pressable
             style={({ pressed }) => [styles.moreButton, pressed && styles.pressedFeedback]}
-            onPress={() => setVisiblePlacesCount((c) => c + PLACES_PAGE_SIZE)}
+            onPress={showMorePlaces}
+            disabled={loadingMorePlaces}
             accessibilityRole="button"
-            accessibilityLabel="더보기"
+            accessibilityLabel={loadingMorePlaces ? "불러오는 중" : "더보기"}
             accessibilityHint={`여행지 ${PLACES_PAGE_SIZE}곳을 더 불러옵니다`}
+            accessibilityState={{ disabled: loadingMorePlaces, busy: loadingMorePlaces }}
           >
-            <Text style={styles.moreButtonText}>더보기</Text>
+            <Text style={styles.moreButtonText}>
+              {loadingMorePlaces ? "불러오는 중..." : "더보기"}
+            </Text>
           </Pressable>
         )}
 
