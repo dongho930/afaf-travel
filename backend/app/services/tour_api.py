@@ -36,6 +36,8 @@ from app.services.sigungu_codes import (
     signgu_name,
 )
 from app.services.supabase_service import (
+    CacheUnavailable,
+    get_all_cached_place_accessibility_ids,
     get_cached_accessibility_stats,
     get_cached_attraction_basic,
     get_cached_attraction_list,
@@ -320,6 +322,14 @@ _LIST_CACHE_UNION_MAX_AGE_HOURS = 24.0 * 365
 # 동시에 돌리므로 전부 실패해도 대략 (타임아웃 30초 x 3회 + 대기 4초) 정도에서 끝납니다.
 _LIST_FETCH_ATTEMPTS = 3
 _LIST_FETCH_BACKOFF_SECONDS = (1.0, 3.0)
+
+# 편의시설 캐시(place_accessibility_cache)를 후보 되살리기에 쓸 수 있는 지역.
+#
+# 이 캐시는 content_id만 키로 쓰고 지역 정보를 담지 않습니다. 지금까지 이 캐시를
+# 채운 전수조사가 경기도 하나뿐이라, 경기도 집계에 한해 "여기 있는 id는 경기도
+# 관광지"라고 볼 수 있습니다. 다른 지역을 지원하게 되면 이 캐시에 지역 컬럼을
+# 추가하고 이 상수를 걷어내야 합니다.
+_ACCESSIBILITY_CACHE_REGION = "경기도"
 
 # 새로 받아온 목록이 기존 캐시의 이 비율 미만이면 캐시를 덮어쓰지 않습니다.
 # 관광지가 하루 사이에 20% 넘게 사라질 일은 없으므로, 그만큼 줄었다면 이번 조회가
@@ -1360,6 +1370,37 @@ class TourApiClient:
             accessibility=AccessibilityFeatures(),
         )
 
+    async def _accessibility_cache_candidates(
+        self, region: str, exclude_ids: set[str]
+    ) -> list[Attraction]:
+        """
+        편의시설 캐시에만 남아 있는 관광지를 후보로 되살립니다.
+
+        관광지 '목록' API가 잘리면 그 카테고리가 통째로 후보에서 빠지고, 편의시설
+        정보가 캐시에 멀쩡히 있어도 '접근성 없음'으로 세어집니다. 실제로 무장애
+        여행지 수가 1232에서 539로 떨어졌습니다 — 캐시에는 1247건이 그대로 있는데도요.
+        목록 캐시(attraction_list_cache)와 달리 이 캐시는 잘린 목록에 덮어써지지
+        않으므로, 개수를 되돌리는 가장 확실한 근거입니다.
+
+        이름/주소는 채우지 않습니다 — 이 캐시에 없기 때문입니다. 개수 집계에는
+        content_id와 편의시설 정보만 있으면 되고, 이름 없는 후보는 '주요 여행지'
+        목록에서 빠집니다(화면에 빈 카드가 뜨지 않도록).
+        """
+        if region != _ACCESSIBILITY_CACHE_REGION:
+            return []
+        cached_ids = await get_all_cached_place_accessibility_ids()
+        return [
+            Attraction(
+                content_id=content_id,
+                name="",
+                address="",
+                latitude=0.0,
+                longitude=0.0,
+                category="",
+            )
+            for content_id in sorted(cached_ids - exclude_ids)
+        ]
+
     async def _accessibility_fallback_candidates(self, category_key: str) -> list[Attraction]:
         """
         실시간 표본에 원하는 접근성 유형이 하나도 안 걸렸을 때 쓰는 안전망입니다.
@@ -1368,7 +1409,13 @@ class TourApiClient:
         진짜 대상지를 가져옵니다. 각 항목은 content_id만 있어서, get_attraction_detail로
         상세를 채웁니다(캐시 우선이라 대부분 API 호출 없이 빠르게 끝납니다).
         """
-        stats = await get_cached_accessibility_stats("경기도")
+        try:
+            stats = await get_cached_accessibility_stats("경기도")
+        except CacheUnavailable as e:
+            # 여긴 '안전망'이라 캐시를 못 읽었다고 요청 전체를 실패시킬 이유는
+            # 없습니다. 안전망 없이 실시간 표본 결과만 내보냅니다.
+            logger.warning("_accessibility_fallback_candidates: 통계 캐시를 읽지 못했습니다: %s", e)
+            return []
         if not stats:
             return []
         places = stats.get(category_key) or []
@@ -2476,6 +2523,21 @@ class TourApiClient:
                         if a.content_id and a.content_id not in seen_ids:
                             seen_ids.add(a.content_id)
                             all_candidates.append(a)
+                # 목록 API가 잘려도 개수가 떨어지지 않도록, 편의시설 캐시에만 남아
+                # 있는 관광지를 후보로 되살립니다 (DB 읽기라 API 예산 소모 없음).
+                try:
+                    revived = await self._accessibility_cache_candidates(region, seen_ids)
+                except CacheUnavailable as e:
+                    revived = []
+                    logger.warning(
+                        "get_accessibility_summary: 편의시설 캐시 id를 읽지 못해 "
+                        "후보 되살리기를 건너뜁니다: %s",
+                        e,
+                    )
+                all_candidates.extend(revived)
+                seen_ids.update(a.content_id for a in revived)
+                debug_info["candidates_revived_from_accessibility_cache"] = len(revived)
+
                 debug_info["total_candidates_before_accessibility_fetch"] = len(all_candidates)
                 debug_info["live_candidates"] = sum(len(g) for g in results_per_type)
                 debug_info["candidates_only_from_cache"] = len(all_candidates) - len(
@@ -2589,16 +2651,21 @@ class TourApiClient:
             a.content_id for a in (wheelchair_places + senior_places + stroller_places)
         }
 
-        # 접근성 탭에서 '더보기'로 여러 페이지 볼 수 있도록 5개보다 훨씬 넉넉하게
-        # 담아둡니다. 실제 화면 노출은 앱에서 5개씩 나눠서 보여줍니다.
         # 접근성 탭에서 '더보기'로 여러 페이지 볼 수 있도록 넉넉하게 담아둡니다.
         # 실제 화면 노출은 앱에서 5개씩 나눠서 보여줍니다.
-        top_wheelchair = sorted(wheelchair_places, key=wheelchair_score, reverse=True)[:200]
-        top_senior = sorted(senior_places, key=senior_score, reverse=True)[:200]
-        top_visual = sorted(visual_places, key=visual_score, reverse=True)[:200]
-        top_hearing = sorted(hearing_places, key=hearing_score, reverse=True)[:200]
-        top_family = sorted(family_places, key=family_score, reverse=True)[:200]
-        top_pregnant = sorted(pregnant_places, key=pregnant_score, reverse=True)[:200]
+        #
+        # 이름이 없는 후보(편의시설 캐시에서 되살린 곳)는 개수에는 들어가지만
+        # 목록에서는 뺍니다 — 이름/이미지가 없어 화면에 빈 카드로 보입니다.
+        # 목록 API가 정상으로 돌아오면 이름이 채워지면서 자연스럽게 합류합니다.
+        def top(places: list[Attraction], score_fn) -> list[Attraction]:
+            return sorted([a for a in places if a.name], key=score_fn, reverse=True)[:200]
+
+        top_wheelchair = top(wheelchair_places, wheelchair_score)
+        top_senior = top(senior_places, senior_score)
+        top_visual = top(visual_places, visual_score)
+        top_hearing = top(hearing_places, hearing_score)
+        top_family = top(family_places, family_score)
+        top_pregnant = top(pregnant_places, pregnant_score)
 
         # 목록 카드에 "이 곳이 실제로 갖춘 편의시설"을 함께 보여주기 위한 항목들입니다.
         # 위 점수 함수가 세는 항목과 정확히 같아야 합니다 — 그래야 '많음/보통/적음'

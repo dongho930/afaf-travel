@@ -15,6 +15,7 @@ from app.services.region_popularity_service import read_region_popularity, refre
 from app.services.sigungu_codes import list_signgu_by_area
 from app.services.supabase_service import (
     _ACCESSIBILITY_COUNT_COLUMNS,
+    CacheUnavailable,
     get_cached_accessibility_stats,
     save_accessibility_stats,
 )
@@ -63,6 +64,18 @@ _ACCESSIBILITY_FAILURE_KEYS = ("deferred_no_budget", "rate_limit_exhausted", "ap
 # 그만큼 줄었다면 우리 쪽 조회가 실패한 것으로 보는 게 맞습니다.
 _CANDIDATE_DROP_THRESHOLD = 0.8
 
+# 직전 값과 비교하지 않고도 "이 결과는 분명히 미완성"이라고 판단하는 절대 하한.
+#
+# 위 _CANDIDATE_DROP_THRESHOLD는 비교할 직전 값(existing)이 있어야만 동작합니다.
+# 그런데 캐시를 처음 채울 때나 캐시 조회가 실패한 직후에는 existing이 없어서
+# 검사가 통째로 통과되고, 목록 API가 죽어 있으면 반토막 난 값이 그대로
+# 저장됐습니다. 경기도 전수조사는 정상일 때 수천 건이 후보로 잡히므로,
+# 이보다 적으면 목록 조회가 깨진 것으로 봅니다.
+#
+# 주의: 이 값은 경기도 기준입니다. 후보가 이보다 적은 지역을 지원하게 되면
+# 지역별 하한으로 바꿔야 합니다 (그 전까지는 지역이 경기도 하나뿐입니다).
+_MIN_PLAUSIBLE_CANDIDATES = 700
+
 
 def _is_regression(existing: dict | None, data: dict) -> bool:
     """
@@ -82,18 +95,26 @@ def _is_regression(existing: dict | None, data: dict) -> bool:
     읽히므로 아래 실패 카운터가 전부 0이고, 검사를 그냥 통과해 491건이 저장됐습니다
     (캐시에는 1247건이 멀쩡히 있었는데도). 그래서 (3) 목록이 잘렸다는 신호와
     (4) 후보 수 급감을 함께 봅니다.
+
+    검사 (0)은 existing 없이도 동작합니다 — 나머지 규칙이 전부 "직전 값과 비교"라,
+    캐시가 비었거나 조회에 실패한 순간에는 통째로 무력화됐기 때문입니다.
     """
+    debug = data.get("debug", {}) or {}
+
+    # (0) 직전 값이 있든 없든, 이번 결과 자체가 명백히 미완성인 경우.
+    #     관광공사 목록 API가 통째로 실패하면 후보가 0곳이 되고, 그러면 편의시설
+    #     조회는 시작조차 못 해서 아래 실패 카운터가 전부 0으로 남습니다. 그 상태를
+    #     "실패 없음"으로 오해해 0을 저장한 적이 있어서, 개수 자체를 먼저 봅니다.
+    if debug.get("total_candidates_before_accessibility_fetch") == 0:
+        return True
+    candidates = data.get("total_candidates")
+    if isinstance(candidates, int) and candidates < _MIN_PLAUSIBLE_CANDIDATES:
+        return True
+
     if not existing:
         return False
 
-    debug = data.get("debug", {}) or {}
-
-    # (1) 조회할 관광지 자체를 못 가져온 경우. 관광공사 목록 API가 통째로 실패하면
-    #     후보가 0곳이 되고, 그러면 편의시설 조회는 시작조차 못 해서 아래 실패
-    #     카운터가 전부 0으로 남습니다. 그 상태를 "실패 없음"으로 오해해 0을 저장한
-    #     적이 있어서, 개수 자체가 비었는지를 먼저 봅니다.
-    if debug.get("total_candidates_before_accessibility_fetch") == 0:
-        return True
+    # (1) 예전엔 있었는데 이번엔 0곳이 된 경우.
     if data.get("total_accessible_count", 0) == 0 and existing.get("total_accessible_count", 0) > 0:
         return True
 
@@ -131,6 +152,39 @@ def _is_regression(existing: dict | None, data: dict) -> bool:
         return True
 
     return False
+
+
+async def _save_summary_unless_regressed(region: str, existing: dict | None, data: dict) -> None:
+    """
+    새로 계산한 통계를 저장합니다 — 단, 이번 결과가 미완성이면 건너뜁니다.
+
+    저장 판단이 갱신 엔드포인트에만 있어서, 일반 조회 쪽은 캐시를 못 읽을 때마다
+    검사 없이 덮어쓰고 있었습니다. 두 경로가 같은 규칙을 쓰도록 한곳으로 모읍니다.
+    """
+    if _is_regression(existing, data):
+        debug = data.get("debug", {}) or {}
+        diag = debug.get("accessibility_fetch", {}) or {}
+        list_diag = debug.get("list_fetch", {}) or {}
+        # 왜 건너뛰었는지 나중에 로그만 보고 알 수 있도록 실패 종류를 전부 남깁니다.
+        failure_detail = ", ".join(f"{key}={diag.get(key, 0)}" for key in _ACCESSIBILITY_FAILURE_KEYS)
+        list_detail = (
+            f"list_page_errors={list_diag.get('list_page_errors', 0)}, "
+            f"list_truncated={list_diag.get('list_truncated', 0)}, "
+            f"후보={data.get('total_candidates')}"
+            f"(직전 {(existing or {}).get('total_candidates', '없음')})"
+        )
+        print(
+            f"[tourism] 이번 집계가 실제보다 낮게 나와 저장을 건너뜁니다 "
+            f"(편의시설 조회: {failure_detail} / 목록 조회: {list_detail}). "
+            f"기존 캐시(total={(existing or {}).get('total_accessible_count', '없음')}, "
+            f"wheelchair={(existing or {}).get('wheelchair_count', '없음')})를 유지합니다. "
+            f"이번 계산값은 total={data.get('total_accessible_count')}, "
+            f"wheelchair={data.get('wheelchair_count')}."
+        )
+        return
+    # debug는 이번 계산 과정을 들여다보기 위한 진단용 필드라 캐시 테이블에는 저장하지
+    # 않습니다 (accessibility_stats 테이블에 debug 컬럼이 없으면 저장이 실패할 수 있음).
+    await save_accessibility_stats(region, {k: v for k, v in data.items() if k != "debug"})
 
 
 @router.get("/regions", response_model=list[RegionOption])
@@ -306,20 +360,30 @@ async def accessibility_summary(
     돌려줍니다 — 그래야 요청할 때마다 숫자가 들쭉날쭉하지 않고 일정합니다.
     아직 한 번도 계산한 적이 없으면(캐시 없음) 그 자리에서 한 번 계산해 저장하고
     돌려줍니다 (최초 1회만 오래 걸립니다 — 전수조사라 수 분 소요될 수 있어요).
+    이때도 계산 결과가 미완성이면(목록 API 장애 등) 저장은 건너뜁니다 — 한 번
+    저장되면 그 낮은 숫자가 다음 갱신의 '직전 값'이 돼서 그대로 굳습니다.
+    캐시를 읽지 못한 경우(DB 일시 장애)는 '캐시 없음'과 달리 503으로 답합니다.
 
     include_places=False면 목록을 빼고 숫자만 읽습니다. 목록 6개는 카테고리마다
     최대 200곳씩 들어 있어 응답이 240KB를 넘는데, 화면에는 5곳씩만 보여주기
     때문에 대부분이 낭비였습니다. DB에서도 그 컬럼을 아예 안 읽습니다.
     """
     columns = "*" if include_places else _ACCESSIBILITY_COUNT_COLUMNS
-    cached = await get_cached_accessibility_stats(region, columns=columns)
+    try:
+        cached = await get_cached_accessibility_stats(region, columns=columns)
+    except CacheUnavailable as e:
+        # 캐시를 '읽지 못한' 것뿐인데 그 자리에서 재계산해 저장하면, 외부 API가
+        # 불안정한 순간에 멀쩡하던 값이 미완성 값으로 덮어써집니다. 저장된 값은
+        # 그대로 두고, 잠시 뒤 다시 물어보게 합니다.
+        raise HTTPException(
+            status_code=503,
+            detail="접근성 통계를 잠시 불러올 수 없어요. 잠시 후 다시 시도해 주세요.",
+        ) from e
     if cached:
         return AccessibilitySummary(**cached)
 
     data = await tour_api_client.get_accessibility_summary(region)
-    # debug는 이번 계산 과정을 들여다보기 위한 진단용 필드라 캐시 테이블에는 저장하지
-    # 않습니다 (accessibility_stats 테이블에 debug 컬럼이 없으면 저장이 실패할 수 있음).
-    await save_accessibility_stats(region, {k: v for k, v in data.items() if k != "debug"})
+    await _save_summary_unless_regressed(region, None, data)
     if not include_places:
         data = {k: v for k, v in data.items() if not k.startswith("top_")}
     return AccessibilitySummary(**data)
@@ -356,7 +420,13 @@ async def accessibility_places(
             f"(가능한 값: {', '.join(_TOP_PLACES_COLUMN)})",
         )
 
-    cached = await get_cached_accessibility_stats(region, columns=column)
+    try:
+        cached = await get_cached_accessibility_stats(region, columns=column)
+    except CacheUnavailable as e:
+        raise HTTPException(
+            status_code=503,
+            detail="주요 여행지 목록을 잠시 불러올 수 없어요. 잠시 후 다시 시도해 주세요.",
+        ) from e
     places = (cached or {}).get(column) or []
     return AccessibilityPlacePage(
         category=category,
@@ -379,30 +449,22 @@ async def refresh_accessibility_summary(region: str = Query(default="경기도")
     후보가 남아서) 기존에 저장된 값보다 더 안 좋은 결과가 나온 경우엔, 화면에
     보이는 숫자가 갑자기 퇴보하지 않도록 캐시를 덮어쓰지 않습니다 — 응답에는
     이번에 새로 계산한 값(과 debug)을 그대로 돌려드리니 진행 상황 확인용으로 쓰시면 됩니다.
+    직전 값을 읽지 못한 경우(DB 일시 장애)에도 저장하지 않습니다 — 퇴보인지
+    판단할 근거가 없는 상태에서 저장하면 검사를 건너뛴 것과 같기 때문입니다.
     """
-    existing = await get_cached_accessibility_stats(region)
+    try:
+        existing = await get_cached_accessibility_stats(region)
+        stats_readable = True
+    except CacheUnavailable as e:
+        # 직전 값을 못 읽으면 '퇴보인지' 판단할 근거가 없습니다. 근거 없이 저장하면
+        # 검사를 통째로 건너뛴 것과 같으므로, 이번 회차는 계산 결과만 돌려주고
+        # 저장은 하지 않습니다 (다음 갱신 때 다시 시도됩니다).
+        existing, stats_readable = None, False
+        print(f"[tourism] 기존 통계 캐시를 읽지 못해 이번 결과는 저장하지 않습니다: {e}")
+
     data = await tour_api_client.get_accessibility_summary(region)
-    if _is_regression(existing, data):
-        debug = data.get("debug", {}) or {}
-        diag = debug.get("accessibility_fetch", {}) or {}
-        list_diag = debug.get("list_fetch", {}) or {}
-        # 왜 건너뛰었는지 나중에 로그만 보고 알 수 있도록 실패 종류를 전부 남깁니다.
-        failure_detail = ", ".join(f"{key}={diag.get(key, 0)}" for key in _ACCESSIBILITY_FAILURE_KEYS)
-        list_detail = (
-            f"list_page_errors={list_diag.get('list_page_errors', 0)}, "
-            f"list_truncated={list_diag.get('list_truncated', 0)}, "
-            f"후보={data.get('total_candidates')}(직전 {existing.get('total_candidates')})"
-        )
-        print(
-            f"[tourism] 이번 집계가 실제보다 낮게 나와 저장을 건너뜁니다 "
-            f"(편의시설 조회: {failure_detail} / 목록 조회: {list_detail}). "
-            f"기존 캐시(total={existing.get('total_accessible_count')}, "
-            f"wheelchair={existing.get('wheelchair_count')})를 유지합니다 — "
-            f"이번 계산값은 total={data.get('total_accessible_count')}, "
-            f"wheelchair={data.get('wheelchair_count')}."
-        )
-    else:
-        await save_accessibility_stats(region, {k: v for k, v in data.items() if k != "debug"})
+    if stats_readable:
+        await _save_summary_unless_regressed(region, existing, data)
     return AccessibilitySummary(**data)
 
 

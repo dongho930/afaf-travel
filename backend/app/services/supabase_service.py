@@ -38,6 +38,17 @@ if settings.supabase_url and settings.supabase_service_key:
 
     _client = create_client(settings.supabase_url, settings.supabase_service_key)
 
+
+class CacheUnavailable(RuntimeError):
+    """
+    캐시 테이블을 '읽지 못했다'는 신호 — '저장된 값이 없다'와 구분하기 위한 것입니다.
+
+    조회 실패와 행 없음을 똑같이 None으로 돌려주면, 호출부는 "아직 계산한 적이
+    없구나"로 오해하고 그 자리에서 다시 계산해 그 결과를 저장해버립니다. 외부
+    API가 불안정한 순간에 이 일이 겹치면, 멀쩡하던 캐시가 반토막 난 값으로
+    덮어써집니다 (실제로 무장애 여행지 수가 1232에서 539로 떨어졌습니다).
+    """
+
 # 관광지 목록 캐시(attraction_list_cache)는 한 행에 카테고리 하나의 목록이 통째로
 # 들어있어 덩치가 큽니다. 홈 화면 한 번 열 때마다 카테고리 5개를 조회하니, 매번
 # DB에서 그 큰 JSON들을 다시 받아오지 않도록 몇 분간 메모리에 들고 있습니다.
@@ -414,7 +425,9 @@ _ACCESSIBILITY_COUNT_COLUMNS = (
 async def get_cached_accessibility_stats(region: str, columns: str = "*") -> Optional[dict]:
     """
     '접근성' 탭/홈 화면 통계용으로 미리 계산해둔 고정 값을 조회합니다.
-    아직 한 번도 계산해서 저장한 적이 없으면(캐시 없음) None을 반환합니다.
+    아직 한 번도 계산해서 저장한 적이 없으면(캐시 없음) None을 반환하고,
+    조회 자체가 실패하면 CacheUnavailable을 올립니다 — 호출부가 이 둘을
+    구분해야 "읽지 못한 김에 재계산해서 덮어쓰는" 사고를 막을 수 있습니다.
 
     columns로 필요한 컬럼만 골라 읽을 수 있습니다 — 기본값 "*"는 top_*_places
     6개(총 240KB 남짓)까지 전부 가져오므로, 숫자만 필요하면
@@ -433,8 +446,10 @@ async def get_cached_accessibility_stats(region: str, columns: str = "*") -> Opt
         rows = result.data or []
         return rows[0] if rows else None
     except Exception as e:
+        # 여기서 None을 돌려주면 호출부가 '캐시 없음'으로 보고 재계산 후 저장까지
+        # 해버립니다. 읽지 못한 것과 없는 것은 다르므로 구분해서 알립니다.
         print(f"[supabase] 접근성 통계 캐시 조회 실패: {e}")
-        return None
+        raise CacheUnavailable(str(e)) from e
 
 
 # accessibility_stats 테이블에 아직 없을 수도 있는 컬럼들.
@@ -535,6 +550,42 @@ async def get_cached_place_accessibility(content_ids: list[str]) -> dict[str, di
         print(f"[supabase] 장소별 무장애 정보 캐시 조회 실패: {e}")
         return {}
     return found
+
+
+async def get_all_cached_place_accessibility_ids() -> set[str]:
+    """
+    편의시설 캐시에 들어 있는 content_id를 전부 돌려줍니다.
+
+    관광지 '목록' API가 잘려서 후보에서 빠진 곳도, 한 번 조회해둔 편의시설 정보는
+    이 캐시에 그대로 남아 있습니다. 그 id를 후보로 되살리면 목록 API가 복구되기
+    전에도 무장애 여행지 수가 원래대로 돌아옵니다 (DB 읽기라 TourAPI 호출/일일
+    예산을 전혀 쓰지 않습니다).
+
+    한 번에 돌려주는 행 수에 상한이 있어 페이지를 넘겨가며 전부 읽습니다.
+    조회 실패는 CacheUnavailable로 알립니다 — 빈 집합을 돌려주면 "되살릴 게
+    없다"와 구분되지 않아, 실패한 날에 조용히 숫자가 떨어집니다.
+    """
+    if _client is None:
+        return set()
+    ids: set[str] = set()
+    page_size = 1000
+    offset = 0
+    try:
+        while True:
+            result = await _execute(
+                _client.table(_PLACE_ACCESSIBILITY_TABLE)
+                .select("content_id")
+                .range(offset, offset + page_size - 1)
+            )
+            rows = result.data or []
+            ids.update(row["content_id"] for row in rows if row.get("content_id"))
+            if len(rows) < page_size:
+                break
+            offset += page_size
+    except Exception as e:
+        print(f"[supabase] 장소별 무장애 정보 캐시 id 조회 실패: {e}")
+        raise CacheUnavailable(str(e)) from e
+    return ids
 
 
 async def save_place_accessibility_batch(rows: list[dict]) -> None:
