@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { MapPinIcon, SparkleIcon, WheelchairIcon, type Icon } from "phosphor-react-native";
 import React, { useEffect, useRef, useState } from "react";
@@ -42,6 +43,28 @@ const CATEGORY_CHIPS = ["전체", "관광지", "문화시설", "레포츠", "숙
 // 인기 여행지 목록에서 아예 제외할 카테고리 (필터 칩으로도 고를 수 없고, '전체'를
 // 선택해도 안 보입니다). 나중에 다시 보이게 하려면 이 배열을 비우면 됩니다.
 const EXCLUDED_CATEGORIES = ["축제/공연/행사", "여행코스", "쇼핑"];
+
+// 지난번에 봤던 홈 화면 내용을 기기에 저장해뒀다가, 다음에 앱을 켤 때 서버 응답을
+// 기다리지 않고 곧바로 그려주기 위한 값들입니다. 화면을 그린 뒤에는 평소대로
+// 서버에서 최신 내용을 받아와 조용히 교체합니다.
+const HOME_CACHE_KEY = "home_screen_cache_v1";
+// 저장해둔 내용의 형식이 바뀌면(필드 추가/삭제) 이 값을 올려서 옛날 캐시를 무시합니다.
+const HOME_CACHE_VERSION = 1;
+// 관광지 목록은 하루 단위로 바뀌는 데이터라, 하루가 지난 캐시는 쓰지 않고
+// 그냥 서버 응답을 기다립니다.
+const HOME_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+// 저장할 카드 수 — 처음 화면에 보이는 만큼(6개)의 두 배 정도면 스크롤을 조금
+// 내려도 빈 곳 없이 이어집니다.
+const HOME_CACHE_PLACE_COUNT = 12;
+
+type HomeCache = {
+  version: number;
+  savedAt: number;
+  places: Attraction[];
+  regionChips: string[];
+  totalAccessibleCount: number | null;
+  supportedRegionCount: number | null;
+};
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -110,6 +133,38 @@ export default function HomeScreen() {
     statsSettledCountRef.current += 1;
     if (statsSettledCountRef.current >= 2) setStatsSettled(true);
   };
+  // 저장해둔 내용으로 먼저 그린 뒤에 서버 응답이 도착하는 게 정상 순서지만,
+  // 반대 순서가 될 수도 있습니다(저장소 읽기가 유독 느린 경우). 그때 오래된
+  // 내용이 최신 내용을 덮어쓰지 않도록 서버 응답이 먼저 왔는지 기억해둡니다.
+  const freshPlacesArrivedRef = useRef(false);
+  const homeCacheSavedRef = useRef(false);
+  // 저장해둔 내용으로 화면을 그린 적이 있는지 (서버 조회가 실패했을 때 그 내용을
+  // 지울지 말지 판단하는 데 씁니다).
+  const hydratedRef = useRef(false);
+
+  // 배경 사진 후보를 갱신하고, 아직 히어로를 띄운 적이 없다면 첫 사진과 함께
+  // 부드럽게 등장시킵니다. 최초 서버 응답과 저장해둔 내용(캐시) 양쪽에서 같은
+  // 방식으로 등장해야 해서 함수로 빼뒀습니다.
+  const initHeroWithImages = (imageUrls: string[]) => {
+    setHeroImageCandidates(imageUrls);
+    if (heroInitializedRef.current) return;
+    heroInitializedRef.current = true;
+    // 사진이 하나도 없는 경우(전부 이미지 URL 없음)에도 히어로 문구 자체는
+    // 떠야 합니다 — 안 그러면 통계/인기 여행지 등장 순서가 영영 다음 단계로
+    // 못 넘어갑니다. 이때는 사진 레이어 없이 배경색만으로 보여집니다.
+    if (imageUrls.length > 0) {
+      // 히어로 박스 전체(사진+글자)를 heroContentOpacity로 한 번에 나타내므로,
+      // 사진 레이어 자체는 처음부터 보이는 상태(1)로 둡니다 — 안 그러면 박스가
+      // 나타난 뒤 사진이 한 번 더 페이드인되어 두 단계로 나뉘어 보입니다.
+      heroOpacityA.setValue(1);
+      heroOpacityB.setValue(0);
+      setHero({ a: imageUrls[Math.floor(Math.random() * imageUrls.length)], b: null, visible: "a" });
+    }
+    Animated.timing(heroContentOpacity, { toValue: 1, duration: 900, useNativeDriver: true }).start(() => {
+      // 통계는 히어로가 다 나타난 뒤에만 등장 허용(이미 2단계 이상이면 유지).
+      setRevealStage((s) => Math.max(s, 1));
+    });
+  };
   const PLACES_PAGE_SIZE = 6;
   // 서버에 한 번에 요청하는 개수(카드 6개씩 5묶음 분량). 예전에는 화면을 열
   // 때마다 최대 1500개를 통째로 받아서 화면단에서만 6개씩 나눠 보여줬는데,
@@ -176,6 +231,71 @@ export default function HomeScreen() {
       .catch(() => {});
   }, []);
 
+  // 지난번에 저장해둔 홈 화면 내용을 먼저 그려줍니다. 서버 응답을 기다리는
+  // 동안 빈 화면을 보고 있을 필요가 없어져서, 두 번째 실행부터는 앱을 켜자마자
+  // 바로 내용이 보입니다. 최신 내용은 평소대로 뒤에서 받아와 교체합니다.
+  React.useEffect(() => {
+    let cancelled = false;
+    AsyncStorage.getItem(HOME_CACHE_KEY)
+      .then((raw) => {
+        // 서버 응답이 이미 도착했다면 굳이 옛날 내용으로 되돌릴 이유가 없습니다.
+        if (cancelled || !raw || freshPlacesArrivedRef.current) return;
+        const cached: HomeCache = JSON.parse(raw);
+        if (cached?.version !== HOME_CACHE_VERSION || !cached.places?.length) return;
+        if (Date.now() - (cached.savedAt ?? 0) > HOME_CACHE_MAX_AGE_MS) return;
+
+        hydratedRef.current = true;
+        setPopularPlaces(cached.places);
+        setLoadingPlaces(false);
+        if (cached.regionChips?.length) setRegionChips(cached.regionChips);
+        if (typeof cached.totalAccessibleCount === "number") setTotalAccessibleCount(cached.totalAccessibleCount);
+        if (typeof cached.supportedRegionCount === "number") setSupportedRegionCount(cached.supportedRegionCount);
+        // 통계/칩은 이미 보여줄 값이 있으니, 서버 응답을 기다리지 않고 등장
+        // 순서를 진행시킵니다 (히어로 → 통계 → 인기 여행지 연출은 그대로).
+        setStatsSettled(true);
+        firstLoadDoneRef.current = true;
+        setChipsReady(true);
+        initHeroWithImages(
+          cached.places.map((p) => p.image_url).filter((url): url is string => !!url)
+        );
+      })
+      .catch(() => {}); // 캐시를 못 읽어도 평소대로 서버에서 받아오면 됩니다.
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 다음 실행 때 바로 그려줄 수 있도록, 기본 화면(지역 '전체' + 무장애 필터 꺼짐)
+  // 기준의 첫 화면 내용을 한 번 저장해둡니다. 필터를 바꾼 상태의 목록은 다음에
+  // 켰을 때의 기본 화면과 다르므로 저장하지 않습니다.
+  React.useEffect(() => {
+    if (homeCacheSavedRef.current) return;
+    if (selectedRegion !== "전체" || wheelchairOnly) return;
+    if (popularPlaces.length === 0 || !statsSettled) return;
+    // 방금 서버에서 받아온 내용만 저장합니다 — 캐시로 그린 내용을 그대로 다시
+    // 저장하면 저장 시각만 계속 새로 찍혀서, 오래된 내용이 영영 만료되지 않습니다.
+    if (!freshPlacesArrivedRef.current) return;
+    homeCacheSavedRef.current = true;
+    const snapshot: HomeCache = {
+      version: HOME_CACHE_VERSION,
+      savedAt: Date.now(),
+      places: popularPlaces.slice(0, HOME_CACHE_PLACE_COUNT),
+      regionChips,
+      totalAccessibleCount,
+      supportedRegionCount,
+    };
+    AsyncStorage.setItem(HOME_CACHE_KEY, JSON.stringify(snapshot)).catch(() => {});
+  }, [
+    popularPlaces,
+    statsSettled,
+    regionChips,
+    totalAccessibleCount,
+    supportedRegionCount,
+    selectedRegion,
+    wheelchairOnly,
+  ]);
+
   // 히어로가 먼저 등장한 뒤(revealStage 1) 통계까지 결론이 나면, 통계 카드가
   // 실제로 페이드인할 시간(FadeInView 기본 300ms)만큼 살짝 기다렸다가 다음
   // 단계(인기 여행지 섹션 표시 허용)로 넘어갑니다.
@@ -210,37 +330,14 @@ export default function HomeScreen() {
         false
       )
       .then((places) => {
+        freshPlacesArrivedRef.current = true;
         hasMoreRef.current = places.length === PLACES_FETCH_PAGE_SIZE;
         // 축제/공연/행사, 여행코스, 쇼핑은 인기 여행지 목록에서 아예 제외합니다.
         const filtered = places.filter((p) => !EXCLUDED_CATEGORIES.includes(p.category));
         // 사진이 있는 관광지들의 사진 URL을 후보 목록으로 저장해두고, 그중
         // 하나를 무작위로 골라 상단 배너 배경으로 씁니다. 아래 useEffect가 이
         // 후보 목록에서 3초마다 다시 무작위로 골라 배경을 크로스페이드로 바꿉니다.
-        const imageUrls = filtered.map((p) => p.image_url).filter((url): url is string => !!url);
-        setHeroImageCandidates(imageUrls);
-        if (!heroInitializedRef.current) {
-          heroInitializedRef.current = true;
-          // 사진이 하나도 없는 경우(전부 이미지 URL 없음)에도 히어로 문구
-          // 자체는 떠야 합니다 — 안 그러면 통계/인기 여행지 등장 순서가
-          // 영영 다음 단계로 못 넘어갑니다. 이때는 사진 레이어 없이 배경색만으로 보여집니다.
-          if (imageUrls.length > 0) {
-            // 히어로 박스 전체(사진+글자)를 아래 heroContentOpacity로 한 번에
-            // 나타내므로, 사진 레이어 자체는 처음부터 바로 보이는 상태(1)로
-            // 둡니다 — 안 그러면 박스가 나타난 뒤 사진이 한 번 더 페이드인되어
-            // 두 단계로 나뉘어 보입니다.
-            heroOpacityA.setValue(1);
-            heroOpacityB.setValue(0);
-            setHero({
-              a: imageUrls[Math.floor(Math.random() * imageUrls.length)],
-              b: null,
-              visible: "a",
-            });
-          }
-          Animated.timing(heroContentOpacity, { toValue: 1, duration: 900, useNativeDriver: true }).start(() => {
-            // 통계는 히어로가 다 나타난 뒤에만 등장 허용(이미 2단계 이상이면 유지).
-            setRevealStage((s) => Math.max(s, 1));
-          });
-        }
+        initHeroWithImages(filtered.map((p) => p.image_url).filter((url): url is string => !!url));
 
         const firstBatch = filtered.slice(0, PLACES_PAGE_SIZE);
         const firstIds = firstBatch.map((p) => p.content_id);
@@ -255,7 +352,13 @@ export default function HomeScreen() {
           setPopularPlaces(mergeOverviewAndExtraInfo(filtered, overviews, extraInfoMap));
         }); // 소개문/부가 정보를 못 받아와도 카드는 그냥 보여줍니다(각 헬퍼가 실패 시 빈 맵을 돌려줌).
       })
-      .catch(() => setPopularPlaces([]))
+      .catch(() => {
+        // 저장해둔 내용으로 이미 화면을 그려둔 상태(기본 화면)라면, 새로 받아오기에
+        // 실패했다고 해서 보고 있던 목록까지 지우지는 않습니다. 반대로 필터를 바꾼
+        // 뒤 실패한 경우엔 지금 조건과 맞지 않는 목록이므로 비웁니다.
+        const isDefaultView = selectedRegion === "전체" && !wheelchairOnly;
+        if (!(hydratedRef.current && isDefaultView)) setPopularPlaces([]);
+      })
       .finally(() => {
         setLoadingPlaces(false);
         if (!firstLoadDoneRef.current) {
