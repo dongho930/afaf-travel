@@ -1188,6 +1188,7 @@ class TourApiClient:
         sigungu_cd: int | None = None,
         include_overview: bool = True,
         offset: int = 0,
+        detail_for: int = 0,
     ) -> list[Attraction]:
         """
         무장애 여행 정보 기준으로 1차 필터링된 관광지 목록 조회.
@@ -1429,6 +1430,29 @@ class TourApiClient:
                     logger.warning(
                         "search_accessible_attractions: 소개문 조회가 6초 안에 끝나지 않아 "
                         "일부는 비어있는 채로 반환합니다."
+                    )
+
+        # detail_for는 "앞의 N개는 소개문/부가정보까지 채워서 한 번에 보내달라"는
+        # 요청입니다. 홈 화면은 목록을 받은 뒤 화면에 보이는 6개의 소개문/부가정보를
+        # 다시 요청하느라 왕복이 한 번 더 필요했는데, 그 왕복을 없애기 위한 것입니다
+        # (앱에서 카드를 보여주기 전에 어차피 둘 다 기다리므로, 서버에서 한 번에
+        # 채워 보내는 편이 빠릅니다). 둘 다 캐시 우선이라 대개는 API 호출이 없습니다.
+        if detail_for > 0 and results:
+            head = results[:detail_for]
+            async with httpx.AsyncClient(timeout=15) as detail_client:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(
+                            self._fill_overview_with_cache(detail_client, head),
+                            self._fill_extra_info_with_cache(detail_client, head),
+                        ),
+                        timeout=8.0,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "search_accessible_attractions: 앞 %d개의 소개문/부가정보 조회가 8초 안에 "
+                        "끝나지 않아 일부는 비어있는 채로 반환합니다.",
+                        detail_for,
                     )
 
         return results

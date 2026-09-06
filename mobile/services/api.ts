@@ -1,5 +1,5 @@
 import Constants from "expo-constants";
-import { supabase } from "./supabaseClient";
+import { getAccessToken } from "./authToken";
 import {
   AccessibilityReport,
   AccessibilitySummary,
@@ -31,8 +31,9 @@ const API_BASE_URL: string =
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   // 로그인 상태면 토큰을 실어 보내서, 백엔드가 "누가 만든 코스인지" 알 수 있게 합니다.
   // 로그인 안 했으면 그냥 토큰 없이 보내고(기존과 동일하게 동작), 백엔드도 이를 허용합니다.
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
+  // 토큰은 메모리에 들고 있다가 바로 씁니다(authToken.ts) — 예전처럼 호출할 때마다
+  // 저장소에서 세션을 읽어오지 않습니다.
+  const token = await getAccessToken();
 
   const res = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
@@ -49,16 +50,19 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // detailFor: 앞의 N개는 소개문/부가정보까지 채워서 함께 받아옵니다. 목록을 받은 뒤
+  // 화면에 보이는 만큼의 소개문을 다시 요청하던 왕복 한 번을 없애기 위한 것입니다.
   listAttractions: (
     region: string,
     userType: UserType,
     sigunguCd?: number | null,
     limit: number = 20,
     includeOverview: boolean = true,
-    offset: number = 0
+    offset: number = 0,
+    detailFor: number = 0
   ) =>
     request<Attraction[]>(
-      `/api/tourism/attractions?region=${encodeURIComponent(region)}&user_type=${userType}&limit=${limit}&include_overview=${includeOverview}&offset=${offset}` +
+      `/api/tourism/attractions?region=${encodeURIComponent(region)}&user_type=${userType}&limit=${limit}&include_overview=${includeOverview}&offset=${offset}&detail_for=${detailFor}` +
         (sigunguCd ? `&sigungu_cd=${sigunguCd}` : "")
     ),
 

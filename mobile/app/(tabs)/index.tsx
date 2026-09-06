@@ -314,20 +314,24 @@ export default function HomeScreen() {
     // 필터가 바뀌면 처음부터 다시 세어야 하므로 페이지 진행 상태를 리셋합니다.
     offsetRef.current = PLACES_FETCH_PAGE_SIZE;
     hasMoreRef.current = true;
-    // 목록 자체는 소개문 없이(include_overview=false) 빠르게 받되, 처음 보이는
-    // 6개의 소개문까지 받아온 뒤에야 카드를 화면에 내보냅니다(그래야 카드가
-    // 소개문 없이 먼저 뜨고 나중에 문구만 툭 튀어나오는 일이 없습니다). 나머지는
-    // '더보기'(자동 스크롤 로드) 시점에 그때 새로 보이는 6개씩만 채워서, 한
-    // 번에 다 채우려다 뒤쪽이 시간제한에 밀리는 문제를 피합니다. 목록 자체도
-    // 처음엔 한 묶음(PLACES_FETCH_PAGE_SIZE)만 받고, 사용자가 스크롤로 이
-    // 묶음을 다 소진하면 그때 다음 묶음을 서버에 요청합니다(handleShowMorePlaces).
+    // 나머지 목록은 소개문 없이(include_overview=false) 가볍게 받되, 처음 보이는
+    // 6개는 소개문/부가정보까지 서버가 한 번에 채워 보내달라고 요청합니다
+    // (detail_for). 어차피 그 6개가 다 준비돼야 카드를 내보내므로(카드가 소개문
+    // 없이 먼저 뜨고 문구만 나중에 튀어나오는 걸 막기 위함), 목록을 받은 뒤
+    // 소개문을 다시 요청하던 왕복 한 번이 통째로 없어집니다. 나머지는 '더보기'
+    // (자동 스크롤 로드) 시점에 그때 새로 보이는 6개씩만 채워서, 한 번에 다
+    // 채우려다 뒤쪽이 시간제한에 밀리는 문제를 피합니다. 목록 자체도 처음엔 한
+    // 묶음(PLACES_FETCH_PAGE_SIZE)만 받고, 사용자가 스크롤로 이 묶음을 다
+    // 소진하면 그때 다음 묶음을 서버에 요청합니다(handleShowMorePlaces).
     api
       .listAttractions(
         "경기도",
         wheelchairOnly ? "wheelchair" : "general",
         matchedRegionCode,
         PLACES_FETCH_PAGE_SIZE,
-        false
+        false,
+        0,
+        PLACES_PAGE_SIZE
       )
       .then((places) => {
         freshPlacesArrivedRef.current = true;
@@ -340,15 +344,18 @@ export default function HomeScreen() {
         initHeroWithImages(filtered.map((p) => p.image_url).filter((url): url is string => !!url));
 
         const firstBatch = filtered.slice(0, PLACES_PAGE_SIZE);
-        const firstIds = firstBatch.map((p) => p.content_id);
-        if (firstIds.length === 0) {
+        if (firstBatch.length === 0) {
           setPopularPlaces(filtered);
           return;
         }
-        return Promise.all([
-          api.getOverviews(firstIds).catch(() => ({}) as Record<string, string | null>),
-          fetchExtraInfoMap(firstBatch),
-        ]).then(([overviews, extraInfoMap]) => {
+        // 위에서 detail_for로 함께 받아왔으면 여기서 더 요청할 게 없습니다. 서버가
+        // 시간제한 등으로 일부를 못 채워 보낸 경우에만 그 몇 개를 따로 채웁니다
+        // (fetchExtraInfoMap도 이미 채워진 항목은 알아서 건너뜁니다).
+        const idsNeedingOverview = firstBatch.filter((p) => !p.overview).map((p) => p.content_id);
+        const overviewsPromise = idsNeedingOverview.length
+          ? api.getOverviews(idsNeedingOverview).catch(() => ({}) as Record<string, string | null>)
+          : Promise.resolve({} as Record<string, string | null>);
+        return Promise.all([overviewsPromise, fetchExtraInfoMap(firstBatch)]).then(([overviews, extraInfoMap]) => {
           setPopularPlaces(mergeOverviewAndExtraInfo(filtered, overviews, extraInfoMap));
         }); // 소개문/부가 정보를 못 받아와도 카드는 그냥 보여줍니다(각 헬퍼가 실패 시 빈 맵을 돌려줌).
       })
@@ -465,7 +472,11 @@ export default function HomeScreen() {
           matchedRegionCode,
           PLACES_FETCH_PAGE_SIZE,
           false,
-          offsetRef.current
+          offsetRef.current,
+          // 이 묶음에서 바로 다음에 보여줄 6개도 소개문/부가정보까지 함께 받아옵니다
+          // (카테고리 필터가 걸려 있으면 화면에 나타나는 카드와 어긋날 수 있는데,
+          // 그때는 아래에서 빠진 것만 따로 채우므로 문제되지 않습니다).
+          PLACES_PAGE_SIZE
         );
         hasMoreRef.current = nextRaw.length === PLACES_FETCH_PAGE_SIZE;
         offsetRef.current += PLACES_FETCH_PAGE_SIZE;

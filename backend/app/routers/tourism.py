@@ -59,6 +59,14 @@ async def list_attractions(
         description="False면 소개문 채우기를 건너뜁니다. 목록을 빨리 받고 소개문은 "
         "/attractions/overviews로 화면에 보이는 만큼만 따로 채우고 싶을 때 씁니다.",
     ),
+    detail_for: int = Query(
+        default=0,
+        ge=0,
+        le=30,
+        description="앞의 N개는 소개문과 부가정보(이용시간/요금 등)까지 채워서 함께 보냅니다. "
+        "목록을 받은 뒤 화면에 보이는 만큼의 소개문을 다시 요청하는 왕복을 없앨 때 씁니다 "
+        "(include_overview=false와 함께 쓰면, 나머지는 소개문 없이 가볍게 옵니다).",
+    ),
 ):
     """무장애 필터링이 적용된 관광지 목록"""
     # search_accessible_attractions 내부에 각 단계별(편의시설/혼잡도/평점) 타임아웃이
@@ -70,13 +78,13 @@ async def list_attractions(
     # 동시에 여러 명이 물어보면 그중 한 번만 실제로 계산하고 나머지는 그 결과를
     # 같이 기다립니다 — 앱을 동시에 켠 사용자들이 각자 무거운 조회를 처음부터
     # 돌리지 않게 하기 위함입니다.
-    cache_key = (region, user_type.value, limit, offset, sigungu_cd, include_overview)
+    cache_key = (region, user_type.value, limit, offset, sigungu_cd, include_overview, detail_for)
     try:
         results = await _ATTRACTIONS_CACHE.get_or_compute(
             cache_key,
             lambda: asyncio.wait_for(
                 tour_api_client.search_accessible_attractions(
-                    region, user_type.value, limit, sigungu_cd, include_overview, offset
+                    region, user_type.value, limit, sigungu_cd, include_overview, offset, detail_for
                 ),
                 timeout=25.0,
             ),
