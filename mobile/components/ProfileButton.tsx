@@ -30,25 +30,48 @@ export function ProfileButton() {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const opacity = useRef(new Animated.Value(0)).current;
+  const hasLoadedRef = useRef(false);
 
+  // 이미 한 번 불러온 적이 있으면(다른 탭 갔다가 이 탭으로 돌아온 경우) 화면을
+  // 비웠다가 다시 불러오지 않고, 기존 프로필을 계속 보여준 채 조용히 최신
+  // 정보로만 갱신합니다. 그래야 탭을 오갈 때마다 버튼이 잠깐씩 안 보이는
+  // 현상이 생기지 않습니다.
   useFocusEffect(
     useCallback(() => {
       if (!session) {
         setProfile(null);
+        hasLoadedRef.current = false;
         return;
       }
-      setProfileLoaded(false);
-      setImageLoaded(false);
-      setAvatarFailed(false);
-      opacity.setValue(0);
+      const isFirstLoad = !hasLoadedRef.current;
+      if (isFirstLoad) {
+        setProfileLoaded(false);
+        setImageLoaded(false);
+        setAvatarFailed(false);
+        opacity.setValue(0);
+      }
       api
         .getMyProfile()
-        .then(setProfile)
-        .catch(() => setProfile(null))
-        .finally(() => setProfileLoaded(true));
+        .then((p) => {
+          setProfile(p);
+          hasLoadedRef.current = true;
+        })
+        .catch(() => {
+          if (isFirstLoad) setProfile(null);
+        })
+        .finally(() => {
+          if (isFirstLoad) setProfileLoaded(true);
+        });
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [session])
   );
+
+  // 백그라운드 갱신으로 사진 주소가 바뀌면(예: 프로필 화면에서 새 사진 등록)
+  // 이전 사진의 실패 상태가 새 사진에 잘못 이어지지 않도록 초기화합니다.
+  useEffect(() => {
+    setAvatarFailed(false);
+    setImageLoaded(false);
+  }, [profile?.avatar_url]);
 
   // 프로필에 사진이 없으면(이니셜/물음표만 보여줄 것이라) 기다릴 이미지가
   // 없으므로, 프로필 조회가 끝나는 즉시 부드럽게 나타나게 합니다.
