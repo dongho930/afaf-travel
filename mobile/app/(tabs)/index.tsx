@@ -74,7 +74,6 @@ export default function HomeScreen() {
   const [searchText, setSearchText] = useState("");
   const [selectedRegion, setSelectedRegion] = useState("전체");
   const [selectedCategory, setSelectedCategory] = useState("전체");
-  const [wheelchairOnly, setWheelchairOnly] = useState(false);
 
   const [totalAccessibleCount, setTotalAccessibleCount] = useState<number | null>(null);
   const [supportedRegionCount, setSupportedRegionCount] = useState<number | null>(null);
@@ -281,7 +280,7 @@ export default function HomeScreen() {
   // 켰을 때의 기본 화면과 다르므로 저장하지 않습니다.
   React.useEffect(() => {
     if (homeCacheSavedRef.current) return;
-    if (selectedRegion !== "전체" || wheelchairOnly) return;
+    if (selectedRegion !== "전체") return;
     if (popularPlaces.length === 0 || !statsSettled) return;
     // 방금 서버에서 받아온 내용만 저장합니다 — 캐시로 그린 내용을 그대로 다시
     // 저장하면 저장 시각만 계속 새로 찍혀서, 오래된 내용이 영영 만료되지 않습니다.
@@ -303,7 +302,6 @@ export default function HomeScreen() {
     totalAccessibleCount,
     supportedRegionCount,
     selectedRegion,
-    wheelchairOnly,
   ]);
 
   // 히어로가 먼저 등장한 뒤(revealStage 1) 통계까지 결론이 나면, 통계 카드가
@@ -336,7 +334,7 @@ export default function HomeScreen() {
     api
       .listAttractions(
         "경기도",
-        wheelchairOnly ? "wheelchair" : "general",
+        "general",
         matchedRegionCodes,
         PLACES_FETCH_PAGE_SIZE,
         false,
@@ -373,7 +371,7 @@ export default function HomeScreen() {
         // 저장해둔 내용으로 이미 화면을 그려둔 상태(기본 화면)라면, 새로 받아오기에
         // 실패했다고 해서 보고 있던 목록까지 지우지는 않습니다. 반대로 필터를 바꾼
         // 뒤 실패한 경우엔 지금 조건과 맞지 않는 목록이므로 비웁니다.
-        const isDefaultView = selectedRegion === "전체" && !wheelchairOnly;
+        const isDefaultView = selectedRegion === "전체";
         if (!(hydratedRef.current && isDefaultView)) setPopularPlaces([]);
       })
       .finally(() => {
@@ -383,7 +381,7 @@ export default function HomeScreen() {
           setChipsReady(true);
         }
       });
-  }, [wheelchairOnly, selectedRegion, matchedRegionKey]);
+  }, [selectedRegion, matchedRegionKey]);
 
   // 히어로 배경 사진을 3초마다 후보 목록에서 무작위로 다시 골라 바꿉니다.
   // 지금 보이지 않는(opacity 0) 레이어에 다음 사진을 미리 얹어두고, 두
@@ -478,7 +476,7 @@ export default function HomeScreen() {
       try {
         const nextRaw = await api.listAttractions(
           "경기도",
-          wheelchairOnly ? "wheelchair" : "general",
+          "general",
           matchedRegionCodes,
           PLACES_FETCH_PAGE_SIZE,
           false,
@@ -683,19 +681,12 @@ export default function HomeScreen() {
 
         {revealStage >= 2 && chipsReady && (
           <FadeInView>
+            {/* 예전에는 여기에 '무장애만' 토글이 있었습니다. 목록 자체가 관광공사
+                무장애 여행 데이터라 대부분이 이미 무장애 등록 시설이고(실측 97%),
+                그 토글은 이름과 달리 '휠체어 시설이 있는 곳'만 걸러서 이름과 동작이
+                어긋났습니다. 유형별로 제대로 고르는 것은 접근성 탭이 담당합니다. */}
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>인기 여행지</Text>
-              <TouchableOpacity
-                style={styles.toggleRow}
-                onPress={() => setWheelchairOnly((v) => !v)}
-                accessibilityRole="switch"
-                accessibilityState={{ checked: wheelchairOnly }}
-              >
-                <Text style={styles.toggleLabel}>무장애만</Text>
-                <View style={[styles.toggleTrack, wheelchairOnly && styles.toggleTrackOn]}>
-                  <View style={[styles.toggleThumb, wheelchairOnly && styles.toggleThumbOn]} />
-                </View>
-              </TouchableOpacity>
             </View>
 
             <HorizontalScrollWeb contentContainerStyle={styles.chipRow}>
@@ -912,19 +903,6 @@ function makeStyles(colors: ThemeColors) {
 
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.md },
   sectionTitle: { fontSize: 18, fontFamily: fontFamily.extraBold, color: colors.text },
-  toggleRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  toggleLabel: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary },
-  toggleTrack: {
-    width: 40,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: colors.border,
-    padding: 2,
-  },
-  toggleTrackOn: { backgroundColor: colors.primary },
-  toggleThumb: { width: 18, height: 18, borderRadius: 9, backgroundColor: colors.surface },
-  toggleThumbOn: { alignSelf: "flex-end" },
-
   chipRow: { gap: spacing.sm, marginBottom: spacing.lg },
   chip: {
     borderWidth: 1,
