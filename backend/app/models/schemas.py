@@ -304,6 +304,11 @@ class AccessibilitySummary(BaseModel):
     top_hearing_places: list[AccessibilityPlaceScore] = Field(default_factory=list)
     top_family_places: list[AccessibilityPlaceScore] = Field(default_factory=list)
     top_pregnant_places: list[AccessibilityPlaceScore] = Field(default_factory=list)
+    # 이번 집계가 몇 곳(관광지 후보)을 놓고 센 것인지. 목록 API가 잘려서 후보가
+    # 급감하면 개수도 같이 떨어지는데, 그때는 편의시설 '조회 실패' 카운터가 0이라
+    # 실패로 보이지 않습니다. 이 값을 함께 저장해두고 다음 갱신에서 비교합니다.
+    # (accessibility_stats에 컬럼이 아직 없는 환경에서는 None)
+    total_candidates: int | None = None
     # 진단용(선택): wheelchair_count 등이 왜 그렇게 나왔는지 원인 확인용 정보.
     # 카테고리별 후보 수, 무장애 정보 등록 여부(no_record/has_record), API 실패 건수 등.
     # 화면에는 표시하지 않아도 되고, 디버깅 때 응답 JSON에서 바로 확인하기 위한 용도입니다.

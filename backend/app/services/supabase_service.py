@@ -420,6 +420,16 @@ async def get_cached_accessibility_stats(region: str) -> Optional[dict]:
         return None
 
 
+# accessibility_stats 테이블에 아직 없을 수도 있는 컬럼들.
+#
+# Supabase 쪽은 스키마에 없는 컬럼이 payload에 하나라도 섞이면 그 요청 '전체'를
+# 거부합니다. 그래서 새 진단 컬럼 하나 때문에 통계 저장이 통째로 실패하는 일이
+# 생깁니다. 아래 컬럼들은 있으면 저장하고, 없으면 빼고 다시 시도합니다 —
+# add_accessibility_stats_total_candidates.sql을 아직 안 돌린 환경에서도
+# 기존 숫자는 정상적으로 저장되도록 하기 위함입니다.
+_ACCESSIBILITY_STATS_OPTIONAL_COLUMNS = ("total_candidates",)
+
+
 async def save_accessibility_stats(region: str, data: dict) -> None:
     """
     새로 계산한 접근성 통계를 저장(있으면 갱신, 없으면 생성)합니다.
@@ -428,14 +438,34 @@ async def save_accessibility_stats(region: str, data: dict) -> None:
     """
     if _client is None:
         return
-    try:
-        existing = await _execute(_client.table("accessibility_stats").select("id").eq("region", region).limit(1))
-        rows = existing.data or []
-        payload = {**data, "region": region}
-        if rows:
+
+    async def _write(payload: dict) -> None:
+        existing = await _execute(
+            _client.table("accessibility_stats").select("id").eq("region", region).limit(1)
+        )
+        if existing.data or []:
             await _execute(_client.table("accessibility_stats").update(payload).eq("region", region))
         else:
             await _execute(_client.table("accessibility_stats").insert(payload))
+
+    payload = {**data, "region": region}
+    try:
+        await _write(payload)
+        return
+    except Exception as e:
+        fallback = {k: v for k, v in payload.items() if k not in _ACCESSIBILITY_STATS_OPTIONAL_COLUMNS}
+        if fallback == payload:
+            print(f"[supabase] 접근성 통계 캐시 저장 실패: {e}")
+            return
+        dropped = sorted(set(payload) - set(fallback))
+        print(
+            f"[supabase] 접근성 통계 저장이 실패해서 선택 컬럼({', '.join(dropped)}) 없이 다시 "
+            f"시도합니다 — 해당 컬럼을 쓰려면 backend/sql/"
+            f"add_accessibility_stats_total_candidates.sql을 실행하세요: {e}"
+        )
+
+    try:
+        await _write(fallback)
     except Exception as e:
         print(f"[supabase] 접근성 통계 캐시 저장 실패: {e}")
 

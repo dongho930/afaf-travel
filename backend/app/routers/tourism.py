@@ -47,6 +47,11 @@ def _parse_sigungu_cds(raw: str | None) -> list[int]:
 # (no_record는 "조회는 됐는데 등록된 정보가 없음"이라 실패가 아니라 정상입니다)
 _ACCESSIBILITY_FAILURE_KEYS = ("deferred_no_budget", "rate_limit_exhausted", "api_error")
 
+# 후보(관광지 목록) 수가 직전 집계 대비 이 비율 밑으로 떨어지면 '목록이 잘렸다'고
+# 보고 저장하지 않습니다. 관광지가 하루 사이에 20% 넘게 사라질 일은 없으므로,
+# 그만큼 줄었다면 우리 쪽 조회가 실패한 것으로 보는 게 맞습니다.
+_CANDIDATE_DROP_THRESHOLD = 0.8
+
 
 def _is_regression(existing: dict | None, data: dict) -> bool:
     """
@@ -60,6 +65,12 @@ def _is_regression(existing: dict | None, data: dict) -> bool:
     레이트리밋이나 API 오류로 실패했을 때는 이 검사를 그냥 통과해버렸고, 실제로
     무장애 여행지 수가 1232에서 658로 떨어진 값이 그대로 저장된 적이 있습니다.
     이제 실패 종류를 모두 세고, 주요 숫자가 하나라도 줄었으면 저장하지 않습니다.
+
+    그래도 못 잡는 경우가 하나 더 있었습니다 — 관광지 '목록' API가 페이지 도중
+    끊겨서 후보 자체가 반토막 나는 경우입니다. 이때 편의시설은 전부 캐시에서
+    읽히므로 아래 실패 카운터가 전부 0이고, 검사를 그냥 통과해 491건이 저장됐습니다
+    (캐시에는 1247건이 멀쩡히 있었는데도). 그래서 (3) 목록이 잘렸다는 신호와
+    (4) 후보 수 급감을 함께 봅니다.
     """
     if not existing:
         return False
@@ -75,15 +86,40 @@ def _is_regression(existing: dict | None, data: dict) -> bool:
     if data.get("total_accessible_count", 0) == 0 and existing.get("total_accessible_count", 0) > 0:
         return True
 
+    dropped = [
+        key
+        for key in ("total_accessible_count", "wheelchair_count")
+        if data.get(key, 0) < existing.get(key, 0)
+    ]
+
     # (2) 개별 장소 조회에 실패한 곳이 있으면서 대표 숫자가 줄어든 경우.
     diag = debug.get("accessibility_fetch", {}) or {}
-    failures = sum(diag.get(key, 0) for key in _ACCESSIBILITY_FAILURE_KEYS)
-    if failures <= 0:
-        return False
-    return any(
-        data.get(key, 0) < existing.get(key, 0)
-        for key in ("total_accessible_count", "wheelchair_count")
-    )
+    if sum(diag.get(key, 0) for key in _ACCESSIBILITY_FAILURE_KEYS) > 0 and dropped:
+        return True
+
+    # (3) 관광지 목록 조회가 중간에 끊긴(잘린) 채로 숫자가 줄어든 경우.
+    #     편의시설은 캐시에서 다 읽혀 위 (2)의 실패 카운터가 0이어도, 애초에
+    #     후보에서 빠진 곳은 셀 수가 없으니 이번 집계는 미완성입니다.
+    list_diag = debug.get("list_fetch", {}) or {}
+    list_broken = list_diag.get("list_page_errors", 0) > 0 or list_diag.get("list_truncated", 0) > 0
+    if list_broken and dropped:
+        return True
+
+    # (4) 실패 신호가 하나도 없더라도, 후보 수 자체가 직전보다 크게 줄었으면
+    #     저장하지 않습니다 — 목록이 조용히 잘리는 경로를 전부 열거하는 대신
+    #     '결과가 이상하면 막는다'는 마지막 안전망입니다.
+    #     (total_candidates 컬럼이 없는 환경에서는 existing 쪽이 None이라 건너뜁니다.)
+    previous_candidates = existing.get("total_candidates")
+    current_candidates = data.get("total_candidates")
+    if (
+        isinstance(previous_candidates, int)
+        and previous_candidates > 0
+        and isinstance(current_candidates, int)
+        and current_candidates < previous_candidates * _CANDIDATE_DROP_THRESHOLD
+    ):
+        return True
+
+    return False
 
 
 @router.get("/regions", response_model=list[RegionOption])
@@ -266,14 +302,21 @@ async def refresh_accessibility_summary(region: str = Query(default="경기도")
     existing = await get_cached_accessibility_stats(region)
     data = await tour_api_client.get_accessibility_summary(region)
     if _is_regression(existing, data):
-        diag = data.get("debug", {}).get("accessibility_fetch", {}) or {}
+        debug = data.get("debug", {}) or {}
+        diag = debug.get("accessibility_fetch", {}) or {}
+        list_diag = debug.get("list_fetch", {}) or {}
         # 왜 건너뛰었는지 나중에 로그만 보고 알 수 있도록 실패 종류를 전부 남깁니다.
         failure_detail = ", ".join(f"{key}={diag.get(key, 0)}" for key in _ACCESSIBILITY_FAILURE_KEYS)
+        list_detail = (
+            f"list_page_errors={list_diag.get('list_page_errors', 0)}, "
+            f"list_truncated={list_diag.get('list_truncated', 0)}, "
+            f"후보={data.get('total_candidates')}(직전 {existing.get('total_candidates')})"
+        )
         print(
-            f"[tourism] 무장애 정보 조회에 실패한 곳이 있어 이번 집계가 실제보다 낮게 나왔습니다 "
-            f"({failure_detail}). "
+            f"[tourism] 이번 집계가 실제보다 낮게 나와 저장을 건너뜁니다 "
+            f"(편의시설 조회: {failure_detail} / 목록 조회: {list_detail}). "
             f"기존 캐시(total={existing.get('total_accessible_count')}, "
-            f"wheelchair={existing.get('wheelchair_count')})를 유지하고 저장은 건너뜁니다 — "
+            f"wheelchair={existing.get('wheelchair_count')})를 유지합니다 — "
             f"이번 계산값은 total={data.get('total_accessible_count')}, "
             f"wheelchair={data.get('wheelchair_count')}."
         )

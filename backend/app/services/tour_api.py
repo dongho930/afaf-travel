@@ -307,6 +307,13 @@ _CONTENT_TYPE_LABELS: dict[int, str] = {
 # 코스에 기본으로 섞어서 조회할 카테고리 (관광지 + 맛집 + 문화시설 + 레포츠 + 숙박)
 _DEFAULT_CONTENT_TYPE_IDS: list[int] = [12, 39, 14, 28, 32]
 
+# 접근성 통계(get_accessibility_summary)에서 후보 목록을 합칠 때 쓰는 목록 캐시
+# 유효기간. 홈 화면용 기본값(24시간)과 달리 아주 길게 잡습니다 — 여기서 캐시는
+# '화면에 보여줄 최신 목록'이 아니라 '한 번이라도 본 관광지를 후보에서 놓치지
+# 않기 위한 안전망'이라, 오래된 목록도 그대로 쓸모가 있습니다. 24시간을 쓰면
+# 하루만 지나도 None이 돌아와 안전망이 사라집니다.
+_LIST_CACHE_UNION_MAX_AGE_HOURS = 24.0 * 365
+
 # 카테고리 한글 라벨 -> contentTypeId 역매핑 (Attraction.category로 detailIntro2
 # 호출 시 필요한 contentTypeId를 되돌려 찾을 때 씁니다).
 _CONTENT_TYPE_ID_BY_LABEL: dict[str, int] = {v: k for k, v in _CONTENT_TYPE_LABELS.items()}
@@ -977,11 +984,21 @@ class TourApiClient:
         content_type_id: int,
         page_size: int = 100,
         max_pages: int = 60,
+        diag: dict | None = None,
     ) -> list[Attraction]:
         """
         전수조사용: 한 카테고리(contentTypeId)의 결과를 페이지가 끝날 때까지
         전부 가져옵니다. TourAPI 응답의 totalCount를 보고 필요한 페이지 수를
         계산합니다. max_pages는 API 오류/무한루프 방지용 안전장치입니다.
+
+        diag(선택): 목록이 '중간에 잘렸는지'를 호출한 쪽에 알려주기 위한 진단 딕셔너리.
+        예전에는 페이지 도중 실패해도 그냥 조용히 break하고 부분 목록을 돌려줬습니다.
+        그러면 후보가 5천 건에서 2천 건으로 줄어도 실패 카운터가 하나도 안 올라가서,
+        집계 결과가 반토막 난 채로 캐시에 저장돼버렸습니다(무장애 여행지 수가
+        1247건 → 491건으로 보인 원인). 이제 잘림을 기록해서 위쪽 퇴보 방지
+        로직이 판단에 쓸 수 있게 합니다.
+          - list_page_errors      : 페이지 조회가 실패한 횟수
+          - list_truncated        : totalCount보다 적게 받고 끝난 카테고리 수
         """
         all_items: list[Attraction] = []
         page_no = 1
@@ -1021,8 +1038,24 @@ class TourApiClient:
                 if len(raw_items) < page_size:
                     break
                 page_no += 1
-            except Exception:
+            except Exception as e:
+                if diag is not None:
+                    diag["list_page_errors"] = diag.get("list_page_errors", 0) + 1
+                logger.warning(
+                    "_fetch_all_by_content_type(contentTypeId=%s): %d페이지에서 조회가 실패해 "
+                    "여기까지(%d건)만 반환합니다 — 목록이 잘렸습니다: %s",
+                    content_type_id,
+                    page_no,
+                    len(all_items),
+                    e,
+                )
                 break
+
+        # totalCount를 알고 있는데 그보다 적게 받았다면, 오류가 안 났더라도(예: 빈
+        # 페이지가 먼저 와서 break) 목록이 잘린 것으로 봅니다.
+        if diag is not None and total_count is not None and len(all_items) < total_count:
+            diag["list_truncated"] = diag.get("list_truncated", 0) + 1
+            diag["list_missing_items"] = diag.get("list_missing_items", 0) + (total_count - len(all_items))
 
         return all_items
 
@@ -2230,9 +2263,12 @@ class TourApiClient:
 
             async with httpx.AsyncClient(timeout=30) as client:
                 # 1) 카테고리별로 전 페이지를 끝까지 가져옵니다 (전수조사).
+                list_diag: dict = {}
                 results_per_type = await asyncio.gather(
                     *(
-                        self._fetch_all_by_content_type(client, ldong_regn_cd, content_type_id)
+                        self._fetch_all_by_content_type(
+                            client, ldong_regn_cd, content_type_id, diag=list_diag
+                        )
                         for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
                     )
                 )
@@ -2243,43 +2279,72 @@ class TourApiClient:
                     for content_type_id, group in zip(_DEFAULT_CONTENT_TYPE_IDS, results_per_type)
                 }
 
-                # 관광공사 목록 API가 통째로 실패하면(일일 한도 소진 등) 위 조회가
-                # 전부 0건으로 돌아옵니다. 그러면 후보가 없으니 편의시설 조회도 못 하고
-                # 모든 개수가 0으로 계산됩니다 — 실제로 무장애 여행지 수가 0으로
-                # 저장된 적이 있습니다. 목록 자체는 이미 캐시(attraction_list_cache)에
-                # 들고 있으므로, 라이브 조회가 빈손으로 오면 캐시로 대신 계산합니다.
-                if not any(results_per_type):
-                    cached_per_type = await asyncio.gather(
-                        *(
-                            get_cached_attraction_list(ldong_regn_cd, content_type_id)
-                            for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
+                # 이번 live 조회 결과에 '예전에 저장해둔 목록 캐시'를 항상 합칩니다.
+                #
+                # 예전에는 live가 '전부 0건'일 때만 캐시로 대체했습니다. 그런데 목록
+                # API는 통째로 실패하기보다 페이지 도중 끊기는 경우가 훨씬 많고, 그러면
+                # 부분 목록이 그대로 후보가 됐습니다. 편의시설 캐시
+                # (place_accessibility_cache) 조회는 '후보에 있는 content_id'만
+                # 물어보기 때문에, 캐시에 1247건이 멀쩡히 있어도 후보에서 빠진 곳은
+                # 통째로 '접근성 없음'이 돼서 491건으로 집계됐습니다.
+                #
+                # 합집합으로 바꾸면 한 번이라도 본 관광지는 계속 후보에 남고, 목록이
+                # 잘려도 개수가 떨어지지 않습니다. 중복 제거는 바로 아래 seen_ids가
+                # 그대로 처리하고, 이 캐시는 DB 읽기라 TourAPI 호출/일일 예산 소모가
+                # 전혀 없습니다.
+                #
+                # max_age_hours를 크게 넘기는 이유: 기본값이 24시간이라 하루만 지나도
+                # None이 돌아와 이 안전망이 무력화됩니다. 개수 집계에는 목록이 조금
+                # 오래돼도 문제가 없고(관광지가 하루아침에 사라지지 않음), 신선한
+                # 목록은 어차피 위 live 결과가 채워줍니다.
+                cached_per_type = await asyncio.gather(
+                    *(
+                        get_cached_attraction_list(
+                            ldong_regn_cd, content_type_id, max_age_hours=_LIST_CACHE_UNION_MAX_AGE_HOURS
                         )
+                        for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
                     )
-                    results_per_type = [
-                        [self._attraction_from_cache_dict(d) for d in (items or [])]
-                        for items in cached_per_type
-                    ]
-                    debug_info["list_source"] = "cache_fallback"
-                    debug_info["candidates_per_category"] = {
-                        str(content_type_id): len(group)
-                        for content_type_id, group in zip(_DEFAULT_CONTENT_TYPE_IDS, results_per_type)
-                    }
+                )
+                cached_results_per_type = [
+                    [self._attraction_from_cache_dict(d) for d in (items or [])]
+                    for items in cached_per_type
+                ]
+                debug_info["cached_candidates_per_category"] = {
+                    str(content_type_id): len(group)
+                    for content_type_id, group in zip(_DEFAULT_CONTENT_TYPE_IDS, cached_results_per_type)
+                }
+                if not any(results_per_type):
+                    debug_info["list_source"] = "cache_only"
                     logger.warning(
-                        "get_accessibility_summary: 관광지 목록 조회가 전부 0건이라 "
-                        "캐시에 저장된 목록으로 대신 계산합니다 (캐시 합계 %d건).",
-                        sum(len(g) for g in results_per_type),
+                        "get_accessibility_summary: 관광지 목록 live 조회가 전부 0건이라 "
+                        "캐시에 저장된 목록만으로 계산합니다 (캐시 합계 %d건).",
+                        sum(len(g) for g in cached_results_per_type),
                     )
+                elif any(cached_results_per_type):
+                    debug_info["list_source"] = "live+cache"
                 else:
                     debug_info["list_source"] = "live"
 
                 all_candidates: list[Attraction] = []
                 seen_ids: set[str] = set()
-                for group in results_per_type:
+                # live를 먼저 넣어서, 같은 content_id면 최신 정보(이름/이미지 등)가
+                # 남고 캐시본은 중복으로 걸러지게 합니다.
+                for group in (*results_per_type, *cached_results_per_type):
                     for a in group:
                         if a.content_id and a.content_id not in seen_ids:
                             seen_ids.add(a.content_id)
                             all_candidates.append(a)
                 debug_info["total_candidates_before_accessibility_fetch"] = len(all_candidates)
+                debug_info["live_candidates"] = sum(len(g) for g in results_per_type)
+                debug_info["candidates_only_from_cache"] = len(all_candidates) - len(
+                    {a.content_id for g in results_per_type for a in g if a.content_id}
+                )
+                # 목록이 중간에 잘렸는지 (수정 3). 퇴보 방지 로직이 이 값을 봅니다.
+                debug_info["list_fetch"] = {
+                    "list_page_errors": list_diag.get("list_page_errors", 0),
+                    "list_truncated": list_diag.get("list_truncated", 0),
+                    "list_missing_items": list_diag.get("list_missing_items", 0),
+                }
 
                 # 2) 전체 항목 각각의 편의시설 상세 정보를 채웁니다.
                 #    캐시(place_accessibility_cache)에 이미 있는 content_id는 API를
@@ -2312,12 +2377,18 @@ class TourApiClient:
                     ),
                 }
                 logger.info(
-                    "get_accessibility_summary(%s): 후보 %d건 / 카테고리별 %s / "
+                    "get_accessibility_summary(%s): 후보 %d건(live %d + 캐시보충 %d, 출처=%s) / "
+                    "목록잘림 %d건·페이지오류 %d회 / 카테고리별 %s / "
                     "캐시적중 %d건, 신규조회 %d건, 미룸(예산/한도) %d건 / "
                     "무장애정보 등록없음 %d건, 등록됨 %d건, 조회실패 %d건, "
                     "429재시도 %d회, 429재시도소진 %d건",
                     region,
                     len(all_candidates),
+                    debug_info["live_candidates"],
+                    debug_info["candidates_only_from_cache"],
+                    debug_info["list_source"],
+                    debug_info["list_fetch"]["list_truncated"],
+                    debug_info["list_fetch"]["list_page_errors"],
                     debug_info["candidates_per_category"],
                     accessibility_diag.get("from_cache", 0),
                     accessibility_diag.get("newly_fetched_and_cached", 0),
@@ -2443,6 +2514,11 @@ class TourApiClient:
             "wheelchair_count": len(wheelchair_places),
             "senior_count": len(senior_places),
             "total_accessible_count": len(any_accessible_ids),
+            # 이번 집계가 몇 곳을 놓고 센 것인지. 캐시에도 함께 저장해서, 다음 갱신 때
+            # "후보 자체가 확 줄었으면 저장하지 않는다"는 판단 기준으로 씁니다
+            # (_is_regression). 이게 없으면 목록이 잘려 후보가 반토막 나도 조회 실패
+            # 카운터가 0이라 그대로 저장돼버립니다.
+            "total_candidates": len(candidates),
             # 활용매뉴얼(v4.3) 기준 실제 응답 필드(점자블록/오디오가이드/수화안내/
             # 자막비디오가이드 등)로 계산한 값입니다 — 더 이상 목업이 아닙니다.
             "visual_count": len(visual_places),
