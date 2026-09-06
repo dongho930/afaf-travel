@@ -83,6 +83,15 @@ const RELEVANT_KEYS_BY_USER_TYPE: Partial<Record<UserType, (keyof AccessibilityF
   hearing: ["has_sign_guide", "has_video_guide", "has_hearing_room"],
 };
 
+/**
+ * 갖춘 편의시설의 한글 이름 목록을 화면에 보이는 칩과 같은 순서로 돌려줍니다.
+ * 스크린리더용 문구를 만들 때처럼, 아이콘 없이 이름만 필요할 때 씁니다.
+ * (이름 목록이 ICON_MAP 한 곳에만 있도록 하려고 함수로 빼뒀습니다)
+ */
+export function accessibilityFeatureLabels(features: Partial<AccessibilityFeatures>): string[] {
+  return ICON_MAP.filter((item) => features[item.key]).map((item) => item.label);
+}
+
 export function AccessibilityIcons({
   features,
   userType,

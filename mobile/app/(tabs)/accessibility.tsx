@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Alert } from "../../services/crossPlatformAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { AccessibilityIcons } from "../../components/AccessibilityIcons";
+import { AccessibilityIcons, accessibilityFeatureLabels } from "../../components/AccessibilityIcons";
 import { FadeInView } from "../../components/FadeInView";
 import { PhotoCardHeader } from "../../components/PhotoCardHeader";
 import { ProfileButton } from "../../components/ProfileButton";
@@ -68,6 +68,28 @@ const FEATURE_TOTAL: Record<CategoryKey, number> = {
   family_count: 3,
   pregnant_count: 5,
 };
+
+/**
+ * 장소 카드 하나를 스크린리더가 읽을 문구입니다.
+ *
+ * 카드에 보이는 걸 전부 읽으면(주소·평점·시설 6개까지) 한 곳당 15초쯤 걸려서,
+ * 200곳짜리 목록을 훑는 게 사실상 불가능합니다. 그래서 "여기 갈지 말지"를
+ * 판단할 수 있는 만큼만 담습니다 — 이름, 등급과 개수, 대표 시설 3개.
+ * 주소·평점처럼 자세한 내용은 상세 화면에서 확인합니다.
+ *
+ * 예: "수원광교박물관, 편의시설 많음, 7개 중 6개, 점자블록, 보조견 동반, 안내요원 외 3개"
+ */
+function placeAccessibilityLabel(
+  place: AccessibilityPlaceScore,
+  tierLabelText: string,
+  count: { have: number; total: number }
+): string {
+  const labels = accessibilityFeatureLabels(featuresOf(place));
+  const shown = labels.slice(0, 3).join(", ");
+  const rest = labels.length > 3 ? ` 외 ${labels.length - 3}개` : "";
+  const facilities = labels.length > 0 ? `, ${shown}${rest}` : "";
+  return `${place.name}, 편의시설 ${tierLabelText}, ${count.total}개 중 ${count.have}개${facilities}`;
+}
 
 /**
  * 그 장소가 몇 개 중 몇 개를 갖췄는지 돌려줍니다.
@@ -167,7 +189,20 @@ function CategoryTabButton({
   const CategoryIcon = meta.icon;
 
   return (
-    <Pressable style={({ pressed }) => [styles.categoryTab, pressed && styles.pressedFeedback]} onPress={onPress}>
+    <Pressable
+      style={({ pressed }) => [styles.categoryTab, pressed && styles.pressedFeedback]}
+      onPress={onPress}
+      // 아이콘·개수·이름을 따로 읽지 않고 한 덩어리로 묶습니다. 예전에는
+      // "1224개" "지체 장애"가 따로 읽히고 버튼인지도 알 수 없었습니다.
+      accessible
+      accessibilityRole="tab"
+      // 선택 여부는 두 가지로 함께 넘깁니다 — 앱은 accessibilityState를,
+      // 웹(react-native-web)은 aria-selected만 읽습니다.
+      accessibilityState={{ selected: isSelected }}
+      aria-selected={isSelected}
+      accessibilityLabel={`${meta.label}, ${typeof count === "number" ? `${count}곳` : "개수 불러오는 중"}`}
+      accessibilityHint={isSelected ? undefined : `${meta.label} 관련 여행지 목록을 봅니다`}
+    >
       <CategoryIcon size={24} color={isSelected ? colors.primary : colors.textTertiary} weight="bold" />
       <Animated.Text style={[styles.categoryCount, { color: textColor }]}>{count}개</Animated.Text>
       <Animated.Text
@@ -323,10 +358,12 @@ export default function AccessibilityScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <Text style={styles.title}>접근성 정보</Text>
+          <Text style={styles.title} accessibilityRole="header">
+            접근성 정보
+          </Text>
           <ProfileButton />
         </View>
-        <View style={styles.grid}>
+        <View style={styles.grid} accessibilityRole="tablist">
           {CATEGORY_META.map((c) => (
             <CategoryTabButton
               key={c.key}
@@ -345,15 +382,15 @@ export default function AccessibilityScreen() {
 
         <View style={styles.legendRow}>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: colors.primary }]} />
+            <View style={[styles.legendDot, { backgroundColor: colors.primary }]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden />
             <Text style={styles.legendText}>많음</Text>
           </View>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: colors.warning }]} />
+            <View style={[styles.legendDot, { backgroundColor: colors.warning }]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden />
             <Text style={styles.legendText}>보통</Text>
           </View>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: colors.textTertiary }]} />
+            <View style={[styles.legendDot, { backgroundColor: colors.textTertiary }]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden />
             <Text style={styles.legendText}>적음</Text>
           </View>
         </View>
@@ -369,7 +406,9 @@ export default function AccessibilityScreen() {
         <FadeInView key={`places-title-${selectedCategory}`} duration={200} translateY={6}>
           <View style={styles.sectionTitleRow}>
             <selectedMeta.icon size={16} color={colors.text} weight="bold" />
-            <Text style={styles.sectionTitle}>{selectedMeta.label} 주요 여행지</Text>
+            <Text style={styles.sectionTitle} accessibilityRole="header">
+              {selectedMeta.label} 주요 여행지
+            </Text>
           </View>
         </FadeInView>
         {selectedPlaces.length ? (
@@ -393,6 +432,13 @@ export default function AccessibilityScreen() {
                       params: { contentId: place.content_id, name: place.name },
                     });
                   }}
+                  // 사진·등급 배지·이름·주소·평점·시설 칩이 따로따로 읽히면 한 곳을
+                  // 파악하는 데만 열 번 넘게 넘겨야 해서, 카드 하나를 한 덩어리로 묶고
+                  // 판단에 필요한 만큼만 읽어줍니다.
+                  accessible
+                  accessibilityRole="button"
+                  accessibilityLabel={placeAccessibilityLabel(place, tier.label, count)}
+                  accessibilityHint="두 번 탭하면 상세 정보를 봅니다"
                 >
                   <PhotoCardHeader
                     imageUrl={place.image_url}
@@ -441,6 +487,9 @@ export default function AccessibilityScreen() {
           <Pressable
             style={({ pressed }) => [styles.moreButton, pressed && styles.pressedFeedback]}
             onPress={() => setVisiblePlacesCount((c) => c + PLACES_PAGE_SIZE)}
+            accessibilityRole="button"
+            accessibilityLabel="더보기"
+            accessibilityHint={`여행지 ${PLACES_PAGE_SIZE}곳을 더 불러옵니다`}
           >
             <Text style={styles.moreButtonText}>더보기</Text>
           </Pressable>
@@ -452,12 +501,17 @@ export default function AccessibilityScreen() {
           <FadeInView key={`reports-title-${selectedCategory}`} duration={200} translateY={6}>
             <View style={styles.reportTitleRow}>
               <NotePencilIcon size={16} color={colors.text} weight="bold" />
-              <Text style={styles.sectionTitle}>{selectedMeta.label} 최근 제보</Text>
+              <Text style={styles.sectionTitle} accessibilityRole="header">
+                {selectedMeta.label} 최근 제보
+              </Text>
             </View>
           </FadeInView>
           <Pressable
             style={({ pressed }) => [styles.reportButton, pressed && styles.pressedFeedback]}
             onPress={openReportModal}
+            accessibilityRole="button"
+            accessibilityLabel="제보하기"
+            accessibilityHint={`${selectedMeta.label} 관련 접근성 정보를 등록합니다`}
           >
             <Text style={styles.reportButtonText}>제보하기</Text>
           </Pressable>
