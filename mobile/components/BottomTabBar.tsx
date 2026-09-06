@@ -12,9 +12,9 @@ const TABS: {
   Icon: React.ComponentType<{ color?: string; size?: number }>;
   label: string;
 }[] = [
-  { path: "/", Icon: HomeIcon, label: "홈" },
-  { path: "/planner", Icon: AirplaneIcon, label: "AI 플래너" },
   { path: "/accessibility", Icon: AccessibilityIcon, label: "접근성" },
+  { path: "/planner", Icon: AirplaneIcon, label: "AI 플래너" },
+  { path: "/", Icon: HomeIcon, label: "홈" },
   { path: "/posts", Icon: NotebookIcon, label: "게시물" },
   { path: "/trips", Icon: MapIcon, label: "내 여행" },
 ];
