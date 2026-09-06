@@ -19,7 +19,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { AccessibilityIcons } from "../../components/AccessibilityIcons";
+import { AccessibilityIcons, accessibilityFeatureLabels } from "../../components/AccessibilityIcons";
 import { AnimatedChip } from "../../components/AnimatedChip";
 import { AppLogo } from "../../components/AppLogo";
 import { EXTRA_INFO_LABELS_BY_CATEGORY, renderExtraInfo as renderExtraInfoRow } from "../../components/ExtraInfoList";
@@ -620,7 +620,9 @@ export default function HomeScreen() {
       >
         <View style={styles.header}>
           <View style={styles.logoRow}>
-            <AppLogo size={30} />
+            <View accessible accessibilityRole="image" accessibilityLabel="경기포올">
+              <AppLogo size={30} />
+            </View>
             <Text style={styles.logoSub}>당신만을 위한 여행 가이드</Text>
           </View>
           <ProfileButton />
@@ -631,13 +633,21 @@ export default function HomeScreen() {
             source={hero.a ? { uri: hero.a } : undefined}
             style={[styles.heroImageLayer, { opacity: heroOpacityA }]}
             resizeMode="cover"
+            // 3초마다 바뀌는 배경 장식이라, 스크린리더에는 방해만 됩니다.
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            aria-hidden
           />
           <Animated.Image
             source={hero.b ? { uri: hero.b } : undefined}
             style={[styles.heroImageLayer, { opacity: heroOpacityB }]}
             resizeMode="cover"
+            // 3초마다 바뀌는 배경 장식이라, 스크린리더에는 방해만 됩니다.
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            aria-hidden
           />
-          <View style={styles.heroOverlay} />
+          <View style={styles.heroOverlay} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden />
           <View style={styles.heroContent}>
             <View style={styles.heroBadge}>
               <SparkleIcon size={11} color={colors.onPrimary} weight="fill" />
@@ -651,11 +661,19 @@ export default function HomeScreen() {
                 style={styles.searchInput}
                 placeholder="어디로 떠나고 싶으세요?"
                 placeholderTextColor={colors.textTertiary}
+                accessibilityLabel="여행지 검색"
+                accessibilityHint="가고 싶은 곳을 입력하면 AI가 코스를 만들어 줍니다"
                 value={searchText}
                 onChangeText={setSearchText}
                 onSubmitEditing={goToPlannerWithSearch}
               />
-              <Pressable style={styles.searchButton} onPress={goToPlannerWithSearch}>
+              <Pressable
+                style={styles.searchButton}
+                onPress={goToPlannerWithSearch}
+                accessibilityRole="button"
+                accessibilityLabel="검색"
+                accessibilityHint="AI 플래너로 이동해 코스를 만듭니다"
+              >
                 <Text style={styles.searchButtonText}>검색</Text>
               </Pressable>
             </View>
@@ -669,7 +687,14 @@ export default function HomeScreen() {
               .map((s) => {
                 const StatIcon = s.icon;
                 return (
-                  <FadeInView key={s.label} style={styles.statCard}>
+                  <FadeInView
+                    key={s.label}
+                    style={styles.statCard}
+                    accessible
+                    // 숫자가 0에서 목표값까지 900ms 동안 계속 바뀌며 그려지는데,
+                    // 라벨에는 최종 값을 넣어 중간 숫자가 읽히지 않게 합니다.
+                    accessibilityLabel={`${s.label} ${s.value}곳`}
+                  >
                     <StatIcon size={26} color={colors.primary} weight="bold" />
                     <AnimatedCountUpText value={s.value} style={styles.statValue} />
                     <Text style={styles.statLabel}>{s.label}</Text>
@@ -686,7 +711,9 @@ export default function HomeScreen() {
                 그 토글은 이름과 달리 '휠체어 시설이 있는 곳'만 걸러서 이름과 동작이
                 어긋났습니다. 유형별로 제대로 고르는 것은 접근성 탭이 담당합니다. */}
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>인기 여행지</Text>
+              <Text style={styles.sectionTitle} accessibilityRole="header">
+                인기 여행지
+              </Text>
             </View>
 
             <HorizontalScrollWeb contentContainerStyle={styles.chipRow}>
@@ -745,6 +772,14 @@ export default function HomeScreen() {
                       params: { contentId: place.content_id, name: place.name },
                     })
                   }
+                  // 사진·이름·주소·평점·혼잡도·종류·소개문·이용시간·편의시설이 전부
+                  // 따로 읽히면 한 곳당 스무 번 넘게 넘겨야 합니다. 카드를 한 덩어리로
+                  // 묶고, "여기 갈지 말지" 판단에 필요한 만큼만 읽어줍니다.
+                  // (소개문은 문장이 길고 잘려 있어 상세 화면에 맡깁니다)
+                  accessible
+                  accessibilityRole="button"
+                  accessibilityLabel={placeCardAccessibilityLabel(place, colors)}
+                  accessibilityHint="두 번 탭하면 상세 정보를 봅니다"
                 >
                   <PhotoCardHeader
                     imageUrl={place.image_url}
@@ -790,6 +825,37 @@ export default function HomeScreen() {
 // 상단 통계 카드 숫자용 — 값이 없을 때는 아무것도 보여주지 않다가(대시 "-" 없이),
 // 실제 값이 도착하면 0에서 그 값까지 세어 올라가며 부드럽게 나타납니다. 값이
 // 나중에 다시 바뀌는 경우(지역 필터 변경 등)에도 그 시점 값에서 새 값까지 이어서 세어갑니다.
+/**
+ * 여행지 카드 하나를 스크린리더가 읽을 문구입니다.
+ *
+ * 카드에 보이는 걸 전부 읽으면(주소·소개문 두 줄·이용시간까지) 한 곳당 25초쯤
+ * 걸려서 목록을 훑을 수 없습니다. 그래서 "여기 갈지 말지"를 판단할 수 있는
+ * 만큼만 담습니다 — 이름, 종류, 평점, 혼잡도, 대표 편의시설 3개.
+ * 소개문은 문장이 길고 두 줄에서 잘려 있어 상세 화면에 맡깁니다.
+ *
+ * 예: "가나아트파크, 관광지, 평점 4.5 리뷰 2개, 혼잡 98퍼센트,
+ *      주차, 경사로, 장애인 화장실 외 2개"
+ */
+function placeCardAccessibilityLabel(place: Attraction, colors: ThemeColors): string {
+  const parts: string[] = [place.name];
+  if (place.category) parts.push(place.category);
+  if (typeof place.avg_rating === "number") {
+    parts.push(`평점 ${place.avg_rating.toFixed(1)}${place.review_count ? ` 리뷰 ${place.review_count}개` : ""}`);
+  }
+  const congestion = getCongestionDisplay(place, colors);
+  // 화면에는 "혼잡 98%"처럼 나오는데, 그것만 읽으면 무엇에 대한 수치인지 알 수
+  // 없어서 "혼잡도"를 앞에 붙입니다("혼잡도 혼잡 98퍼센트"). %는 기기마다 읽는
+  // 방식이 달라서 '퍼센트'로 풀어 적습니다.
+  if (congestion) parts.push(`혼잡도 ${congestion.label.replace("%", "퍼센트")}`);
+
+  const features = place.accessibility ? accessibilityFeatureLabels(place.accessibility) : [];
+  if (features.length > 0) {
+    const shown = features.slice(0, 3).join(", ");
+    parts.push(`${shown}${features.length > 3 ? ` 외 ${features.length - 3}개` : ""}`);
+  }
+  return parts.join(", ");
+}
+
 function AnimatedCountUpText({ value, style }: { value: number | null; style: TextStyle }) {
   const animated = useRef(new Animated.Value(0)).current;
   const [display, setDisplay] = useState<number | null>(null);

@@ -52,7 +52,20 @@ export function AnimatedChip({
       : undefined;
 
   return (
-    <TouchableOpacity activeOpacity={0.7} onPress={onPress}>
+    <TouchableOpacity
+      activeOpacity={0.7}
+      onPress={onPress}
+      // 칩은 "여러 개 중 하나를 고르는" 필터라, 화면을 못 보는 사용자에게는
+      // 지금 무엇이 골라져 있는지가 색깔 말고는 전달될 방법이 없었습니다.
+      // 선택 여부는 앱(accessibilityState)과 웹(aria-selected)이 서로 다른 것만
+      // 읽어서 둘 다 넘깁니다.
+      accessible
+      accessibilityRole="tab"
+      accessibilityState={{ selected }}
+      aria-selected={selected}
+      accessibilityLabel={label}
+      accessibilityHint={selected ? undefined : `${label} 조건으로 목록을 봅니다`}
+    >
       <Animated.View
         style={[
           style,

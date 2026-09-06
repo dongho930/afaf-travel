@@ -10,11 +10,17 @@ export function FadeInView({
   duration = 300,
   translateY = 12,
   style,
+  accessible,
+  accessibilityLabel,
 }: {
   children: React.ReactNode;
   duration?: number;
   translateY?: number;
   style?: StyleProp<ViewStyle>;
+  // 이 래퍼가 실제로 화면에 그려지는 상자라, 안쪽 내용을 한 덩어리로 묶어
+  // 읽어주고 싶을 때(예: 홈 화면 통계 카드) 여기로 이름표를 넘깁니다.
+  accessible?: boolean;
+  accessibilityLabel?: string;
 }) {
   const progress = useRef(new Animated.Value(0)).current;
 
@@ -32,6 +38,8 @@ export function FadeInView({
         },
         style,
       ]}
+      accessible={accessible}
+      accessibilityLabel={accessibilityLabel}
     >
       {children}
     </Animated.View>
