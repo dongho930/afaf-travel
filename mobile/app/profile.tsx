@@ -326,6 +326,9 @@ function makeStyles(colors: ThemeColors) {
     editRow: { flexDirection: "row", gap: spacing.sm, alignItems: "center", marginTop: spacing.sm },
     input: {
       flex: 1,
+      // 웹에서 <input>이 고유 최소 너비 아래로 안 줄어들어 옆 버튼(저장/취소)이
+      // 밀려나는 것을 막습니다 (홈 화면 searchInput과 같은 이유).
+      minWidth: 0,
       backgroundColor: colors.surfaceAlt,
       borderRadius: radius.sm + 2,
       borderWidth: 1,

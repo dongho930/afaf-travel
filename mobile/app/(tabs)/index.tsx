@@ -870,6 +870,13 @@ function makeStyles(colors: ThemeColors) {
   searchRow: { flexDirection: "row", gap: spacing.sm },
   searchInput: {
     flex: 1,
+    // 웹(react-native-web)에서 TextInput은 <input> 태그로 그려지는데, <input>은
+    // 브라우저가 정해준 고유 최소 너비(약 215px)보다 좁아지지 않으려고 합니다.
+    // 그래서 화면이 좁으면(갤럭시 계열에서 흔한 360px 이하) 입력창이 안 줄어들고
+    // 대신 옆의 '검색' 버튼이 히어로 박스 밖으로 밀려나 잘려 보였습니다.
+    // minWidth를 0으로 두면 입력창이 남는 만큼으로 줄어들어 버튼이 항상 제자리에
+    // 있습니다 (네이티브는 원래 0이 기본이라 영향 없음).
+    minWidth: 0,
     backgroundColor: colors.surface,
     borderRadius: radius.md,
     borderWidth: 1,

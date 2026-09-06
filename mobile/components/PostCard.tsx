@@ -287,6 +287,9 @@ function makeStyles(colors: ThemeColors) {
     commentInputRow: { flexDirection: "row", alignItems: "flex-end", gap: spacing.sm, marginTop: spacing.xs + 2 },
     commentInput: {
       flex: 1,
+      // 웹에서 <input>이 고유 최소 너비 아래로 안 줄어들어 옆의 등록 버튼이
+      // 밀려나는 것을 막습니다 (홈 화면 searchInput과 같은 이유).
+      minWidth: 0,
       backgroundColor: colors.surface,
       borderRadius: radius.md,
       borderWidth: 1,

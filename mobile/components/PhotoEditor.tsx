@@ -675,7 +675,16 @@ function makeStyles(colors: ThemeColors) {
       paddingVertical: spacing.sm,
       borderRadius: radius.md,
     },
-    textInput: { flex: 1, color: EDITOR_TEXT, fontSize: 14, fontFamily: fontFamily.regular, paddingVertical: spacing.xs },
+    // minWidth: 0 — 웹에서 <input>이 고유 최소 너비 아래로 안 줄어들어 옆의
+    // '추가' 버튼이 밀려나는 것을 막습니다 (홈 화면 searchInput과 같은 이유).
+    textInput: {
+      flex: 1,
+      minWidth: 0,
+      color: EDITOR_TEXT,
+      fontSize: 14,
+      fontFamily: fontFamily.regular,
+      paddingVertical: spacing.xs,
+    },
     textInputConfirm: { color: colors.primary, fontSize: 13, fontFamily: fontFamily.bold },
 
     hiddenExport: { position: "absolute", top: -99999, left: -99999 },
