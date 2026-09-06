@@ -483,6 +483,40 @@ async def refresh_overview_cache(region: str = Query(default="경기도")):
     return await tour_api_client.refresh_overview_cache(region)
 
 
+@router.get("/intro-cache/refresh")
+async def refresh_intro_cache(region: str = Query(default="경기도")):
+    """
+    상세 페이지의 부가정보(이용시간/요금/주차 등)를 미리 캐시에 채웁니다.
+
+    소개문 갱신과 같은 패턴인데, 이 캐시만 그동안 채우는 배치가 없어서 상세
+    페이지를 연 곳만 값이 있었습니다. 사용자 요청 경로에서는 더 이상 새로
+    조회하지 않으므로(_NO_LIVE_FETCH), 이 엔드포인트가 유일한 공급원입니다.
+    """
+    return await tour_api_client.refresh_intro_cache(region)
+
+
+@router.get("/related-cache/refresh")
+async def refresh_related_cache(region: str = Query(default="경기도")):
+    """
+    상세 페이지 '함께 가볼 만한 곳'을 미리 캐시에 채웁니다.
+
+    연관 관광지(TarRlteTarService1)는 관광공사가 통계로 계산해 주는 값이라
+    우리가 재현할 수 없어서, 응답을 그대로 저장해 둡니다. 아직 안 채워진
+    관광지는 화면에서 '같은 시군구·같은 카테고리'로 대신 채웁니다.
+    """
+    return await tour_api_client.refresh_related_cache(region)
+
+
+@router.get("/forecast-cache/refresh")
+async def refresh_forecast_cache(region: str = Query(default="경기도")):
+    """
+    상세 페이지의 날짜별 혼잡도(집중률 예보)를 미리 캐시에 채웁니다.
+
+    날짜 데이터라 오래되면 의미가 없어서, 이미 캐시에 있어도 매일 다시 채웁니다.
+    """
+    return await tour_api_client.refresh_forecast_cache(region)
+
+
 @router.get("/region-popularity")
 async def region_popularity(limit: int = Query(default=5, le=20)):
     """

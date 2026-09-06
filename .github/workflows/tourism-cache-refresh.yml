@@ -9,6 +9,9 @@ name: Tourism cache refresh
 #                                (_should_save_list_cache) 캐시에 씁니다.
 #   2) congestion-cache      : 관광지 혼잡도(집중률) — 카드에 표시되는 %
 #   3) overview-cache        : 홈 화면 '인기 여행지' 카드의 소개문
+#   4) intro-cache           : 상세 페이지의 부가정보(이용시간/요금/주차 등)
+#   5) related-cache         : 상세 페이지 '함께 가볼 만한 곳'
+#   6) forecast-cache        : 상세 페이지의 날짜별 혼잡도
 #
 # 이 워크플로우가 관광공사 API를 부르는 유일한 통로입니다.
 #
@@ -107,6 +110,11 @@ jobs:
           refresh congestion "congestion-cache/refresh" 900 120
           # 3) 소개문 — 무장애와 일일 한도를 공유하므로 마지막에 돌립니다.
           refresh overview "overview-cache/refresh" 900 120
+          # 4) 부가정보(이용시간/요금/주차) — 소개문과 같은 일일 한도를 나눠 씁니다.
+          refresh intro "intro-cache/refresh" 900 120
+          # 5) 연관 관광지 / 6) 혼잡도 예보 — 위 셋과 다른 서비스라 별도 한도를 씁니다.
+          refresh related "related-cache/refresh" 1800 120
+          refresh forecast "forecast-cache/refresh" 1800 120
 
       - name: Summarize results
         if: always()
@@ -171,6 +179,42 @@ jobs:
           else
             echo "응답을 해석하지 못했습니다." >> "$S"
           fi
+
+          # --- 4) 부가정보 ---
+          echo "" >> "$S"
+          echo "### 4. 부가정보 캐시 (HTTP $(status intro))" >> "$S"
+          if [ -f response-intro.json ] && jq -e . response-intro.json >/dev/null 2>&1; then
+            jq -r '
+              "| 항목 | 값 |", "| --- | --- |",
+              "| 후보 수 | \(.total_candidates // "-") |",
+              "| 이미 캐시됨 | \(.diag.from_cache // "-") |",
+              "| 새로 채운 부가정보 | \(.diag.newly_fetched_and_cached // "-") |",
+              "| 예산 부족으로 미룸 | \(.diag.deferred_no_budget // "-") |"
+            ' response-intro.json >> "$S"
+          else
+            echo "응답을 해석하지 못했습니다." >> "$S"
+          fi
+
+          # --- 5) 연관 관광지 / 6) 혼잡도 예보 ---
+          for name in related forecast; do
+            case "$name" in
+              related)  title="5. 연관 관광지 캐시" ;;
+              forecast) title="6. 혼잡도 예보 캐시" ;;
+            esac
+            echo "" >> "$S"
+            echo "### $title (HTTP $(status "$name"))" >> "$S"
+            if [ -f "response-$name.json" ] && jq -e . "response-$name.json" >/dev/null 2>&1; then
+              jq -r '
+                "| 항목 | 값 |", "| --- | --- |",
+                "| 후보 수 | \(.total_candidates // "-") |",
+                "| 이미 캐시됨 | \(.already_cached // "-") |",
+                "| 새로 캐시 | \(.newly_cached // "-") |",
+                "| 예산 부족으로 미룸 | \(.deferred_no_budget // "-") |"
+              ' "response-$name.json" >> "$S"
+            else
+              echo "응답을 해석하지 못했습니다." >> "$S"
+            fi
+          done
 
       - name: Fail if any refresh failed
         if: always()

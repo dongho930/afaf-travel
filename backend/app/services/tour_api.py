@@ -28,6 +28,7 @@ import httpx
 
 from app.config import get_settings
 from app.models.schemas import AccessibilityFeatures, Attraction, CongestionForecast, InfoField
+from app.services.memory_cache import TTLCache
 from app.services.review_service import get_average_ratings
 from app.services.sigungu_codes import (
     area_code_for_signgu,
@@ -46,9 +47,13 @@ from app.services.supabase_service import (
     get_cached_intro_info,
     get_cached_intro_info_batch,
     get_cached_overviews,
+    get_cached_forecast,
     get_cached_place_accessibility,
+    get_cached_related,
     save_attraction_basic,
     save_attraction_list_cache,
+    save_forecast_batch,
+    save_related_batch,
     save_congestion_rates_batch,
     save_intro_info,
     save_intro_info_batch,
@@ -70,6 +75,23 @@ _BENEFIT_LABELS: list[tuple[str, str]] = [
     ("has_visual_accessibility", "시각장애 편의시설"),
     ("has_hearing_accessibility", "청각장애 편의시설"),
 ]
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """두 좌표 사이의 대권 거리(km). 근처 관광지를 DB만으로 뽑을 때 씁니다."""
+    radius = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlambda / 2) ** 2
+    return 2 * radius * math.asin(math.sqrt(a))
+
+
+# 지역 전체 관광지 목록(카테고리 5개 합집합)을 잠깐 들고 있는 캐시.
+# 이름 검색과 근처 관광지가 매 요청마다 목록 캐시 5건을 DB에서 다시 내려받지
+# 않도록 하기 위한 것입니다 — 목록 자체는 하루 단위로 바뀌는 데이터라
+# 몇 분 들고 있어도 신선도에 영향이 없습니다.
+_REGION_ATTRACTIONS_CACHE = TTLCache[list[Attraction]](ttl_seconds=300.0)
 
 
 async def _optional_cache(coro, default, what: str):
@@ -489,13 +511,31 @@ class _RateLimiter:
 class TourApiClient:
     def __init__(self) -> None:
         self.use_mock = settings.use_mock_data or not settings.tour_api_key
+        # 서비스키를 번갈아 쓰기 위한 회전 위치 (_next_service_key 참고)
+        self._key_index = 0
         # 초당 최대 요청 수를 제한합니다 (0.15초 간격 ≈ 초당 최대 약 6~7건).
         # data.go.kr 429 응답이 잦으면 이 값을 더 키워서(간격을 늘려서) 완화하세요.
         self._rate_limiter = _RateLimiter(min_interval_seconds=0.15)
 
+    def _next_service_key(self) -> str:
+        """
+        호출마다 서비스키를 번갈아 씁니다.
+
+        공공데이터포털 개발계정 한도는 '키당' 하루 1,000건이라, 키를 두 개
+        등록하고 번갈아 쓰면 하루에 쓸 수 있는 양이 그대로 두 배가 됩니다.
+        어느 키가 한도에 걸렸는지 따로 추적하지 않고 균등하게 나눠 쓰는 방식이라
+        상태가 없습니다 — 한쪽만 먼저 소진되는 일이 없습니다.
+        """
+        pool = settings.tour_api_key_pool
+        if not pool:
+            return settings.tour_api_key
+        key = pool[self._key_index % len(pool)]
+        self._key_index += 1
+        return key
+
     def _common_params(self, extra: dict) -> dict:
         return {
-            "serviceKey": settings.tour_api_key,
+            "serviceKey": self._next_service_key(),
             "MobileOS": "ETC",
             "MobileApp": "AccessibleTravelPlanner",
             "_type": "json",
@@ -796,13 +836,29 @@ class TourApiClient:
                     # 조회 때 다시 시도해서, 일시적인 빈 응답이었을 경우 스스로
                     # 복구됩니다.
                     if overview:
-                        new_rows.append(
-                            {
-                                "content_id": a.content_id,
-                                "overview": overview,
-                                "fetched_at": datetime.datetime.utcnow().isoformat(),
-                            }
-                        )
+                        row = {
+                            "content_id": a.content_id,
+                            "overview": overview,
+                            "fetched_at": datetime.datetime.utcnow().isoformat(),
+                        }
+                        # 기본정보(이름/주소/좌표/카테고리/이미지)도 같이 저장합니다.
+                        # 같은 테이블(attraction_overview_cache)을 상세 페이지가
+                        # 읽는데, 예전에는 소개문만 채워서 상세 페이지가 캐시를
+                        # 못 쓰고 매번 detailCommon2를 다시 불렀습니다. 이 값들은
+                        # 이미 목록 캐시에서 들고 온 것이라 추가 호출이 없습니다.
+                        # (이름이 빈 자리표시자 객체로는 덮어쓰지 않습니다.)
+                        if a.name:
+                            row.update(
+                                {
+                                    "name": a.name,
+                                    "address": a.address,
+                                    "latitude": a.latitude,
+                                    "longitude": a.longitude,
+                                    "category": a.category,
+                                    "image_url": a.image_url,
+                                }
+                            )
+                        new_rows.append(row)
             if new_rows:
                 await save_overviews_batch(new_rows)
 
@@ -812,6 +868,7 @@ class TourApiClient:
         attractions: list[Attraction],
         max_concurrency: int = 8,
         max_new_fetches: int | None = None,
+        diag: dict | None = None,
     ) -> None:
         """
         attractions 각각의 extra_info(이용시간/요금 등)를 채웁니다. _fill_overview_with_cache와
@@ -840,9 +897,16 @@ class TourApiClient:
             else:
                 to_fetch.append((a, content_type_id))
 
+        if diag is not None:
+            diag["from_cache"] = diag.get("from_cache", 0) + (len(candidates) - len(to_fetch))
+
         # max_new_fetches=0이면 캐시에 있는 것만 채우고 끝냅니다 — 사용자 요청
         # 경로에서 공공데이터 API를 부르지 않기 위한 설정(_NO_LIVE_FETCH)입니다.
-        if max_new_fetches is not None:
+        if max_new_fetches is not None and len(to_fetch) > max_new_fetches:
+            if diag is not None:
+                diag["deferred_no_budget"] = diag.get("deferred_no_budget", 0) + (
+                    len(to_fetch) - max_new_fetches
+                )
             to_fetch = to_fetch[:max_new_fetches]
         if not to_fetch:
             return
@@ -869,6 +933,10 @@ class TourApiClient:
                     )
             if new_rows:
                 await save_intro_info_batch(new_rows)
+                if diag is not None:
+                    diag["newly_fetched_and_cached"] = diag.get("newly_fetched_and_cached", 0) + len(
+                        new_rows
+                    )
 
     async def _resolve_attraction_by_name(
         self, client: httpx.AsyncClient, name: str
@@ -1867,52 +1935,89 @@ class TourApiClient:
                 )
         return {a.content_id: a.extra_info for a in placeholders}
 
+    async def _region_attractions(self, ldong_regn_cd: str = "41") -> list[Attraction]:
+        """
+        저장된 목록 캐시에서 그 지역 관광지 전체(카테고리 5개 합집합)를 읽습니다.
+
+        이름 검색과 '근처 가볼 만한 곳'이 공유합니다. 둘 다 예전에는 공공데이터
+        API(searchKeyword2 / locationBasedList2)를 사용자 요청 중에 불렀는데,
+        같은 데이터가 이미 목록 캐시에 있어서 DB만으로 답할 수 있습니다.
+        """
+        cached = _REGION_ATTRACTIONS_CACHE.get(ldong_regn_cd)
+        if cached is not None:
+            return cached
+
+        per_type = await asyncio.gather(
+            *(
+                _optional_cache(
+                    get_cached_attraction_list(
+                        ldong_regn_cd, content_type_id, max_age_hours=_LIST_CACHE_ANY_AGE_HOURS
+                    ),
+                    None,
+                    "관광지 목록",
+                )
+                for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
+            )
+        )
+        merged: list[Attraction] = []
+        seen: set[str] = set()
+        for items in per_type:
+            for d in items or []:
+                attraction = self._attraction_from_cache_dict(d)
+                if attraction.content_id and attraction.content_id not in seen:
+                    seen.add(attraction.content_id)
+                    merged.append(attraction)
+        _REGION_ATTRACTIONS_CACHE.set(ldong_regn_cd, merged)
+        return merged
+
     async def search_attractions_by_keyword(self, keyword: str, limit: int = 8) -> list[dict]:
         """
-        접근성 제보 작성 시 '여행지 이름 검색(자동완성)'에 씁니다. 무장애 정보/
-        소개문 같은 무거운 보강 없이 이름/주소/카테고리만 가볍게 반환합니다
-        (searchKeyword2는 detailWithTour2와 같은 일일 트래픽 한도를 공유하므로,
-        자동완성이라고 남발하면 안 되고 프론트에서 디바운스 필수).
+        접근성 제보 작성 시 '여행지 이름 검색(자동완성)'에 씁니다.
+
+        예전에는 searchKeyword2를 사용자 요청 중에 불렀습니다. 자동완성이라
+        타자 한 번에 한 번씩 나가는 구조라 일일 트래픽 한도를 가장 빨리 태우는
+        경로였고, 공공데이터포털이 느린 날에는 검색창이 그대로 멈췄습니다.
+        같은 데이터가 목록 캐시에 이미 있으므로 DB에서 찾습니다 — 이 앱은
+        경기도만 다루고 후보 목록이 그 경기도 전체입니다.
+
+        이름을 먼저, 그 다음 주소를 봅니다(이름이 걸린 곳이 사용자가 찾는 곳일
+        가능성이 높습니다). 공백은 무시해서 '수원 화성'으로도 '수원화성'을 찾습니다.
         """
-        if not keyword.strip():
+        query = keyword.strip()
+        if not query:
             return []
+
         if self.use_mock:
-            kw = keyword.strip()
             return [
-                {"content_id": a.content_id, "name": a.name, "address": a.address, "category": a.category}
+                {"content_id": a.content_id, "name": a.name,
+                 "address": a.address, "category": a.category}
                 for a in _MOCK_ATTRACTIONS
-                if kw in a.name
+                if query in a.name
             ][:limit]
 
-        async with httpx.AsyncClient(timeout=15) as client:
-            try:
-                resp = await client.get(
-                    f"{settings.tour_api_base_url}/KorWithService2/searchKeyword2",
-                    params=self._common_params(
-                        {"keyword": keyword.strip(), "numOfRows": limit, "pageNo": 1}
-                    ),
-                )
-                resp.raise_for_status()
-                items = self._extract_items(resp.json())
-            except Exception as exc:
-                logger.warning("여행지 이름 검색 실패 (keyword=%s): %s", keyword, exc)
-                return []
+        needle = query.replace(" ", "").lower()
+        candidates = await self._region_attractions()
 
-        results = []
-        for item in items:
-            content_id = str(item.get("contentid") or "")
-            name = item.get("title") or ""
-            if not content_id or not name:
-                continue
-            results.append(
-                {
-                    "content_id": content_id,
-                    "name": name,
-                    "address": " ".join(filter(None, [item.get("addr1"), item.get("addr2")])).strip(),
-                    "category": _CONTENT_TYPE_LABELS.get(int(item.get("contenttypeid") or 0), "기타"),
-                }
-            )
-        return results
+        by_name: list[Attraction] = []
+        by_address: list[Attraction] = []
+        for a in candidates:
+            if needle in (a.name or "").replace(" ", "").lower():
+                by_name.append(a)
+            elif needle in (a.address or "").replace(" ", "").lower():
+                by_address.append(a)
+
+        # 이름이 짧을수록 질의에 더 가깝게 맞은 것으로 봅니다
+        # ('수원'을 쳤을 때 '수원화성'이 '수원화성박물관특별전'보다 먼저).
+        by_name.sort(key=lambda a: len(a.name or ""))
+        return [
+            {
+                "content_id": a.content_id,
+                "name": a.name,
+                "address": a.address,
+                "category": a.category,
+            }
+            for a in (by_name + by_address)[:limit]
+        ]
 
     async def get_attraction_detail(self, content_id: str) -> Attraction | None:
         """
@@ -1944,6 +2049,25 @@ class TourApiClient:
             cached_basic = await _optional_cache(
                 get_cached_attraction_basic(content_id), None, "관광지 기본정보"
             )
+            if not cached_basic:
+                # 소개문 캐시에 아직 없더라도, 목록 캐시에는 이름/주소/좌표/
+                # 이미지가 다 들어 있습니다. 거기서 만들면 이 관광지 하나를
+                # 위해 detailCommon2를 부르지 않아도 됩니다 (소개문만 비어 있고
+                # 나머지는 정상으로 뜹니다 — 다음 자정 갱신이 채웁니다).
+                from_list = next(
+                    (a for a in await self._region_attractions() if a.content_id == content_id),
+                    None,
+                )
+                if from_list is not None:
+                    cached_basic = {
+                        "name": from_list.name,
+                        "address": from_list.address,
+                        "latitude": from_list.latitude,
+                        "longitude": from_list.longitude,
+                        "category": from_list.category,
+                        "image_url": from_list.image_url,
+                        "overview": None,
+                    }
             if cached_basic:
                 attraction = Attraction(
                     content_id=content_id,
@@ -2093,101 +2217,125 @@ class TourApiClient:
 
     async def get_nearby_attractions(self, content_id: str, radius_km: float = 2.0) -> list[dict]:
         """
-        관광지 상세 페이지 '근처 가볼 만한 곳'용. 한국관광공사 [위치기반 관광정보
-        조회](locationBasedList2) 오퍼레이션을 씁니다 — 좌표+반경으로 검색하면
-        응답에 각 장소까지의 거리(dist, m)가 이미 포함돼 있어서 직접 거리 계산이
-        필요 없습니다. arrange=E로 거리순 정렬까지 API가 대신 해줍니다.
+        관광지 상세 페이지 '근처 가볼 만한 곳'용.
 
-        개수 제한 없이 반경(기본 2km) 안의 결과를 전부 반환합니다.
+        예전에는 locationBasedList2(위치기반 조회)를 사용자 요청 중에 불렀습니다.
+        API가 거리 계산과 정렬까지 해주는 건 편했지만, 상세 페이지를 열 때마다
+        외부 호출이 하나 더 붙었고 공공데이터포털이 느린 날에는 이 영역이
+        비거나 페이지 전체가 느려졌습니다.
+
+        같은 관광지 목록이 이미 캐시에 있고 좌표도 들어 있으므로, 거리를 직접
+        계산합니다(_haversine_km). 경기도 전체가 1,300건 남짓이라 전부 훑어도
+        밀리초 단위이고, 데이터 출처가 같아서 결과도 사실상 동일합니다.
+
+        개수 제한 없이 반경(기본 2km) 안의 결과를 거리순으로 전부 반환합니다.
         """
-        base = await self.get_attraction_detail(content_id)
+        candidates = await self._region_attractions()
+        base = next((a for a in candidates if a.content_id == content_id), None)
+        if base is None:
+            # 목록 캐시에 없는 관광지(예: 다른 지역)라면 상세 조회로 좌표만 확보합니다.
+            base = await self.get_attraction_detail(content_id)
         if not base or not base.latitude or not base.longitude:
             return []
 
-        if self.use_mock:
-            # mock 모드엔 위치기반 조회 API가 없어서, 좌표 거리(Haversine)를
-            # 직접 계산해 흉내 냅니다.
-            def haversine_km(lat1, lon1, lat2, lon2):
-                r = 6371.0
-                p1, p2 = math.radians(lat1), math.radians(lat2)
-                dphi = math.radians(lat2 - lat1)
-                dlambda = math.radians(lon2 - lon1)
-                a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlambda / 2) ** 2
-                return 2 * r * math.asin(math.sqrt(a))
-
-            nearby = []
-            for a in _MOCK_ATTRACTIONS:
-                if a.content_id == content_id:
-                    continue
-                d = haversine_km(base.latitude, base.longitude, a.latitude, a.longitude)
-                if d <= radius_km:
-                    nearby.append(
-                        {
-                            "content_id": a.content_id,
-                            "name": a.name,
-                            "image_url": a.image_url,
-                            "category": a.category,
-                            "distance_km": round(d, 1),
-                        }
-                    )
-            nearby.sort(key=lambda x: x["distance_km"])
-            return nearby
-
-        async with httpx.AsyncClient(timeout=15) as client:
-            try:
-                resp = await client.get(
-                    f"{settings.tour_api_base_url}/KorWithService2/locationBasedList2",
-                    params=self._common_params(
-                        {
-                            "mapX": base.longitude,
-                            "mapY": base.latitude,
-                            "radius": int(radius_km * 1000),
-                            "arrange": "E",  # 거리순 정렬
-                            # 개수 제한이 없어서, 반경 안의 결과를 최대한 다 담을
-                            # 수 있게 넉넉히 요청합니다 (본인 자신도 포함되니 여유분 포함).
-                            "numOfRows": 100,
-                            "pageNo": 1,
-                        }
-                    ),
-                )
-                resp.raise_for_status()
-                items = self._extract_items(resp.json())
-            except Exception as exc:
-                logger.warning("근처 관광지 조회 실패 (content_id=%s): %s", content_id, exc)
-                return []
-
+        pool = _MOCK_ATTRACTIONS if self.use_mock else candidates
         nearby = []
-        for item in items:
-            item_content_id = str(item.get("contentid") or "")
-            if not item_content_id or item_content_id == content_id:
-                continue  # 자기 자신 제외
-            dist_m = item.get("dist")
-            try:
-                distance_km = round(float(dist_m) / 1000, 1) if dist_m is not None else None
-            except (TypeError, ValueError):
-                distance_km = None
-            if distance_km is None or distance_km > radius_km:
+        for a in pool:
+            if a.content_id == content_id or not a.latitude or not a.longitude:
                 continue
-            nearby.append(
-                {
-                    "content_id": item_content_id,
-                    "name": item.get("title") or "",
-                    "image_url": item.get("firstimage") or item.get("firstimage2") or None,
-                    "category": _CONTENT_TYPE_LABELS.get(int(item.get("contenttypeid") or 0), "기타"),
-                    "distance_km": distance_km,
-                }
-            )
+            distance = _haversine_km(base.latitude, base.longitude, a.latitude, a.longitude)
+            if distance <= radius_km:
+                nearby.append(
+                    {
+                        "content_id": a.content_id,
+                        "name": a.name,
+                        "image_url": a.image_url,
+                        "category": a.category,
+                        "distance_km": round(distance, 1),
+                    }
+                )
+        nearby.sort(key=lambda x: x["distance_km"])
         return nearby
+
+    async def _fetch_related_live(
+        self, client: httpx.AsyncClient, base: Attraction
+    ) -> list[Attraction] | None:
+        """
+        연관 관광지(TarRlteTarService1)를 실제로 조회합니다. 자정 갱신 전용입니다.
+
+        예전에는 이름/주소를 알아내려고 detailCommon2를 먼저 불렀는데, 목록
+        캐시에 이미 이름과 주소가 있어서 그 호출이 통째로 필요 없어졌습니다.
+        실패하면 None을 돌려줍니다 — 빈 목록([])으로 캐시를 덮어쓰지 않기 위해
+        '실패'와 '연관 관광지가 없음'을 구분합니다.
+        """
+        area_signgu = find_area_signgu(base.address or "")
+        if not base.name or not area_signgu:
+            return None
+        area_cd, signgu_cd = area_signgu
+
+        try:
+            resp = await client.get(
+                f"{_TAR_RLTE_TAR_BASE}/searchKeyword1",
+                params=self._common_params(
+                    {
+                        "baseYm": datetime.date.today().strftime("%Y%m"),
+                        "areaCd": area_cd,
+                        "signguCd": signgu_cd,
+                        "keyword": base.name,
+                        "numOfRows": 10,
+                        "pageNo": 1,
+                    }
+                ),
+            )
+            resp.raise_for_status()
+            related_items = self._extract_items(resp.json())
+        except Exception as exc:
+            logger.warning("연관 관광지 조회 실패 (%s): %s", base.name, exc)
+            return None
+
+        # rlteRank(연관순위) 상위 5개만 좌표를 붙입니다.
+        related_items = sorted(related_items, key=lambda i: int(i.get("rlteRank") or 999))[:5]
+        names = [item.get("rlteTatsNm", "") for item in related_items if item.get("rlteTatsNm")]
+
+        # 이름 -> 완전한 Attraction. 목록 캐시에서 먼저 찾고(무료), 없을 때만
+        # 키워드검색을 씁니다. 대부분 같은 지역이라 캐시에서 걸립니다.
+        pool = await self._region_attractions()
+        by_name = {a.name: a for a in pool}
+        resolved: list[Attraction] = []
+        for name in names:
+            found = by_name.get(name)
+            if found is None:
+                found = await self._resolve_attraction_by_name(client, name)
+            if found is not None:
+                resolved.append(found)
+        return resolved
+
+    async def _related_fallback(self, base: Attraction) -> list[Attraction]:
+        """
+        캐시에 없는 관광지의 '함께 가볼 만한 곳'을 DB만으로 채웁니다.
+
+        연관 관광지는 관광공사가 통계로 계산해 주는 값이라 우리가 재현할 수
+        없습니다. 그래서 같은 시군구의 같은 카테고리에서 가져옵니다 — 품질은
+        떨어지지만, 외부 API를 부르지 않고도 영역이 비지 않습니다.
+        """
+        area_signgu = find_area_signgu(base.address or "")
+        if not area_signgu:
+            return []
+        pool = await self._region_attractions()
+        return [
+            a
+            for a in pool
+            if a.content_id != base.content_id
+            and a.category == base.category
+            and find_area_signgu(a.address or "") == area_signgu
+        ][:5]
 
     async def get_related_attractions(self, content_id: str) -> list[Attraction]:
         """
-        한국관광공사_관광지별 연관 관광지 정보 (TarRlteTarService1 / searchKeyword1)
+        상세 페이지 '함께 가볼 만한 곳'. 저장된 캐시에서만 읽습니다.
 
-        이 API는 contentId가 아니라 '관광지명 + areaCd + signguCd'로 조회합니다.
-        1) detailCommon2로 이 관광지의 이름/주소를 가져오고
-        2) 주소로 areaCd/signguCd를 역으로 찾은 뒤
-        3) 관광지명으로 연관관광지 목록(이름 + 카테고리 + 순위)을 조회하고
-        4) 상위 몇 개만 다시 이름으로 검색해서 좌표가 있는 완전한 Attraction으로 만듭니다.
+        캐시는 자정 갱신(refresh_related_cache)이 채웁니다. 아직 안 채워진
+        관광지는 같은 시군구·같은 카테고리로 대신 채웁니다(_related_fallback).
         """
         if self.use_mock:
             base = next((a for a in _MOCK_ATTRACTIONS if a.content_id == content_id), None)
@@ -2195,109 +2343,175 @@ class TourApiClient:
                 return []
             return [a for a in _MOCK_ATTRACTIONS if a.content_id in base.related_attraction_ids]
 
+        cached = await _optional_cache(get_cached_related([content_id]), {}, "연관 관광지")
+        row = cached.get(content_id)
+        if row and row.get("items"):
+            return [self._attraction_from_cache_dict(d) for d in row["items"]]
+
+        pool = await self._region_attractions()
+        base = next((a for a in pool if a.content_id == content_id), None)
+        return await self._related_fallback(base) if base else []
+
+    async def refresh_related_cache(self, region: str) -> dict:
+        """
+        상세 페이지 '함께 가볼 만한 곳'을 미리 채웁니다 (자정 갱신용).
+
+        관광지 전체를 매일 채우면 예산을 통째로 쓰는데 상세 페이지를 여는 곳은
+        일부라, 목록 앞쪽(홈 화면 노출 순서) 예산만큼만 채웁니다. 이미 캐시에
+        있는 곳은 건너뛰므로, 매일 돌리면 앞에서부터 조금씩 넓어집니다.
+        """
+        debug_info: dict = {"mode": "mock" if self.use_mock else "live"}
+        if self.use_mock:
+            return debug_info
+
+        pool = await self._region_attractions()
+        cached = await _optional_cache(
+            get_cached_related([a.content_id for a in pool]), {}, "연관 관광지"
+        )
+        to_fetch = [a for a in pool if a.content_id not in cached]
+        budget = settings.daily_related_budget
+        debug_info["total_candidates"] = len(pool)
+        debug_info["already_cached"] = len(cached)
+        debug_info["deferred_no_budget"] = max(0, len(to_fetch) - budget)
+        to_fetch = to_fetch[:budget]
+
+        rows: list[dict] = []
         async with httpx.AsyncClient(timeout=15) as client:
-            basic = await self._get_basic_info(client, content_id)
-            if not basic:
-                return []
-            name = basic.get("title", "")
-            address = " ".join(filter(None, [basic.get("addr1", ""), basic.get("addr2", "")]))
-            area_signgu = find_area_signgu(address)
-            if not name or not area_signgu:
-                return []
-            area_cd, signgu_cd = area_signgu
-
-            try:
-                resp = await client.get(
-                    f"{_TAR_RLTE_TAR_BASE}/searchKeyword1",
-                    params=self._common_params(
-                        {
-                            "baseYm": datetime.date.today().strftime("%Y%m"),
-                            "areaCd": area_cd,
-                            "signguCd": signgu_cd,
-                            "keyword": name,
-                            "numOfRows": 10,
-                            "pageNo": 1,
-                        }
-                    ),
+            for base in to_fetch:
+                related = await self._fetch_related_live(client, base)
+                if related is None:
+                    continue  # 조회 실패 — 빈 목록으로 덮어쓰지 않습니다
+                rows.append(
+                    {
+                        "content_id": base.content_id,
+                        "items": [self._attraction_to_cache_dict(a) for a in related],
+                        "fetched_at": datetime.datetime.utcnow().isoformat(),
+                    }
                 )
-                resp.raise_for_status()
-                related_items = self._extract_items(resp.json())
-            except Exception:
-                return []
+        await save_related_batch(rows)
+        debug_info["newly_cached"] = len(rows)
+        logger.info(
+            "refresh_related_cache(%s): 후보 %d개 / 이미 캐시 %d개 / 새로 캐시 %d개 / 미룸 %d개",
+            region,
+            debug_info["total_candidates"],
+            debug_info["already_cached"],
+            debug_info["newly_cached"],
+            debug_info["deferred_no_budget"],
+        )
+        return debug_info
 
-            # rlteRank(연관순위) 기준 상위 5개만 좌표 보강 (매 건마다 추가 API 호출이 발생하므로 제한)
-            related_items = sorted(
-                related_items, key=lambda i: int(i.get("rlteRank") or 999)
-            )[:5]
+    async def _fetch_forecast_live(
+        self, client: httpx.AsyncClient, base: Attraction
+    ) -> list[CongestionForecast] | None:
+        """
+        관광지별 집중률 예보(TatsCnctrRateService)를 실제로 조회합니다. 자정 갱신 전용.
 
-            resolved = await asyncio.gather(
-                *(
-                    self._resolve_attraction_by_name(client, item.get("rlteTatsNm", ""))
-                    for item in related_items
-                    if item.get("rlteTatsNm")
+        일 단위 데이터라 기존 스키마(CongestionForecast.hour)에 맞추려고 정오로
+        고정하고, 집중률 %를 low/medium/high로 바꿉니다. 실패는 None으로 알려
+        빈 목록이 캐시를 덮어쓰지 않게 합니다.
+        """
+        area_signgu = find_area_signgu(base.address or "")
+        if not base.name or not area_signgu:
+            return None
+        area_cd, signgu_cd = area_signgu
+
+        try:
+            resp = await client.get(
+                f"{_TATS_CNCTR_RATE_BASE}/tatsCnctrRatedList",
+                params=self._common_params(
+                    {
+                        "areaCd": area_cd,
+                        "signguCd": signgu_cd,
+                        "tAtsNm": base.name,
+                        "numOfRows": 30,
+                        "pageNo": 1,
+                    }
+                ),
+            )
+            resp.raise_for_status()
+            items = self._extract_items(resp.json())
+        except Exception as exc:
+            logger.warning("혼잡도 예보 조회 실패 (%s): %s", base.name, exc)
+            return None
+
+        forecasts: list[CongestionForecast] = []
+        for item in items:
+            base_ymd = str(item.get("baseYmd") or "")
+            if len(base_ymd) != 8:
+                continue
+            try:
+                rate = float(item.get("cnctrRate") or 0)
+            except (TypeError, ValueError):
+                continue
+            level = "high" if rate >= 66 else "medium" if rate >= 34 else "low"
+            forecasts.append(
+                CongestionForecast(
+                    date=f"{base_ymd[:4]}-{base_ymd[4:6]}-{base_ymd[6:8]}",
+                    hour=12,
+                    congestion_level=level,
                 )
             )
-            return [a for a in resolved if a is not None]
+        return forecasts
 
     async def get_congestion_forecast(self, content_id: str) -> list[CongestionForecast]:
         """
-        한국관광공사_관광지 집중률 방문자 추이 예측 정보 (TatsCnctrRateService / tatsCnctrRatedList)
+        상세 페이지의 날짜별 혼잡도. 저장된 캐시에서만 읽습니다.
 
-        관광지별 향후 최대 30일치 '집중률(cnctrRate, 0~100 %)'을 일 단위로 제공합니다.
-        시간(hour) 단위 데이터는 없어서, 기존 스키마(CongestionForecast.hour)를 맞추기
-        위해 정오(12시)로 고정하고 집중률 % 구간을 low/medium/high로 변환합니다.
+        캐시는 자정 갱신(refresh_forecast_cache)이 채웁니다. 아직 안 채워진
+        관광지는 빈 목록이 나가고, 화면은 혼잡도 영역만 비워서 보여줍니다 —
+        예보는 없어도 나머지 정보로 페이지가 성립합니다.
         """
         if self.use_mock:
             base = next((a for a in _MOCK_ATTRACTIONS if a.content_id == content_id), None)
             return base.congestion_forecast if base else []
 
+        cached = await _optional_cache(get_cached_forecast([content_id]), {}, "혼잡도 예보")
+        row = cached.get(content_id)
+        if not row:
+            return []
+        return [CongestionForecast(**f) for f in (row.get("forecast") or [])]
+
+    async def refresh_forecast_cache(self, region: str) -> dict:
+        """
+        상세 페이지의 날짜별 혼잡도를 미리 채웁니다 (자정 갱신용).
+
+        연관 관광지와 같은 방침 — 목록 앞쪽부터 예산만큼 채우고 나머지는 다음
+        날로 미룹니다. 다만 예보는 날짜 데이터라 오래되면 의미가 없어서,
+        이미 캐시에 있어도 매일 다시 채웁니다.
+        """
+        debug_info: dict = {"mode": "mock" if self.use_mock else "live"}
+        if self.use_mock:
+            return debug_info
+
+        pool = await self._region_attractions()
+        budget = settings.daily_forecast_budget
+        debug_info["total_candidates"] = len(pool)
+        debug_info["deferred_no_budget"] = max(0, len(pool) - budget)
+        to_fetch = pool[:budget]
+
+        rows: list[dict] = []
         async with httpx.AsyncClient(timeout=15) as client:
-            basic = await self._get_basic_info(client, content_id)
-            if not basic:
-                return []
-            name = basic.get("title", "")
-            address = " ".join(filter(None, [basic.get("addr1", ""), basic.get("addr2", "")]))
-            area_signgu = find_area_signgu(address)
-            if not name or not area_signgu:
-                return []
-            area_cd, signgu_cd = area_signgu
-
-            try:
-                resp = await client.get(
-                    f"{_TATS_CNCTR_RATE_BASE}/tatsCnctrRatedList",
-                    params=self._common_params(
-                        {
-                            "areaCd": area_cd,
-                            "signguCd": signgu_cd,
-                            "tAtsNm": name,
-                            "numOfRows": 30,
-                            "pageNo": 1,
-                        }
-                    ),
+            for base in to_fetch:
+                forecast = await self._fetch_forecast_live(client, base)
+                if forecast is None:
+                    continue
+                rows.append(
+                    {
+                        "content_id": base.content_id,
+                        "forecast": [f.model_dump() for f in forecast],
+                        "fetched_at": datetime.datetime.utcnow().isoformat(),
+                    }
                 )
-                resp.raise_for_status()
-                items = self._extract_items(resp.json())
-            except Exception:
-                return []
-
-            forecasts: list[CongestionForecast] = []
-            for item in items:
-                base_ymd = str(item.get("baseYmd") or "")
-                if len(base_ymd) != 8:
-                    continue
-                date_str = f"{base_ymd[:4]}-{base_ymd[4:6]}-{base_ymd[6:8]}"
-                try:
-                    rate = float(item.get("cnctrRate") or 0)
-                except (TypeError, ValueError):
-                    continue
-                if rate >= 66:
-                    level = "high"
-                elif rate >= 34:
-                    level = "medium"
-                else:
-                    level = "low"
-                forecasts.append(CongestionForecast(date=date_str, hour=12, congestion_level=level))
-            return forecasts
+        await save_forecast_batch(rows)
+        debug_info["newly_cached"] = len(rows)
+        logger.info(
+            "refresh_forecast_cache(%s): 후보 %d개 / 새로 캐시 %d개 / 미룸 %d개",
+            region,
+            debug_info["total_candidates"],
+            debug_info["newly_cached"],
+            debug_info["deferred_no_budget"],
+        )
+        return debug_info
 
     async def _fetch_congestion_rates_by_signgu(
         self, client: httpx.AsyncClient, area_cd: int, signgu_cd: int, diag: dict | None = None
@@ -2459,9 +2673,13 @@ class TourApiClient:
 
         ldong_regn_map = {"경기도": "41", "서울": "11"}
         ldong_regn_cd = ldong_regn_map.get(region, "41")
-        # 카테고리당 40개씩, 5개 카테고리라 최대 200개 후보 — 홈 화면에 실제로
-        # 노출될 만한 범위를 넉넉하게 커버합니다.
-        per_type_rows = 40
+        # 카테고리별 전체를 후보로 삼습니다.
+        #
+        # 예전에는 카테고리당 40개(총 200곳)만 훑어서, 목록 뒤쪽 관광지는 며칠이
+        # 지나도 소개문이 채워지지 않았습니다(실측 소개문 보유율: 앞 30건 100%,
+        # 385건 표본 66.8%). 실제로 몇 건을 조회할지는 어차피 예산이 막으므로,
+        # 대상만 넓혀두면 매일 조금씩 앞에서부터 채워집니다.
+        per_type_rows = 2000
 
         async with httpx.AsyncClient(timeout=30) as client:
             results_per_type = await asyncio.gather(
@@ -2485,7 +2703,7 @@ class TourApiClient:
                 candidates,
                 diag=diag,
                 max_concurrency=8,
-                max_new_fetches=settings.overview_api_daily_fetch_budget,
+                max_new_fetches=settings.daily_overview_budget,
             )
             debug_info["diag"] = diag
 
@@ -2494,6 +2712,61 @@ class TourApiClient:
             region,
             debug_info["total_candidates"],
             diag.get("fetched", 0),
+            diag.get("deferred_no_budget", 0),
+        )
+        return debug_info
+
+    async def refresh_intro_cache(self, region: str) -> dict:
+        """
+        관광지 부가정보(이용시간/요금/주차 등)를 attraction_intro_cache에 미리 채웁니다.
+
+        소개문(refresh_overview_cache)과 같은 방식인데, 이 캐시만 그동안 채우는
+        배치가 없었습니다. 그래서 상세 페이지를 한 번 연 관광지만 값이 있고
+        나머지는 비어 있었습니다 — 사용자 요청 경로에서 새로 조회하지 않게 바꾼
+        뒤로는(_NO_LIVE_FETCH) 이 배치가 유일한 공급원입니다.
+
+        detailIntro2는 편의시설/소개문과 같은 일일 한도를 나눠 쓰므로,
+        예산(daily_intro_budget)을 넘는 나머지는 다음 갱신으로 미룹니다.
+        """
+        debug_info: dict = {"mode": "mock" if self.use_mock else "live"}
+        if self.use_mock:
+            return debug_info
+
+        ldong_regn_map = {"경기도": "41", "서울": "11"}
+        ldong_regn_cd = ldong_regn_map.get(region, "41")
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            results_per_type = await asyncio.gather(
+                *(
+                    self._fetch_by_content_type(client, ldong_regn_cd, content_type_id, 2000)
+                    for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
+                )
+            )
+            candidates: list[Attraction] = []
+            seen_ids: set[str] = set()
+            for group in results_per_type:
+                for a in group:
+                    if a.content_id and a.content_id not in seen_ids:
+                        seen_ids.add(a.content_id)
+                        candidates.append(a)
+            debug_info["total_candidates"] = len(candidates)
+
+            diag: dict = {}
+            await self._fill_extra_info_with_cache(
+                client,
+                candidates,
+                max_concurrency=8,
+                max_new_fetches=settings.daily_intro_budget,
+                diag=diag,
+            )
+            debug_info["diag"] = diag
+
+        logger.info(
+            "refresh_intro_cache(%s): 후보 %d개 / 캐시적중 %d개 / 새로 캐시 %d개 / 미룸 %d개",
+            region,
+            debug_info["total_candidates"],
+            diag.get("from_cache", 0),
+            diag.get("newly_fetched_and_cached", 0),
             diag.get("deferred_no_budget", 0),
         )
         return debug_info
@@ -2663,7 +2936,7 @@ class TourApiClient:
                     all_candidates,
                     diag=accessibility_diag,
                     max_concurrency=10,
-                    max_new_fetches=settings.tour_api_daily_fetch_budget,
+                    max_new_fetches=settings.daily_accessibility_budget,
                 )
 
                 debug_info["accessibility_fetch"] = {

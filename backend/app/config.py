@@ -42,13 +42,24 @@ class Settings(BaseSettings):
     # 서비스키가 없으면 어차피 목업으로 넘어갑니다(TourApiClient.use_mock).
     use_mock_data: bool = os.getenv("USE_MOCK_DATA", "false").lower() == "true"
 
-    # 무장애 정보(detailWithTour2) 전수조사용 일일 예산.
-    # 지금 발급받은 키가 '개발계정'이라 하루 트래픽 한도가 1,000건입니다.
-    # 이 한도는 소개문(overview_api_daily_fetch_budget)과 공유되므로, 둘을
-    # 합쳐서 1,000을 넘지 않도록 절반씩(500/500) 나눠 잡았습니다. 운영계정으로
-    # 전환하면 TOUR_API_DAILY_FETCH_BUDGET 환경변수로 더 큰 값(예: 90000)을
-    # 넣어주면 됩니다.
-    tour_api_daily_fetch_budget: int = int(os.getenv("TOUR_API_DAILY_FETCH_BUDGET", "500"))
+    # 두 번째 관광공사 서비스키(선택).
+    #
+    # 공공데이터포털 개발계정 한도는 '활용신청(키)당' 하루 1,000건이라, 키를
+    # 하나 더 등록하면 하루 예산이 그대로 두 배가 됩니다. 두 키 모두 같은
+    # 서비스(KorWithService2 등)에 활용신청이 돼 있어야 의미가 있습니다.
+    tour_api_key_2: str = os.getenv("TOUR_API_KEY_2", "")
+
+    # 아래 세 예산은 모두 '키 하나당' 값입니다. 실제 하루 예산은 여기에 키
+    # 개수를 곱한 값이고, 곱셈은 daily_* 프로퍼티가 합니다.
+    #
+    # detailWithTour2(편의시설) / detailCommon2(기본정보·소개문) /
+    # detailIntro2(부가정보)는 키 하나의 같은 한도 1,000건을 나눠 씁니다.
+    # 그래서 200 + 300 + 500 = 1,000으로 잡았습니다. 배분 근거:
+    #   - 편의시설은 이미 1,247건이 다 캐시돼 신규 조회가 거의 없습니다 (200)
+    #   - 소개문은 3분의 1쯤 비어 있습니다 (300)
+    #   - 부가정보는 통째로 비어 있어 가장 급합니다 (500)
+    # 운영계정으로 전환하면 환경변수로 더 큰 값을 넣으면 됩니다.
+    tour_api_daily_fetch_budget: int = int(os.getenv("TOUR_API_DAILY_FETCH_BUDGET", "200"))
 
     # 관광지 집중률(TatsCnctrRateService) 전수조사용 일일 예산.
     # 이 API는 장소 단위가 아니라 시/군/구 단위로 한 번에 여러 관광지 정보를
@@ -59,12 +70,55 @@ class Settings(BaseSettings):
         os.getenv("CONGESTION_API_DAILY_FETCH_BUDGET", "200")
     )
 
-    # 홈 화면 소개문 미리 채우기(예열)용 일일 예산. detailCommon2도 무장애 정보와
-    # 같은 일일 한도(1,000건)를 공유하므로, tour_api_daily_fetch_budget과 합쳐서
-    # 1,000을 넘지 않도록 절반씩(500/500) 나눠 잡았습니다.
+    # 소개문(detailCommon2) 미리 채우기용 일일 예산 — 키 하나당.
     overview_api_daily_fetch_budget: int = int(
-        os.getenv("OVERVIEW_API_DAILY_FETCH_BUDGET", "500")
+        os.getenv("OVERVIEW_API_DAILY_FETCH_BUDGET", "300")
     )
+
+    # 부가정보(detailIntro2, 이용시간·요금·주차 등) 미리 채우기용 일일 예산 —
+    # 키 하나당. 지금 이 캐시는 상세 페이지를 연 곳만 채워져 있어서 가장 큽니다.
+    intro_api_daily_fetch_budget: int = int(
+        os.getenv("INTRO_API_DAILY_FETCH_BUDGET", "500")
+    )
+
+    # 연관 관광지(TarRlteTarService1) / 혼잡도 예보(TatsCnctrRateService) 미리
+    # 채우기용 일일 예산 — 키 하나당. 둘 다 위 세 오퍼레이션과 다른 서비스라
+    # 별도 한도를 쓰므로, 1,000건 배분에 포함되지 않습니다.
+    #
+    # 관광지 1,300건을 전부 채우면 매일 그만큼을 쓰게 되는데 상세 페이지를
+    # 여는 곳은 일부뿐이라, 목록 앞쪽(홈 화면에 실제로 노출되는 순서) 200곳만
+    # 미리 채웁니다. 캐시에 없는 곳은 같은 시군구·같은 카테고리로 대신 채웁니다.
+    related_api_daily_fetch_budget: int = int(os.getenv("RELATED_API_DAILY_FETCH_BUDGET", "200"))
+    forecast_api_daily_fetch_budget: int = int(os.getenv("FORECAST_API_DAILY_FETCH_BUDGET", "200"))
+
+    @property
+    def tour_api_key_pool(self) -> list[str]:
+        """실제로 쓸 수 있는 서비스키 목록 (빈 값은 제외)."""
+        return [k for k in (self.tour_api_key, self.tour_api_key_2) if k]
+
+    @property
+    def _key_count(self) -> int:
+        return max(1, len(self.tour_api_key_pool))
+
+    @property
+    def daily_accessibility_budget(self) -> int:
+        return self.tour_api_daily_fetch_budget * self._key_count
+
+    @property
+    def daily_overview_budget(self) -> int:
+        return self.overview_api_daily_fetch_budget * self._key_count
+
+    @property
+    def daily_intro_budget(self) -> int:
+        return self.intro_api_daily_fetch_budget * self._key_count
+
+    @property
+    def daily_related_budget(self) -> int:
+        return self.related_api_daily_fetch_budget * self._key_count
+
+    @property
+    def daily_forecast_budget(self) -> int:
+        return self.forecast_api_daily_fetch_budget * self._key_count
 
     class Config:
         env_file = ".env"

@@ -39,6 +39,8 @@ CACHE_READS = [
     ("get_cached_intro_info", lambda m: m.get_cached_intro_info("1")),
     ("get_cached_intro_info_batch", lambda m: m.get_cached_intro_info_batch(["1"])),
     ("get_cached_attraction_list", lambda m: m.get_cached_attraction_list("41", 12)),
+    ("get_cached_related", lambda m: m.get_cached_related(["1"])),
+    ("get_cached_forecast", lambda m: m.get_cached_forecast(["1"])),
 ]
 
 

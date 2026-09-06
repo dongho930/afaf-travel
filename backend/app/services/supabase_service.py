@@ -592,6 +592,76 @@ async def save_place_accessibility_batch(rows: list[dict]) -> None:
         print(f"[supabase] 장소별 무장애 정보 캐시 저장 실패: {e}")
 
 
+# ---- content_id를 키로 쓰는 캐시 공통 처리 ----
+#
+# 이 파일에는 content_id가 기본 키인 캐시 테이블이 여럿 있습니다(편의시설,
+# 소개문, 부가정보, 연관 관광지, 혼잡도 예보). 조회/저장 모양이 똑같아서,
+# 새로 추가하는 것부터는 아래 두 함수를 씁니다. 기존 것들도 나중에 옮기면
+# 좋지만, 잘 도는 코드를 한꺼번에 건드리지 않으려고 그대로 뒀습니다.
+
+_CONTENT_ID_CHUNK = 500
+
+
+async def _get_rows_by_content_ids(table: str, content_ids: list[str], what: str) -> dict[str, dict]:
+    """캐시에 있는 것만 {content_id: row}로 돌려줍니다. 못 읽으면 CacheUnavailable."""
+    if _client is None or not content_ids:
+        return {}
+    found: dict[str, dict] = {}
+    try:
+        for i in range(0, len(content_ids), _CONTENT_ID_CHUNK):
+            chunk = content_ids[i : i + _CONTENT_ID_CHUNK]
+            result = await _execute(_client.table(table).select("*").in_("content_id", chunk))
+            for row in result.data or []:
+                found[row["content_id"]] = row
+    except Exception as e:
+        print(f"[supabase] {what} 캐시 조회 실패: {e}")
+        raise CacheUnavailable(str(e)) from e
+    return found
+
+
+async def _upsert_rows(table: str, rows: list[dict], what: str) -> None:
+    """content_id를 기본 키로 upsert합니다. 저장 실패는 로그만 남깁니다."""
+    if _client is None or not rows:
+        return
+    try:
+        for i in range(0, len(rows), _CONTENT_ID_CHUNK):
+            await _execute(_client.table(table).upsert(rows[i : i + _CONTENT_ID_CHUNK]))
+    except Exception as e:
+        print(f"[supabase] {what} 캐시 저장 실패: {e}")
+
+
+# ---- 연관 관광지 캐시 (상세 페이지 '함께 가볼 만한 곳') ----
+#
+# Supabase 대시보드에서 미리 만들어둬야 하는 테이블:
+#   attraction_related_cache (content_id PK, items jsonb, fetched_at)
+#   -> backend/sql/create_related_and_forecast_cache.sql
+
+_RELATED_TABLE = "attraction_related_cache"
+
+
+async def get_cached_related(content_ids: list[str]) -> dict[str, dict]:
+    return await _get_rows_by_content_ids(_RELATED_TABLE, content_ids, "연관 관광지")
+
+
+async def save_related_batch(rows: list[dict]) -> None:
+    await _upsert_rows(_RELATED_TABLE, rows, "연관 관광지")
+
+
+# ---- 혼잡도 예보 캐시 (상세 페이지 날짜별 혼잡도) ----
+#
+#   attraction_forecast_cache (content_id PK, forecast jsonb, fetched_at)
+
+_FORECAST_TABLE = "attraction_forecast_cache"
+
+
+async def get_cached_forecast(content_ids: list[str]) -> dict[str, dict]:
+    return await _get_rows_by_content_ids(_FORECAST_TABLE, content_ids, "혼잡도 예보")
+
+
+async def save_forecast_batch(rows: list[dict]) -> None:
+    await _upsert_rows(_FORECAST_TABLE, rows, "혼잡도 예보")
+
+
 # ---- 관광지 집중률(≈인기도) 캐시 ----
 #
 # 한국관광공사 '관광지 집중률 방문자 추이 예측 정보'(TatsCnctrRateService)는
