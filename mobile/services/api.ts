@@ -1,5 +1,6 @@
 import Constants from "expo-constants";
 import { getAccessToken } from "./authToken";
+import { bumpDataVersion } from "./dataVersion";
 import {
   AccessibilityReport,
   AccessibilitySummary,
@@ -46,6 +47,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     const body = await res.text();
     throw new Error(`API 요청 실패 (${res.status}): ${body}`);
   }
+
+  // 서버 상태를 바꾸는 요청이 성공했으면 표시를 남깁니다. 화면을 열 때마다
+  // 다시 부를 필요는 없지만 이런 동작 뒤에는 갱신돼야 하는 값들(예: 내 여행
+  // 탭의 리뷰/제보/방문 개수)이 이 표시를 보고 판단합니다.
+  if ((options?.method ?? "GET") !== "GET") {
+    bumpDataVersion();
+  }
+
   return res.json() as Promise<T>;
 }
 

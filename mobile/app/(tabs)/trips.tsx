@@ -36,6 +36,7 @@ import { radius, spacing } from "../../constants/tokens";
 import { userTypeIcon } from "../../constants/userTypeIcons";
 import { api } from "../../services/api";
 import { useAuth } from "../../services/AuthContext";
+import { getDataVersion } from "../../services/dataVersion";
 import { useTheme } from "../../services/ThemeContext";
 import {
   COURSE_CATEGORIES,
@@ -171,6 +172,8 @@ export default function TripsScreen() {
   // 이 탭을 한 번이라도 불러온 적이 있는지. 처음에만 로딩 화면을 보여주고,
   // 그 뒤로는 보고 있던 목록을 그대로 둔 채 조용히 갱신하기 위해 씁니다.
   const hasLoadedRef = useRef(false);
+  // 개수 3종을 마지막으로 받아왔을 때의 변경 카운터(services/dataVersion.ts).
+  const countsVersionRef = useRef(-1);
 
   const load = useCallback(() => {
     // 처음 들어왔을 때만 로딩 화면을 띄웁니다. 예전에는 탭에 들어올 때마다
@@ -192,19 +195,28 @@ export default function TripsScreen() {
       .finally(() => {
         if (isFirstLoad) setLoading(false);
       });
-    // 아래 개수 3종은 화면을 가리지 않고 조용히 갱신됩니다(숫자만 바뀜).
-    api
-      .getMyReviewCount()
-      .then((res) => setReviewCount(res.count))
-      .catch(() => setReviewCount(0));
-    api
-      .getMyReportCount()
-      .then((res) => setReportCount(res.count))
-      .catch(() => setReportCount(0));
-    api
-      .getMyVisitedCount()
-      .then((res) => setVisitedCount(res.count))
-      .catch(() => setVisitedCount(0));
+    // 개수 3종(리뷰/제보/방문)은 리뷰를 쓰거나 방문 처리를 했을 때만 바뀝니다.
+    // 그런데 그 동작은 다른 화면(관광지 상세, 접근성 탭)에서도 일어나기 때문에,
+    // 이 화면에서만 갱신하면 최신 값을 놓칩니다. 그렇다고 탭에 들어올 때마다
+    // 부르면 아무것도 안 바뀌었는데 매번 조회 3번이 나갑니다.
+    // 그래서 "앱에서 무언가를 바꾼 적이 있는지"(dataVersion)를 보고, 지난번에
+    // 받아온 뒤로 달라졌을 때만 다시 부릅니다.
+    const version = getDataVersion();
+    if (isFirstLoad || version !== countsVersionRef.current) {
+      countsVersionRef.current = version;
+      api
+        .getMyReviewCount()
+        .then((res) => setReviewCount(res.count))
+        .catch(() => setReviewCount(0));
+      api
+        .getMyReportCount()
+        .then((res) => setReportCount(res.count))
+        .catch(() => setReportCount(0));
+      api
+        .getMyVisitedCount()
+        .then((res) => setVisitedCount(res.count))
+        .catch(() => setVisitedCount(0));
+    }
   }, []);
 
   useFocusEffect(
