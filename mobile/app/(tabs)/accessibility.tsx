@@ -55,10 +55,51 @@ const REPORT_CATEGORY_MAP: Record<CategoryKey, ReportCategory> = {
 
 const PLACES_PAGE_SIZE = 5;
 
-function tierLabel(score: number, colors: ThemeColors): { label: string; color: string } {
-  if (score >= 80) return { label: "우수", color: colors.primary };
-  if (score >= 60) return { label: "보통", color: colors.warning };
-  return { label: "주의", color: colors.danger };
+/**
+ * 그 장소가 해당 유형의 편의시설을 얼마나 갖췄는지 나타내는 등급입니다.
+ *
+ * score는 서버에서 "갖춘 항목 수 ÷ 그 유형의 전체 항목 수 × 100"으로 계산됩니다
+ * (휠체어 6개, 시각 7개, 임산부 5개, 고령자 4개, 청각·영유아가족 3개 항목).
+ * 항목 수가 유형마다 다르다 보니 나올 수 있는 점수도 띄엄띄엄 다릅니다. 그래서
+ * "절반쯤 갖춘 곳"이 어느 유형에서나 같은 등급이 되도록 절반(50)을 경계로 씁니다.
+ * 예전에는 경계가 60이라, 똑같이 절반을 갖춰도 청각 2/3(67)은 '보통'인데
+ * 휠체어 3/6(50)과 시각 4/7(57)은 '주의'로 갈리는 문제가 있었습니다.
+ *
+ * 유형별로 실제 등급이 갈리는 지점은 이렇습니다.
+ *   휠체어(6): 많음 5~6 / 보통 3~4 / 적음 1~2
+ *   시각(7):   많음 6~7 / 보통 4~5 / 적음 1~3
+ *   임산부(5): 많음 4~5 / 보통 3   / 적음 1~2
+ *   고령자(4): 많음 4   / 보통 2~3 / 적음 1
+ *   청각(3), 영유아가족(3): 많음 3 / 보통 2 / 적음 1
+ *
+ * 문구가 '우수/보통/주의'가 아닌 이유: 이 목록에 오르는 곳은 이미 해당 편의시설을
+ * 하나 이상 갖춰서 걸러진 곳들입니다. 그런데 '주의'는 가면 위험한 곳처럼 읽혀서,
+ * 실제 뜻(등록된 편의시설이 적음)에 맞게 '많음/보통/적음'으로 바꿨습니다.
+ */
+type Tier = { label: string; badgeBg: string; badgeText: string; accent: string };
+
+function tierLabel(score: number, colors: ThemeColors): Tier {
+  // 배지의 배경/글자색은 테마가 짝으로 정의해둔 조합만 씁니다. 예전에는 어떤
+  // 배경이든 흰 글자를 얹었는데, 그러면 대비가 부족했습니다(라이트 '보통' 2.9:1,
+  // 다크는 세 등급 모두 2~3:1로 WCAG AA 4.5:1 미달). 아래 조합은 라이트/다크
+  // 양쪽 모두 5:1 이상입니다. accent는 글자가 아닌 오른쪽 색 막대에 씁니다.
+  if (score >= 80) {
+    return { label: "많음", badgeBg: colors.primary, badgeText: colors.onPrimary, accent: colors.primary };
+  }
+  if (score >= 50) {
+    return {
+      label: "보통",
+      badgeBg: colors.warningLight,
+      badgeText: colors.warningText,
+      accent: colors.warning,
+    };
+  }
+  return {
+    label: "적음",
+    badgeBg: colors.surfaceAlt,
+    badgeText: colors.textSecondary,
+    accent: colors.textTertiary,
+  };
 }
 
 // 카테고리 탭 하나. 선택 상태가 바뀔 때 개수/라벨 글자색과 아래 점(dot)이
@@ -268,17 +309,25 @@ export default function AccessibilityScreen() {
         <View style={styles.legendRow}>
           <View style={styles.legendItem}>
             <View style={[styles.legendDot, { backgroundColor: colors.primary }]} />
-            <Text style={styles.legendText}>우수 80+</Text>
+            <Text style={styles.legendText}>많음</Text>
           </View>
           <View style={styles.legendItem}>
             <View style={[styles.legendDot, { backgroundColor: colors.warning }]} />
-            <Text style={styles.legendText}>보통 60-79</Text>
+            <Text style={styles.legendText}>보통</Text>
           </View>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: colors.danger }]} />
-            <Text style={styles.legendText}>주의 ~59</Text>
+            <View style={[styles.legendDot, { backgroundColor: colors.textTertiary }]} />
+            <Text style={styles.legendText}>적음</Text>
           </View>
         </View>
+        {/* 예전 범례는 '우수 80+ / 보통 60-79 / 주의 ~59'처럼 점수 구간을 적었는데,
+            유형마다 항목 수가 달라서 실제로 나올 수 없는 점수 구간이 있었습니다
+            (예: 휠체어는 50 다음이 67이라 60~66점이 존재하지 않음). 숫자 대신
+            무슨 뜻인지를 한 줄로 설명합니다. */}
+        <Text style={styles.legendNote}>
+          아래 목록은 모두 이 유형의 편의시설을 갖춘 곳이며, 등급은 그중 얼마나 여러 가지를 갖췄는지를
+          나타냅니다.
+        </Text>
 
         <FadeInView key={`places-title-${selectedCategory}`} duration={200} translateY={6}>
           <View style={styles.sectionTitleRow}>
@@ -307,8 +356,13 @@ export default function AccessibilityScreen() {
                     });
                   }}
                 >
-                  <View style={[styles.scoreBadge, { backgroundColor: tier.color }]}>
-                    <Text style={styles.scoreBadgeText}>{place.score}</Text>
+                  <View
+                    style={[
+                      styles.tierBadge,
+                      { backgroundColor: tier.badgeBg, borderColor: tier.accent },
+                    ]}
+                  >
+                    <Text style={[styles.tierBadgeText, { color: tier.badgeText }]}>{tier.label}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.placeName}>{place.name}</Text>
@@ -316,7 +370,7 @@ export default function AccessibilityScreen() {
                       {place.address}
                     </Text>
                   </View>
-                  <View style={[styles.tierBar, { backgroundColor: tier.color }]} />
+                  <View style={[styles.tierBar, { backgroundColor: tier.accent }]} />
                 </Pressable>
               </FadeInView>
             );
@@ -522,10 +576,17 @@ function makeStyles(colors: ThemeColors) {
   categoryDot: { width: 4, height: 4, borderRadius: 2, marginTop: -4 },
   mockBadge: { fontSize: 10, color: colors.warning, fontFamily: fontFamily.semiBold },
 
-  legendRow: { flexDirection: "row", gap: spacing.lg, marginBottom: spacing.xl },
+  legendRow: { flexDirection: "row", gap: spacing.lg, marginBottom: spacing.sm },
   legendItem: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2 },
   legendDot: { width: 8, height: 8, borderRadius: 4 },
   legendText: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textSecondary },
+  legendNote: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: fontFamily.regular,
+    color: colors.textTertiary,
+    marginBottom: spacing.xl,
+  },
 
   sectionTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2, marginBottom: spacing.md },
   reportTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2 },
@@ -541,8 +602,18 @@ function makeStyles(colors: ThemeColors) {
     marginBottom: spacing.sm + 2,
     gap: spacing.md,
   },
-  scoreBadge: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
-  scoreBadgeText: { color: "#FFFFFF", fontFamily: fontFamily.extraBold, fontSize: 14 },
+  // 예전에는 점수(숫자)를 담은 원형 배지였는데, 숫자만으로는 그 유형에서 어느
+  // 정도인지 알기 어려워 등급 문구를 그대로 보여주는 알약 모양으로 바꿨습니다.
+  tierBadge: {
+    minWidth: 48,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tierBadgeText: { fontFamily: fontFamily.bold, fontSize: 12 },
   placeName: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.text },
   placeAddress: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary, marginTop: 2 },
   tierBar: { width: 4, height: 32, borderRadius: 2 },
