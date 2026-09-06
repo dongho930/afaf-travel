@@ -1,0 +1,30 @@
+# EAS 빌드에 올릴 때 제외할 것들.
+#
+# 이 파일이 있으면 EAS는 .gitignore 대신 이 파일을 봅니다. 그래서 원래
+# .gitignore로 걸러지던 것들(node_modules 등)도 여기에 다시 적어야 합니다.
+#
+# 이 파일을 만든 이유: .claude/skills 안에 심볼릭 링크가 있는데, 윈도우에서는
+# 링크를 만들 권한이 없어서 EAS가 프로젝트를 복사하는 단계에서 실패했습니다
+# ("EPERM: operation not permitted, symlink ..."). 앱 빌드에 필요 없는 폴더라
+# 아예 빼면 됩니다.
+
+# 앱 빌드와 무관한 것들
+.claude/
+.agents/
+backend/
+.github/
+*.md
+
+# 원래 .gitignore에 있던 항목들
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+node_modules/
+.expo/
+dist/
+web-build/
+*.log
+.DS_Store
+Thumbs.db
