@@ -63,11 +63,23 @@ def _is_regression(existing: dict | None, data: dict) -> bool:
     """
     if not existing:
         return False
-    diag = data.get("debug", {}).get("accessibility_fetch", {}) or {}
+
+    debug = data.get("debug", {}) or {}
+
+    # (1) 조회할 관광지 자체를 못 가져온 경우. 관광공사 목록 API가 통째로 실패하면
+    #     후보가 0곳이 되고, 그러면 편의시설 조회는 시작조차 못 해서 아래 실패
+    #     카운터가 전부 0으로 남습니다. 그 상태를 "실패 없음"으로 오해해 0을 저장한
+    #     적이 있어서, 개수 자체가 비었는지를 먼저 봅니다.
+    if debug.get("total_candidates_before_accessibility_fetch") == 0:
+        return True
+    if data.get("total_accessible_count", 0) == 0 and existing.get("total_accessible_count", 0) > 0:
+        return True
+
+    # (2) 개별 장소 조회에 실패한 곳이 있으면서 대표 숫자가 줄어든 경우.
+    diag = debug.get("accessibility_fetch", {}) or {}
     failures = sum(diag.get(key, 0) for key in _ACCESSIBILITY_FAILURE_KEYS)
     if failures <= 0:
         return False
-    # 대표 숫자(전체 합계와 지체 장애) 중 하나라도 줄었으면 미완성으로 봅니다.
     return any(
         data.get(key, 0) < existing.get(key, 0)
         for key in ("total_accessible_count", "wheelchair_count")

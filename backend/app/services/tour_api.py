@@ -2243,6 +2243,35 @@ class TourApiClient:
                     for content_type_id, group in zip(_DEFAULT_CONTENT_TYPE_IDS, results_per_type)
                 }
 
+                # 관광공사 목록 API가 통째로 실패하면(일일 한도 소진 등) 위 조회가
+                # 전부 0건으로 돌아옵니다. 그러면 후보가 없으니 편의시설 조회도 못 하고
+                # 모든 개수가 0으로 계산됩니다 — 실제로 무장애 여행지 수가 0으로
+                # 저장된 적이 있습니다. 목록 자체는 이미 캐시(attraction_list_cache)에
+                # 들고 있으므로, 라이브 조회가 빈손으로 오면 캐시로 대신 계산합니다.
+                if not any(results_per_type):
+                    cached_per_type = await asyncio.gather(
+                        *(
+                            get_cached_attraction_list(ldong_regn_cd, content_type_id)
+                            for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
+                        )
+                    )
+                    results_per_type = [
+                        [self._attraction_from_cache_dict(d) for d in (items or [])]
+                        for items in cached_per_type
+                    ]
+                    debug_info["list_source"] = "cache_fallback"
+                    debug_info["candidates_per_category"] = {
+                        str(content_type_id): len(group)
+                        for content_type_id, group in zip(_DEFAULT_CONTENT_TYPE_IDS, results_per_type)
+                    }
+                    logger.warning(
+                        "get_accessibility_summary: 관광지 목록 조회가 전부 0건이라 "
+                        "캐시에 저장된 목록으로 대신 계산합니다 (캐시 합계 %d건).",
+                        sum(len(g) for g in results_per_type),
+                    )
+                else:
+                    debug_info["list_source"] = "live"
+
                 all_candidates: list[Attraction] = []
                 seen_ids: set[str] = set()
                 for group in results_per_type:
