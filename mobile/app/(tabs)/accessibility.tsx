@@ -5,7 +5,9 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Alert } from "../../services/crossPlatformAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { AccessibilityIcons } from "../../components/AccessibilityIcons";
 import { FadeInView } from "../../components/FadeInView";
+import { PhotoCardHeader } from "../../components/PhotoCardHeader";
 import { ProfileButton } from "../../components/ProfileButton";
 import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
@@ -15,6 +17,7 @@ import { api } from "../../services/api";
 import { useAuth } from "../../services/AuthContext";
 import { useTheme } from "../../services/ThemeContext";
 import {
+  AccessibilityFeatures,
   AccessibilityPlaceScore,
   AccessibilityReport,
   AccessibilitySummary,
@@ -54,6 +57,15 @@ const REPORT_CATEGORY_MAP: Record<CategoryKey, ReportCategory> = {
 };
 
 const PLACES_PAGE_SIZE = 5;
+
+/**
+ * 서버가 보내준 "갖춘 편의시설 필드명 목록"을 AccessibilityIcons가 받는 형태
+ * (필드별 true/false)로 바꿔줍니다. 서버가 이미 그 유형과 관련된 항목만 골라
+ * 보내주므로, 여기서 유형별 필터를 한 번 더 걸지는 않습니다.
+ */
+function featuresOf(place: AccessibilityPlaceScore): Partial<AccessibilityFeatures> {
+  return Object.fromEntries((place.features ?? []).map((key) => [key, true]));
+}
 
 /**
  * 그 장소가 해당 유형의 편의시설을 얼마나 갖췄는지 나타내는 등급입니다.
@@ -341,7 +353,7 @@ export default function AccessibilityScreen() {
             return (
               <FadeInView key={place.content_id || place.name} duration={250}>
                 <Pressable
-                  style={({ pressed }) => [styles.placeRow, pressed && styles.pressedFeedback]}
+                  style={({ pressed }) => [styles.placeCard, pressed && styles.pressedFeedback]}
                   onPress={() => {
                     if (!place.content_id) {
                       Alert.alert(
@@ -356,21 +368,34 @@ export default function AccessibilityScreen() {
                     });
                   }}
                 >
-                  <View
-                    style={[
-                      styles.tierBadge,
-                      { backgroundColor: tier.badgeBg, borderColor: tier.accent },
-                    ]}
-                  >
-                    <Text style={[styles.tierBadgeText, { color: tier.badgeText }]}>{tier.label}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.placeName}>{place.name}</Text>
-                    <Text style={styles.placeAddress} numberOfLines={1}>
-                      {place.address}
-                    </Text>
-                  </View>
-                  <View style={[styles.tierBar, { backgroundColor: tier.accent }]} />
+                  <PhotoCardHeader
+                    imageUrl={place.image_url}
+                    height={150}
+                    topLeft={
+                      <View
+                        style={[
+                          styles.tierBadge,
+                          { backgroundColor: tier.badgeBg, borderColor: tier.accent },
+                        ]}
+                      >
+                        <Text style={[styles.tierBadgeText, { color: tier.badgeText }]}>{tier.label}</Text>
+                      </View>
+                    }
+                    title={place.name}
+                    titleNumberOfLines={1}
+                    subtitle={place.address}
+                    rating={place.avg_rating}
+                    reviewCount={place.review_count}
+                  />
+                  {/* 사진 아래에는 "이 곳이 실제로 갖춘 편의시설"을 보여줍니다. 등급
+                      배지만으로는 무엇이 많은지 알 수 없어서, 상세 페이지에 들어가지
+                      않아도 내게 필요한 시설이 있는지 바로 판단할 수 있게 합니다.
+                      서버가 이 유형과 관련된 항목만 보내주므로 그대로 그립니다. */}
+                  {!!place.features?.length && (
+                    <View style={styles.placeCardBody}>
+                      <AccessibilityIcons features={featuresOf(place)} />
+                    </View>
+                  )}
                 </Pressable>
               </FadeInView>
             );
@@ -591,17 +616,17 @@ function makeStyles(colors: ThemeColors) {
   sectionTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2, marginBottom: spacing.md },
   reportTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2 },
   sectionTitle: { fontSize: 16, fontFamily: fontFamily.extraBold, color: colors.text },
-  placeRow: {
-    flexDirection: "row",
-    alignItems: "center",
+  // 홈 화면 '인기 여행지'와 같은 사진 카드 형태입니다. 사진 위에 이름/주소/등급이
+  // 얹히고(PhotoCardHeader), 그 아래 본문에 갖춘 편의시설 칩이 붙습니다.
+  placeCard: {
     backgroundColor: colors.surface,
-    borderRadius: radius.md,
+    borderRadius: radius.xl,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: spacing.md,
-    marginBottom: spacing.sm + 2,
-    gap: spacing.md,
+    marginBottom: spacing.md,
+    overflow: "hidden", // 둥근 모서리가 사진에도 적용되도록
   },
+  placeCardBody: { paddingHorizontal: spacing.md, paddingBottom: spacing.md },
   // 예전에는 점수(숫자)를 담은 원형 배지였는데, 숫자만으로는 그 유형에서 어느
   // 정도인지 알기 어려워 등급 문구를 그대로 보여주는 알약 모양으로 바꿨습니다.
   tierBadge: {
@@ -614,9 +639,6 @@ function makeStyles(colors: ThemeColors) {
     justifyContent: "center",
   },
   tierBadgeText: { fontFamily: fontFamily.bold, fontSize: 12 },
-  placeName: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.text },
-  placeAddress: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary, marginTop: 2 },
-  tierBar: { width: 4, height: 32, borderRadius: 2 },
   emptyText: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textTertiary },
   moreButton: {
     marginTop: spacing.xs,

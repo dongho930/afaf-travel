@@ -277,6 +277,16 @@ class AccessibilityPlaceScore(BaseModel):
     name: str
     score: int
     address: str
+    # 아래 네 개는 목록을 사진 카드로 보여주기 위해 나중에 추가한 값들입니다.
+    # content_id와 같은 이유로 전부 기본값을 둡니다 — 이 필드들이 없던 시절에
+    # 저장된 accessibility_stats 캐시를 읽을 때 검증 에러가 나지 않도록 하기
+    # 위함입니다(캐시를 새로고침하기 전까지는 비어 있을 수 있습니다).
+    image_url: str | None = None
+    # 이 유형에서 실제로 갖춘 편의시설 필드명(has_ramp 등). 앱이 아이콘/문구로 바꿔 보여줍니다.
+    # 유형과 상관있는 항목만 담습니다 — 점수를 매길 때 쓰는 항목과 같은 목록입니다.
+    features: list[str] = Field(default_factory=list)
+    avg_rating: float | None = None
+    review_count: int = 0
 
 
 class AccessibilitySummary(BaseModel):

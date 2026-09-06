@@ -87,7 +87,9 @@ export function AccessibilityIcons({
   features,
   userType,
 }: {
-  features: AccessibilityFeatures;
+  // 있는 항목만 담긴 객체도 받습니다 — 접근성 탭 목록처럼 서버가 "갖춘 항목"만
+  // 보내주는 경우가 있어서, 전체 필드를 다 채워 넘기도록 강제하지 않습니다.
+  features: Partial<AccessibilityFeatures>;
   // 지정하면 그 이동유형과 관련된 항목만 보여줍니다. 생략하면(예: 관광지
   // 상세 페이지, 홈 화면처럼 특정 유형에 매인 화면이 아닌 곳) 전체를 보여줍니다.
   userType?: UserType;

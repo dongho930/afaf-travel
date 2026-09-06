@@ -163,6 +163,14 @@ export interface AccessibilityPlaceScore {
   name: string;
   score: number;
   address: string;
+  // 아래 값들은 목록을 사진 카드로 보여주면서 추가됐습니다. 서버의 통계 캐시가
+  // 아직 갱신되지 않았으면 비어있을 수 있어서 전부 선택 항목입니다.
+  image_url?: string | null;
+  // 이 유형에서 실제로 갖춘 편의시설 필드명(has_ramp 등). 등급 점수를 매길 때
+  // 쓰는 항목과 같은 목록이라, 화면의 시설 목록과 등급이 서로 어긋나지 않습니다.
+  features?: (keyof AccessibilityFeatures)[];
+  avg_rating?: number | null;
+  review_count?: number;
 }
 
 export interface AccessibilitySummary {

@@ -2301,11 +2301,57 @@ class TourApiClient:
         top_family = sorted(family_places, key=family_score, reverse=True)[:200]
         top_pregnant = sorted(pregnant_places, key=pregnant_score, reverse=True)[:200]
 
-        def to_place_scores(places: list[Attraction], score_fn) -> list[dict]:
-            return [
-                {"content_id": a.content_id, "name": a.name, "score": score_fn(a), "address": a.address}
-                for a in places
-            ]
+        # 목록 카드에 "이 곳이 실제로 갖춘 편의시설"을 함께 보여주기 위한 항목들입니다.
+        # 위 점수 함수가 세는 항목과 정확히 같아야 합니다 — 그래야 '많음/보통/적음'
+        # 등급과 화면에 찍히는 시설 목록이 서로 어긋나지 않습니다.
+        fields_by_category: dict[str, tuple[str, ...]] = {
+            "wheelchair": (
+                "has_parking", "has_ramp", "has_wheelchair_rental",
+                "has_exit", "has_elevator", "has_accessible_restroom",
+            ),
+            "senior": ("has_rest_area", "has_ramp", "has_elevator", "has_accessible_restroom"),
+            "visual": (
+                "has_braille_block", "has_help_dog", "has_guide_human", "has_audio_guide",
+                "has_big_print", "has_braille_promotion", "has_guide_system",
+            ),
+            "hearing": ("has_sign_guide", "has_video_guide", "has_hearing_room"),
+            "family": ("has_stroller_accessible_path", "has_lactation_room", "has_baby_spare_chair"),
+            "pregnant": (
+                "has_lactation_room", "has_baby_spare_chair",
+                "has_ramp", "has_elevator", "has_accessible_restroom",
+            ),
+        }
+
+        # 카드에 별점을 함께 보여주기 위해 우리 DB의 평균 평점을 한 번에 조회합니다
+        # (외부 API가 아니라 우리 리뷰 테이블이라 조회 한 번이면 됩니다).
+        top_lists = (top_wheelchair, top_senior, top_visual, top_hearing, top_family, top_pregnant)
+        rating_rows: dict[str, dict] = {}
+        try:
+            top_ids = sorted({a.content_id for lst in top_lists for a in lst if a.content_id})
+            if top_ids:
+                rating_rows = await asyncio.wait_for(get_average_ratings(top_ids), timeout=10.0)
+        except Exception as e:
+            # 평점을 못 받아와도 목록 자체는 그대로 내보냅니다.
+            logger.warning("get_accessibility_summary: 평점 조회 실패 — 별점 없이 진행합니다: %s", e)
+
+        def to_place_scores(places: list[Attraction], score_fn, category: str) -> list[dict]:
+            fields = fields_by_category[category]
+            result = []
+            for a in places:
+                rating = rating_rows.get(a.content_id)
+                result.append(
+                    {
+                        "content_id": a.content_id,
+                        "name": a.name,
+                        "score": score_fn(a),
+                        "address": a.address,
+                        "image_url": a.image_url,
+                        "features": [f for f in fields if getattr(a.accessibility, f, False)],
+                        "avg_rating": rating["avg_rating"] if rating else None,
+                        "review_count": rating["review_count"] if rating else 0,
+                    }
+                )
+            return result
 
         return {
             "wheelchair_count": len(wheelchair_places),
@@ -2317,12 +2363,12 @@ class TourApiClient:
             "hearing_count": len(hearing_places),
             "family_count": len(family_places),
             "pregnant_count": len(pregnant_places),
-            "top_wheelchair_places": to_place_scores(top_wheelchair, wheelchair_score),
-            "top_senior_places": to_place_scores(top_senior, senior_score),
-            "top_visual_places": to_place_scores(top_visual, visual_score),
-            "top_hearing_places": to_place_scores(top_hearing, hearing_score),
-            "top_family_places": to_place_scores(top_family, family_score),
-            "top_pregnant_places": to_place_scores(top_pregnant, pregnant_score),
+            "top_wheelchair_places": to_place_scores(top_wheelchair, wheelchair_score, "wheelchair"),
+            "top_senior_places": to_place_scores(top_senior, senior_score, "senior"),
+            "top_visual_places": to_place_scores(top_visual, visual_score, "visual"),
+            "top_hearing_places": to_place_scores(top_hearing, hearing_score, "hearing"),
+            "top_family_places": to_place_scores(top_family, family_score, "family"),
+            "top_pregnant_places": to_place_scores(top_pregnant, pregnant_score, "pregnant"),
             # 진단용 필드: 43 같은 숫자가 왜 그렇게 나왔는지 원인을 구분하기 위한 정보.
             # candidates_per_category: 카테고리별(관광지/음식점/문화시설/레포츠/숙박) 수집 건수
             # total_candidates_before_accessibility_fetch: 중복 제거 후 전체 후보 수
