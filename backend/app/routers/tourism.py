@@ -39,22 +39,39 @@ def _parse_sigungu_cds(raw: str | None) -> list[int]:
     return codes
 
 
+# 무장애 정보를 못 읽고 넘어간 경우들. 이런 곳은 전부 '편의시설 없음'으로 세어지기
+# 때문에, 하나라도 있으면 이번 집계는 실제보다 낮게 나온 것일 수 있습니다.
+#   deferred_no_budget   : 일일 트래픽 예산이 다 떨어져 아예 시도하지 못함
+#   rate_limit_exhausted : 429를 계속 받아 재시도까지 실패
+#   api_error            : 타임아웃, 5xx 등 다른 이유로 실패
+# (no_record는 "조회는 됐는데 등록된 정보가 없음"이라 실패가 아니라 정상입니다)
+_ACCESSIBILITY_FAILURE_KEYS = ("deferred_no_budget", "rate_limit_exhausted", "api_error")
+
+
 def _is_regression(existing: dict | None, data: dict) -> bool:
     """
     이번에 새로 계산한 data가 기존 캐시(existing)보다 '더 안 좋은 미완성 결과'인지 판단합니다.
 
-    일일 트래픽 예산(tour_api_daily_fetch_budget)이나 연속 429 때문에 이번 실행이
-    중간에 멈추면(debug.accessibility_fetch.deferred_no_budget > 0), 아직 못 채운
-    후보들은 전부 '접근성 없음(False)'으로 잡혀서 wheelchair_count 등이 실제보다
+    무장애 정보 조회에 실패한 곳은 전부 '접근성 없음'으로 잡혀서 개수가 실제보다
     낮게 나옵니다. 이런 미완성 결과가 예전의 더 정확했던 값을 덮어써버리면 화면에
-    보이는 숫자가 갑자기 0 같은 값으로 퇴보하니, 그 경우엔 저장하지 않습니다.
+    보이는 숫자가 갑자기 반토막 나므로, 그 경우엔 저장하지 않습니다.
+
+    예전에는 실패 종류 중 예산 초과(deferred_no_budget) 하나만 봤습니다. 그래서
+    레이트리밋이나 API 오류로 실패했을 때는 이 검사를 그냥 통과해버렸고, 실제로
+    무장애 여행지 수가 1232에서 658로 떨어진 값이 그대로 저장된 적이 있습니다.
+    이제 실패 종류를 모두 세고, 주요 숫자가 하나라도 줄었으면 저장하지 않습니다.
     """
     if not existing:
         return False
-    deferred = data.get("debug", {}).get("accessibility_fetch", {}).get("deferred_no_budget", 0)
-    if deferred <= 0:
+    diag = data.get("debug", {}).get("accessibility_fetch", {}) or {}
+    failures = sum(diag.get(key, 0) for key in _ACCESSIBILITY_FAILURE_KEYS)
+    if failures <= 0:
         return False
-    return data.get("wheelchair_count", 0) < existing.get("wheelchair_count", 0)
+    # 대표 숫자(전체 합계와 지체 장애) 중 하나라도 줄었으면 미완성으로 봅니다.
+    return any(
+        data.get(key, 0) < existing.get(key, 0)
+        for key in ("total_accessible_count", "wheelchair_count")
+    )
 
 
 @router.get("/regions", response_model=list[RegionOption])
@@ -237,10 +254,16 @@ async def refresh_accessibility_summary(region: str = Query(default="경기도")
     existing = await get_cached_accessibility_stats(region)
     data = await tour_api_client.get_accessibility_summary(region)
     if _is_regression(existing, data):
-        logger_msg_data = data.get("debug", {}).get("accessibility_fetch", {})
+        diag = data.get("debug", {}).get("accessibility_fetch", {}) or {}
+        # 왜 건너뛰었는지 나중에 로그만 보고 알 수 있도록 실패 종류를 전부 남깁니다.
+        failure_detail = ", ".join(f"{key}={diag.get(key, 0)}" for key in _ACCESSIBILITY_FAILURE_KEYS)
         print(
-            f"[tourism] 이번 계산이 미완성 상태(deferred={logger_msg_data.get('deferred_no_budget')})라 "
-            f"기존 캐시(wheelchair_count={existing.get('wheelchair_count')})를 유지하고 저장은 건너뜁니다."
+            f"[tourism] 무장애 정보 조회에 실패한 곳이 있어 이번 집계가 실제보다 낮게 나왔습니다 "
+            f"({failure_detail}). "
+            f"기존 캐시(total={existing.get('total_accessible_count')}, "
+            f"wheelchair={existing.get('wheelchair_count')})를 유지하고 저장은 건너뜁니다 — "
+            f"이번 계산값은 total={data.get('total_accessible_count')}, "
+            f"wheelchair={data.get('wheelchair_count')}."
         )
     else:
         await save_accessibility_stats(region, {k: v for k, v in data.items() if k != "debug"})

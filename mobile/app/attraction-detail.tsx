@@ -87,6 +87,24 @@ interface ReviewPhotoDraft {
  * 주소/혼잡도/이점 태그/소개문 + 방문자 리뷰 목록과, 로그인한 사용자의 리뷰
  * 작성(또는 이미 쓴 리뷰 수정)을 보여줍니다.
  */
+/**
+ * 상세 화면 맨 위(이름 + 평점·혼잡도 배지)를 스크린리더가 읽을 문구입니다.
+ *
+ * 배지들이 따로 읽히면 "4.5" "(2)" "혼잡도 98%"처럼 숫자만 흩어져서 무엇에 대한
+ * 값인지 알 수 없습니다. 이름과 함께 한 문장으로 묶고, %는 기기마다 읽는 방식이
+ * 달라서 '퍼센트'로 풀어 적습니다.
+ */
+function detailHeaderLabel(attraction: Attraction): string {
+  const parts: string[] = [attraction.name];
+  if (typeof attraction.avg_rating === "number") {
+    parts.push(`평점 ${attraction.avg_rating.toFixed(1)}${attraction.review_count ? ` 리뷰 ${attraction.review_count}개` : ""}`);
+  }
+  if (typeof attraction.congestion_rate === "number") {
+    parts.push(`혼잡도 ${Math.round(attraction.congestion_rate)}퍼센트`);
+  }
+  return parts.join(", ");
+}
+
 export default function AttractionDetailScreen() {
   const router = useRouter();
   const { contentId, name } = useLocalSearchParams<{ contentId: string; name?: string }>();
@@ -103,7 +121,10 @@ export default function AttractionDetailScreen() {
   // 위 순서대로 하나씩 페이드인 되도록, 데이터가 준비될 때마다 한 단계씩 올립니다.
   const [stage, setStage] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [ratingInput, setRatingInput] = useState(5);
+  // 0 = 아직 고르지 않음. 예전에는 5로 시작해서 별 5개가 채워진 채로 보였는데,
+  // 화면을 못 보는 사용자에게는 "별점 5점, 선택됨"으로 읽혀 이미 5점을 준 것처럼
+  // 오해할 수 있었습니다(그대로 등록하면 실제로 5점이 들어갑니다).
+  const [ratingInput, setRatingInput] = useState(0);
   const [bodyInput, setBodyInput] = useState("");
   const [photoDrafts, setPhotoDrafts] = useState<ReviewPhotoDraft[]>([]);
   const [pickingPhoto, setPickingPhoto] = useState(false);
@@ -222,6 +243,13 @@ export default function AttractionDetailScreen() {
         { text: "취소", style: "cancel" },
         { text: "로그인하러 가기", onPress: () => router.push("/login") },
       ]);
+      return;
+    }
+    // 별점 기본값을 5에서 0(아직 안 고름)으로 바꾸면서 함께 넣은 검사입니다.
+    // 예전에는 항상 5로 시작해서 이 상황이 생길 수 없었지만, 이제는 별점을 건드리지
+    // 않은 채로 등록을 누를 수 있어서 0점이 그대로 저장될 수 있습니다.
+    if (ratingInput === 0) {
+      Alert.alert("별점을 선택해주세요.");
       return;
     }
     if (!bodyInput.trim()) {
@@ -368,10 +396,23 @@ export default function AttractionDetailScreen() {
       {stage >= 1 && (
       <FadeInView duration={280}>
       {attraction.image_url ? (
-        <Image source={{ uri: attraction.image_url }} style={styles.heroImage} />
+        <Image
+          source={{ uri: attraction.image_url }}
+          style={styles.heroImage}
+          // 바로 아래에 이름이 읽히므로, 사진은 장식으로 두고 건너뜁니다.
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          aria-hidden
+        />
       ) : null}
 
-      <View style={styles.titleRow}>
+      {/* 이름과 평점·혼잡도 배지가 따로 읽히면 "4.5" "(2)" "혼잡도 98%"처럼
+          숫자만 흩어져서 무엇에 대한 값인지 알 수 없습니다. 한 덩어리로 묶습니다. */}
+      <View
+        style={styles.titleRow}
+        accessible
+        accessibilityLabel={detailHeaderLabel(attraction)}
+      >
         <Text style={styles.title}>{attraction.name}</Text>
         <View style={styles.badgeGroup}>
           {typeof attraction.avg_rating === "number" && (
@@ -392,7 +433,7 @@ export default function AttractionDetailScreen() {
         </View>
       </View>
       <Text style={styles.category}>{attraction.category}</Text>
-      <View style={styles.addressRow}>
+      <View style={styles.addressRow} accessible accessibilityLabel={`주소, ${attraction.address}`}>
         <MapPinIcon size={13} color={colors.textSecondary} weight="bold" />
         <Text style={styles.address}>{attraction.address}</Text>
       </View>
@@ -401,6 +442,9 @@ export default function AttractionDetailScreen() {
         <Pressable
           style={({ pressed }) => [styles.directionsButton, pressed && styles.pressedFeedback]}
           onPress={handleOpenDirections}
+          accessibilityRole="button"
+          accessibilityLabel="길찾기"
+          accessibilityHint="지도 앱에서 이 장소까지 가는 길을 봅니다"
         >
           <MapTrifoldIcon size={16} color={colors.primary} weight="bold" />
           <Text style={styles.directionsButtonText}>길찾기</Text>
@@ -408,6 +452,9 @@ export default function AttractionDetailScreen() {
         <Pressable
           style={({ pressed }) => [styles.directionsButton, pressed && styles.pressedFeedback]}
           onPress={() => setTransitModalVisible(true)}
+          accessibilityRole="button"
+          accessibilityLabel="교통편 예약"
+          accessibilityHint="기차나 버스 예매 사이트를 고릅니다"
         >
           <TrainIcon size={16} color={colors.primary} weight="bold" />
           <Text style={styles.directionsButtonText}>교통편 예약</Text>
@@ -415,6 +462,9 @@ export default function AttractionDetailScreen() {
         <Pressable
           style={({ pressed }) => [styles.directionsButton, pressed && styles.pressedFeedback]}
           onPress={handleOpenPosts}
+          accessibilityRole="button"
+          accessibilityLabel="게시물"
+          accessibilityHint="이 장소에 올라온 여행 기록을 봅니다"
         >
           <NotebookIcon size={16} color={colors.primary} weight="bold" />
           <Text style={styles.directionsButtonText}>게시물</Text>
@@ -422,6 +472,9 @@ export default function AttractionDetailScreen() {
         <Pressable
           style={({ pressed }) => [styles.directionsButton, pressed && styles.pressedFeedback]}
           onPress={openSaveModal}
+          accessibilityRole="button"
+          accessibilityLabel="저장"
+          accessibilityHint="이 장소를 내 여행에 저장합니다"
         >
           <FloppyDiskIcon size={16} color={colors.primary} weight="bold" />
           <Text style={styles.directionsButtonText}>저장</Text>
@@ -442,6 +495,9 @@ export default function AttractionDetailScreen() {
             <View
               key={info.label}
               style={[styles.infoRow, i === attraction.extra_info!.length - 1 && styles.infoRowLast]}
+              // "이용시간" "09:00~18:00"이 따로 읽히면 짝이 맞는지 알 수 없습니다.
+              accessible
+              accessibilityLabel={`${info.label}, ${info.value}`}
             >
               <Text style={styles.infoLabel}>{info.label}</Text>
               <Text style={styles.infoValue}>{info.value}</Text>
@@ -457,7 +513,9 @@ export default function AttractionDetailScreen() {
           <View style={styles.nearbySection}>
             <View style={styles.nearbySectionTitleRow}>
               <MapPinIcon size={14} color={colors.text} weight="bold" />
-              <Text style={styles.nearbySectionTitle}>근처 가볼 만한 곳</Text>
+              <Text style={styles.nearbySectionTitle} accessibilityRole="header">
+                근처 가볼 만한 곳
+              </Text>
             </View>
             <HorizontalScrollWeb contentContainerStyle={styles.nearbyRow}>
               {nearby.map((n) => (
@@ -470,6 +528,10 @@ export default function AttractionDetailScreen() {
                       params: { contentId: n.content_id, name: n.name },
                     })
                   }
+                  accessible
+                  accessibilityRole="button"
+                  accessibilityLabel={`${n.name}, ${n.category}, ${n.distance_km}킬로미터`}
+                  accessibilityHint="두 번 탭하면 이 장소를 봅니다"
                 >
                   {n.image_url ? (
                     <Image source={{ uri: n.image_url }} style={styles.nearbyImage} />
@@ -497,7 +559,9 @@ export default function AttractionDetailScreen() {
 
       <View style={styles.sectionTitleRow}>
         <ChatCircleTextIcon size={16} color={colors.text} weight="bold" />
-        <Text style={styles.sectionTitle}>방문자 리뷰 ({reviews.length})</Text>
+        <Text style={styles.sectionTitle} accessibilityRole="header">
+          방문자 리뷰 ({reviews.length})
+        </Text>
       </View>
 
       <View style={styles.reviewForm}>
@@ -506,7 +570,18 @@ export default function AttractionDetailScreen() {
         </Text>
         <View style={styles.starRow}>
           {[1, 2, 3, 4, 5].map((n) => (
-            <TouchableOpacity key={n} onPress={() => setRatingInput(n)} hitSlop={6}>
+            <TouchableOpacity
+              key={n}
+              onPress={() => setRatingInput(n)}
+              hitSlop={6}
+              // 별이 아이콘뿐이라 스크린리더로는 무엇인지도, 몇 점을 줬는지도
+              // 알 수 없었습니다. 별마다 점수를 이름으로 주고, 지금 고른 점수는
+              // '선택됨'으로 전달합니다(앱은 accessibilityState, 웹은 aria-selected).
+              accessibilityRole="button"
+              accessibilityLabel={`별점 ${n}점`}
+              accessibilityState={{ selected: n === ratingInput }}
+              aria-selected={n === ratingInput}
+            >
               <StarIcon size={26} color={n <= ratingInput ? "#F0A93B" : colors.border} weight={n <= ratingInput ? "fill" : "regular"} />
             </TouchableOpacity>
           ))}
@@ -521,6 +596,10 @@ export default function AttractionDetailScreen() {
           value={bodyInput}
           onChangeText={setBodyInput}
           editable={!!session}
+          accessibilityLabel="리뷰 내용"
+          accessibilityHint={
+            session ? "이 장소가 어땠는지, 이동이 편했는지 적어주세요" : "로그인해야 리뷰를 남길 수 있습니다"
+          }
         />
 
         <HorizontalScrollWeb style={styles.photoPickerRow}>
@@ -531,6 +610,8 @@ export default function AttractionDetailScreen() {
                 style={styles.photoRemoveButton}
                 onPress={() => handleRemoveReviewPhoto(p.uri)}
                 hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel="사진 삭제"
               >
                 <XIcon size={11} color={colors.surface} weight="bold" />
               </TouchableOpacity>
@@ -541,6 +622,9 @@ export default function AttractionDetailScreen() {
               style={styles.photoAddButton}
               onPress={handlePickReviewPhotos}
               disabled={pickingPhoto}
+              accessibilityRole="button"
+              accessibilityLabel="사진 추가"
+              accessibilityHint={`리뷰에 사진을 넣습니다. 최대 ${MAX_REVIEW_PHOTOS}장`}
             >
               {pickingPhoto ? (
                 <ActivityIndicator color={colors.primary} />
@@ -558,6 +642,11 @@ export default function AttractionDetailScreen() {
           style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
           onPress={handleSubmitReview}
           disabled={submitting}
+          accessibilityRole="button"
+          accessibilityLabel={session ? (myReview ? "리뷰 수정하기" : "리뷰 등록하기") : "로그인하고 리뷰 남기기"}
+          accessibilityHint={
+            session && ratingInput === 0 ? "별점을 먼저 고른 뒤 등록할 수 있습니다" : undefined
+          }
         >
           {submitting ? (
             <ActivityIndicator color={colors.onPrimary} />
