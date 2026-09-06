@@ -68,6 +68,10 @@ async def _build_content_id_to_city_map() -> dict[str, str]:
     읽어 쓰므로, 이 배치 때문에 관광공사 API를 새로 호출하지 않습니다. 캐시가
     없거나 오래됐으면(get_cached_attraction_list가 None) 그 카테고리는 그냥
     건너뜁니다 — 다음 홈 화면 조회가 캐시를 채우면 다음 배치부터 반영됩니다.
+
+    반면 캐시를 '읽지 못한' 경우(CacheUnavailable)는 넘기지 않고 그대로 올려보냅니다.
+    그 상태로 계속하면 도시 매핑이 빈 채로 순위를 계산해서, 멀쩡한 순위 테이블을
+    빈 결과로 덮어쓰게 됩니다. 갱신 엔드포인트가 503으로 답하고 다음 날 다시 돌면 됩니다.
     """
     mapping: dict[str, str] = {}
     for content_type_id in _DEFAULT_CONTENT_TYPE_IDS:

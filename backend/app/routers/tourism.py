@@ -369,16 +369,10 @@ async def accessibility_summary(
     때문에 대부분이 낭비였습니다. DB에서도 그 컬럼을 아예 안 읽습니다.
     """
     columns = "*" if include_places else _ACCESSIBILITY_COUNT_COLUMNS
-    try:
-        cached = await get_cached_accessibility_stats(region, columns=columns)
-    except CacheUnavailable as e:
-        # 캐시를 '읽지 못한' 것뿐인데 그 자리에서 재계산해 저장하면, 외부 API가
-        # 불안정한 순간에 멀쩡하던 값이 미완성 값으로 덮어써집니다. 저장된 값은
-        # 그대로 두고, 잠시 뒤 다시 물어보게 합니다.
-        raise HTTPException(
-            status_code=503,
-            detail="접근성 통계를 잠시 불러올 수 없어요. 잠시 후 다시 시도해 주세요.",
-        ) from e
+    # 캐시를 '읽지 못한' 경우에는 여기서 CacheUnavailable이 그대로 올라가 503이
+    # 됩니다(app/main.py 핸들러). 그 자리에서 재계산해 저장해버리면, 외부 API가
+    # 불안정한 순간에 멀쩡하던 값이 미완성 값으로 덮어써집니다.
+    cached = await get_cached_accessibility_stats(region, columns=columns)
     if cached:
         return AccessibilitySummary(**cached)
 
@@ -420,13 +414,7 @@ async def accessibility_places(
             f"(가능한 값: {', '.join(_TOP_PLACES_COLUMN)})",
         )
 
-    try:
-        cached = await get_cached_accessibility_stats(region, columns=column)
-    except CacheUnavailable as e:
-        raise HTTPException(
-            status_code=503,
-            detail="주요 여행지 목록을 잠시 불러올 수 없어요. 잠시 후 다시 시도해 주세요.",
-        ) from e
+    cached = await get_cached_accessibility_stats(region, columns=column)
     places = (cached or {}).get(column) or []
     return AccessibilityPlacePage(
         category=category,

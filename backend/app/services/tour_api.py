@@ -72,6 +72,22 @@ _BENEFIT_LABELS: list[tuple[str, str]] = [
 ]
 
 
+async def _optional_cache(coro, default, what: str):
+    """
+    캐시가 '있으면 좋은' 자리에서 쓰는 래퍼 — 못 읽으면 캐시 미스처럼 넘어갑니다.
+
+    캐시를 못 읽었다고 화면까지 실패시킬 이유가 없는 곳(상세 페이지의 소개문·
+    부가정보·집중률 등)에 씁니다. 반대로 캐시가 '안전망'인 자리(목록 캐시,
+    전수조사용 편의시설 캐시, 갱신 전 직전 값)에는 쓰면 안 됩니다 — 거기서
+    조용히 넘어가면 나쁜 값이 그대로 저장되거나 일일 예산이 통째로 날아갑니다.
+    """
+    try:
+        return await coro
+    except CacheUnavailable as e:
+        logger.warning("%s 캐시를 읽지 못해 캐시 없이 진행합니다: %s", what, e)
+        return default
+
+
 def _region_token_sets(sigungu_cd: int | list[int] | None) -> list[list[str]]:
     """
     시/군/구 코드를 주소 비교용 단어 묶음으로 바꿉니다.
@@ -1263,9 +1279,19 @@ class TourApiClient:
 
         # TTL을 무시하고 '예전에 저장해둔 목록'과 크기를 비교합니다. 여기까지 왔다는
         # 건 유효기간이 지났다는 뜻이라, 기본 TTL로 읽으면 항상 None이 나옵니다.
-        previous = await get_cached_attraction_list(
-            ldong_regn_cd, content_type_id, max_age_hours=_LIST_CACHE_UNION_MAX_AGE_HOURS
-        )
+        try:
+            previous = await get_cached_attraction_list(
+                ldong_regn_cd, content_type_id, max_age_hours=_LIST_CACHE_UNION_MAX_AGE_HOURS
+            )
+        except CacheUnavailable as e:
+            # 기존 캐시를 못 읽으면 '얼마나 줄었는지'를 판단할 수 없습니다. 판단
+            # 근거 없이 저장하면 검사를 건너뛴 것과 같으므로 이번엔 저장하지 않습니다.
+            logger.warning(
+                "목록 캐시 저장을 건너뜁니다 (contentTypeId=%s): 기존 캐시를 읽지 못했습니다: %s",
+                content_type_id,
+                e,
+            )
+            return False
         previous_count = len(previous or [])
         if previous_count and len(attractions) < previous_count * _LIST_CACHE_SHRINK_THRESHOLD:
             logger.warning(
@@ -1297,7 +1323,9 @@ class TourApiClient:
         # offset은 이 캐시된 전체 목록 안에서의 시작 위치입니다 — 홈 화면이
         # 스크롤로 다음 페이지를 요청할 때(예: offset=6, offset=12, ...), 매번
         # 전체 목록을 다시 보내는 대신 그 구간만 잘라 돌려줍니다.
-        cached_items = await get_cached_attraction_list(ldong_regn_cd, content_type_id)
+        cached_items = await _optional_cache(
+            get_cached_attraction_list(ldong_regn_cd, content_type_id), None, "관광지 목록"
+        )
         if cached_items is not None:
             attractions = [self._attraction_from_cache_dict(d) for d in cached_items]
             # 시/군/구 필터가 있으면 "자르기 전에" 먼저 거릅니다 — 앞에서 잘라낸
@@ -1553,6 +1581,15 @@ class TourApiClient:
                     "search_accessible_attractions: 편의시설 정보 조회가 8초 안에 "
                     "끝나지 않아 일부(또는 전부)는 비어있는 채로 목록을 반환합니다."
                 )
+            except CacheUnavailable as e:
+                # 여기는 사람이 화면을 보며 기다리는 자리라, 캐시를 못 읽었다고
+                # 화면 전체를 실패시키지 않습니다 — 위 타임아웃과 같은 방침입니다.
+                # (캐시 조회가 먼저라 이 시점엔 API를 한 번도 부르지 않았습니다.)
+                logger.warning(
+                    "search_accessible_attractions: 편의시설 캐시를 읽지 못해 "
+                    "편의시설 정보 없이 목록을 반환합니다: %s",
+                    e,
+                )
 
         # 캐시된 혼잡도(구 집중률)를 카드 표시용으로만 채웁니다. refresh_congestion_cache로
         # 미리 채워둔 DB 캐시만 읽으니, 이 단계는 별도 API 호출이 없습니다(빠름).
@@ -1578,6 +1615,9 @@ class TourApiClient:
             )
         except asyncio.TimeoutError:
             logger.warning("search_accessible_attractions: 혼잡도 캐시 조회가 5초 안에 끝나지 않아 건너뜁니다.")
+            congestion_rows = {}
+        except CacheUnavailable as e:
+            logger.warning("search_accessible_attractions: 혼잡도 캐시를 읽지 못해 건너뜁니다: %s", e)
             congestion_rows = {}
 
         # 방문자 리뷰 평균 평점 (외부 API 없이 우리 DB 조회라 부담 없음)
@@ -1680,6 +1720,12 @@ class TourApiClient:
                         "search_accessible_attractions: 소개문 조회가 6초 안에 끝나지 않아 "
                         "일부는 비어있는 채로 반환합니다."
                     )
+                except CacheUnavailable as e:
+                    logger.warning(
+                        "search_accessible_attractions: 소개문 캐시를 읽지 못해 "
+                        "일부는 비어있는 채로 반환합니다: %s",
+                        e,
+                    )
 
         # detail_for는 "앞의 N개는 소개문/부가정보까지 채워서 한 번에 보내달라"는
         # 요청입니다. 홈 화면은 목록을 받은 뒤 화면에 보이는 6개의 소개문/부가정보를
@@ -1702,6 +1748,13 @@ class TourApiClient:
                         "search_accessible_attractions: 앞 %d개의 소개문/부가정보 조회가 8초 안에 "
                         "끝나지 않아 일부는 비어있는 채로 반환합니다.",
                         detail_for,
+                    )
+                except CacheUnavailable as e:
+                    logger.warning(
+                        "search_accessible_attractions: 앞 %d개의 소개문/부가정보 캐시를 "
+                        "읽지 못해 일부는 비어있는 채로 반환합니다: %s",
+                        detail_for,
+                        e,
                     )
 
         return results
@@ -1738,6 +1791,8 @@ class TourApiClient:
                 logger.warning(
                     "get_overviews_for_ids: 6초 안에 끝나지 않아 일부는 비어있는 채로 반환합니다."
                 )
+            except CacheUnavailable as e:
+                logger.warning("get_overviews_for_ids: 소개문 캐시를 읽지 못했습니다: %s", e)
         return {a.content_id: a.overview for a in placeholders}
 
     async def get_extra_info_for_ids(self, items: list[tuple[str, str]]) -> dict[str, list[InfoField]]:
@@ -1767,6 +1822,8 @@ class TourApiClient:
                     self._fill_extra_info_with_cache(client, placeholders, max_concurrency=8),
                     timeout=6.0,
                 )
+            except CacheUnavailable as e:
+                logger.warning("get_extra_info_for_ids: 부가정보 캐시를 읽지 못했습니다: %s", e)
             except asyncio.TimeoutError:
                 logger.warning(
                     "get_extra_info_for_ids: 6초 안에 끝나지 않아 일부는 비어있는 채로 반환합니다."
@@ -1847,7 +1904,9 @@ class TourApiClient:
             return None
 
         async with httpx.AsyncClient(timeout=15) as client:
-            cached_basic = await get_cached_attraction_basic(content_id)
+            cached_basic = await _optional_cache(
+                get_cached_attraction_basic(content_id), None, "관광지 기본정보"
+            )
             if cached_basic:
                 attraction = Attraction(
                     content_id=content_id,
@@ -1932,7 +1991,9 @@ class TourApiClient:
                 )
 
             # 무장애 정보: 캐시 우선, 없으면 이번 하나만 즉시 조회
-            cached = await get_cached_place_accessibility([content_id])
+            cached = await _optional_cache(
+                get_cached_place_accessibility([content_id]), {}, "장소별 무장애 정보"
+            )
             if content_id in cached:
                 attraction.accessibility = _accessibility_from_cache_row(cached[content_id])
             else:
@@ -1954,7 +2015,9 @@ class TourApiClient:
             # 집중률: 캐시(congestion_cache)에서 시군구+이름으로 조회 (API 호출 없음)
             area_signgu = find_area_signgu(attraction.address)
             if area_signgu:
-                rows = await get_cached_congestion_rates([area_signgu[1]])
+                rows = await _optional_cache(
+                    get_cached_congestion_rates([area_signgu[1]]), {}, "집중률"
+                )
                 row = rows.get((area_signgu[1], attraction.name))
                 attraction.congestion_rate = float(row["cnctr_rate"]) if row else None
 
@@ -1971,7 +2034,9 @@ class TourApiClient:
             # 동일한 방침 — attraction_overview_cache 관련 주석 참고).
             content_type_id = _CONTENT_TYPE_ID_BY_LABEL.get(attraction.category)
             if content_type_id is not None and content_type_id in _INTRO_FIELDS_BY_TYPE:
-                cached_intro = await get_cached_intro_info(content_id)
+                cached_intro = await _optional_cache(
+                    get_cached_intro_info(content_id), None, "관광지 부가정보"
+                )
                 if cached_intro:
                     field_values = cached_intro.get("fields") or {}
                 else:

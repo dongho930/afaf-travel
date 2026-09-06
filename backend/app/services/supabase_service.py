@@ -43,10 +43,19 @@ class CacheUnavailable(RuntimeError):
     """
     캐시 테이블을 '읽지 못했다'는 신호 — '저장된 값이 없다'와 구분하기 위한 것입니다.
 
-    조회 실패와 행 없음을 똑같이 None으로 돌려주면, 호출부는 "아직 계산한 적이
-    없구나"로 오해하고 그 자리에서 다시 계산해 그 결과를 저장해버립니다. 외부
-    API가 불안정한 순간에 이 일이 겹치면, 멀쩡하던 캐시가 반토막 난 값으로
-    덮어써집니다 (실제로 무장애 여행지 수가 1232에서 539로 떨어졌습니다).
+    조회 실패와 행 없음을 똑같이 None/빈 결과로 돌려주면, 호출부는 "아직 없구나"로
+    오해하고 그 자리에서 다시 계산하거나 전부 다시 조회합니다. 외부 API가 불안정한
+    순간에 이 일이 겹치면 멀쩡하던 캐시가 반토막 난 값으로 덮어써지고(실제로 무장애
+    여행지 수가 1232에서 539로 떨어졌습니다), 멀쩡할 때도 일일 트래픽 예산을
+    통째로 날립니다.
+
+    그래서 이 파일의 캐시 '읽기' 함수는 전부 같은 규약을 씁니다.
+      - 값이 없다  -> None / 빈 dict / 빈 set (정상)
+      - 못 읽었다  -> CacheUnavailable (예외)
+
+    호출부는 둘을 구분해 처리해야 합니다. 캐시가 '있으면 좋은' 자리(소개문·부가정보
+    등)는 예외를 잡아 캐시 미스처럼 넘어가고, 캐시가 '안전망'인 자리(목록 캐시,
+    편의시설 캐시, 갱신 전 직전 값)는 넘기지 말고 이번 작업을 멈춰야 합니다.
     """
 
 # 관광지 목록 캐시(attraction_list_cache)는 한 행에 카테고리 하나의 목록이 통째로
@@ -548,7 +557,7 @@ async def get_cached_place_accessibility(content_ids: list[str]) -> dict[str, di
                 found[row["content_id"]] = row
     except Exception as e:
         print(f"[supabase] 장소별 무장애 정보 캐시 조회 실패: {e}")
-        return {}
+        raise CacheUnavailable(str(e)) from e
     return found
 
 
@@ -642,7 +651,7 @@ async def get_cached_congestion_rates(signgu_cds: list[int]) -> dict[tuple[int, 
             found[(row["signgu_cd"], row["tats_nm"])] = row
     except Exception as e:
         print(f"[supabase] 집중률 캐시 조회 실패: {e}")
-        return {}
+        raise CacheUnavailable(str(e)) from e
     return found
 
 
@@ -655,7 +664,7 @@ async def get_cached_congestion_signgu_cds() -> set[int]:
         return {row["signgu_cd"] for row in (result.data or [])}
     except Exception as e:
         print(f"[supabase] 집중률 캐시 시군구 목록 조회 실패: {e}")
-        return set()
+        raise CacheUnavailable(str(e)) from e
 
 
 async def save_congestion_rates_batch(rows: list[dict]) -> None:
@@ -713,7 +722,7 @@ async def get_cached_overviews(content_ids: list[str]) -> dict[str, str]:
                 found[row["content_id"]] = row.get("overview") or ""
     except Exception as e:
         print(f"[supabase] 관광지 소개문 캐시 조회 실패: {e}")
-        return {}
+        raise CacheUnavailable(str(e)) from e
     return found
 
 
@@ -737,7 +746,7 @@ async def get_cached_attraction_basic(content_id: str) -> dict | None:
         return rows[0]
     except Exception as e:
         print(f"[supabase] 관광지 기본정보 캐시 조회 실패: {e}")
-        return None
+        raise CacheUnavailable(str(e)) from e
 
 
 async def save_attraction_basic(row: dict) -> None:
@@ -795,7 +804,7 @@ async def get_cached_intro_info(content_id: str) -> dict | None:
         return rows[0] if rows else None
     except Exception as e:
         print(f"[supabase] 관광지 부가정보 캐시 조회 실패: {e}")
-        return None
+        raise CacheUnavailable(str(e)) from e
 
 
 async def save_intro_info(row: dict) -> None:
@@ -822,7 +831,7 @@ async def get_cached_intro_info_batch(content_ids: list[str]) -> dict[str, dict]
                 found[row["content_id"]] = row
     except Exception as e:
         print(f"[supabase] 관광지 부가정보 캐시 일괄 조회 실패: {e}")
-        return {}
+        raise CacheUnavailable(str(e)) from e
     return found
 
 
@@ -1018,7 +1027,7 @@ async def get_cached_attraction_list(
         return items
     except Exception as e:
         print(f"[supabase] 관광지 목록 캐시 조회 실패: {e}")
-        return None
+        raise CacheUnavailable(str(e)) from e
 
 
 async def save_attraction_list_cache(ldong_regn_cd: str, content_type_id: int, items: list[dict]) -> None:
