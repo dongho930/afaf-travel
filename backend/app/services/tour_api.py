@@ -1208,7 +1208,6 @@ class TourApiClient:
             diag["deferred_no_budget"] = diag.get("deferred_no_budget", 0) + deferred_count
 
         new_cache_rows: list[dict] = []
-        stopped_early = False
         for chunk_start in range(0, len(to_fetch), max_concurrency):
             chunk = to_fetch[chunk_start : chunk_start + max_concurrency]
             semaphore = asyncio.Semaphore(max_concurrency)
@@ -1239,7 +1238,6 @@ class TourApiClient:
                 if diag is not None:
                     diag["stopped_early_rate_limited"] = True
                     diag["deferred_no_budget"] = diag.get("deferred_no_budget", 0) + remaining
-                stopped_early = True
                 logger.warning(
                     "무장애정보 조회를 일찍 중단합니다 (연속 429로 일일 한도 소진 추정, "
                     "남은 %d건은 다음 새로고침으로 미룸)",
@@ -1258,7 +1256,6 @@ class TourApiClient:
             row = cached_rows.get(attraction.content_id)
             if row is not None:
                 attraction.accessibility = _accessibility_from_cache_row(row)
-        _ = stopped_early  # 로그/필요 시 확장을 위해 남겨둠 (현재는 diag로 충분히 노출됨)
 
     async def _should_save_list_cache(
         self,

@@ -37,7 +37,10 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = os.getenv("SUPABASE_JWT_SECRET", "")
 
     # 개발 편의를 위한 모드 플래그: 실제 키가 없을 때는 목업 데이터로 동작
-    use_mock_data: bool = os.getenv("USE_MOCK_DATA", "true").lower() == "true"
+    # 기본값은 false입니다 — 예전엔 true라, Render 환경변수에서 USE_MOCK_DATA가
+    # 빠지기만 해도 프로덕션이 목업 관광지 몇 곳을 실제 데이터인 양 서빙했습니다.
+    # 서비스키가 없으면 어차피 목업으로 넘어갑니다(TourApiClient.use_mock).
+    use_mock_data: bool = os.getenv("USE_MOCK_DATA", "false").lower() == "true"
 
     # 무장애 정보(detailWithTour2) 전수조사용 일일 예산.
     # 지금 발급받은 키가 '개발계정'이라 하루 트래픽 한도가 1,000건입니다.

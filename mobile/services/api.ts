@@ -140,22 +140,6 @@ export const api = {
       }),
     }),
 
-  generateCourse: (params: {
-    queryText: string;
-    userType: UserType;
-    region?: string;
-    maxStops?: number;
-  }) =>
-    request<CourseResponse>("/api/courses/generate", {
-      method: "POST",
-      body: JSON.stringify({
-        query_text: params.queryText,
-        user_type: params.userType,
-        region: params.region ?? "경기도",
-        max_stops: params.maxStops ?? 5,
-      }),
-    }),
-
   // 로그인 화면에서 입력한 값(이메일 또는 아이디)을 실제 이메일로 변환
   resolveLoginEmail: (identifier: string) =>
     request<{ email: string }>("/api/account/resolve-login-email", {
@@ -230,16 +214,6 @@ export const api = {
 
   // 내 여행 목록 (마이페이지)
   listTrips: () => request<TripSummary[]>("/api/trips"),
-
-  // 저장된 코스 전체 (여행 구분 없이, 내 여행 탭 '저장한 경로' 카드용)
-  getSavedCourses: () => request<SavedCourseSummary[]>("/api/courses/saved"),
-
-  // 새 여행을 미리 만들어두기 (보통은 저장 시 한 번에 만들지만 필요하면 따로도 가능)
-  createTrip: (name: string, category: CourseCategory, startDate?: string | null, endDate?: string | null) =>
-    request<TripSummary>("/api/trips", {
-      method: "POST",
-      body: JSON.stringify({ name, category, start_date: startDate ?? null, end_date: endDate ?? null }),
-    }),
 
   // 여행 이름/분류/날짜 수정
   updateTrip: (
@@ -383,8 +357,6 @@ export const api = {
       `/api/posts?limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ""}`
     ),
 
-  getPost: (postId: string) => request<PostItem>(`/api/posts/${encodeURIComponent(postId)}`),
-
   // 관광지 상세 화면 '게시물' 팝업용, 이 관광지(content_id)에 대한 게시물 전체 (최신순)
   getPostsByPlace: (contentId: string, limit: number = 50) =>
     request<PostItem[]>(
@@ -414,8 +386,4 @@ export const api = {
       body: JSON.stringify({ body, parent_comment_id: parentCommentId ?? null }),
     }),
 
-  deletePostComment: (commentId: string) =>
-    request<{ ok: boolean }>(`/api/posts/comments/${encodeURIComponent(commentId)}`, {
-      method: "DELETE",
-    }),
 };

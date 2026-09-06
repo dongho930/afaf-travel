@@ -31,7 +31,6 @@ from app.services.supabase_service import (
     delete_trip,
     delete_visited_place,
     get_saved_course_detail,
-    list_recent_courses,
     list_saved_courses,
     list_trip_courses,
     list_trips,
@@ -99,7 +98,7 @@ async def create_course_from_selection(
     return course
 
 
-@courses_router.post("/generate", response_model=CourseResponse)
+@courses_router.post("/generate", response_model=CourseResponse, deprecated=True)
 async def create_course(
     request: CourseRequest,
     user_id: Optional[str] = Depends(get_optional_user_id),
@@ -107,7 +106,14 @@ async def create_course(
     """
     (레거시) 질의 하나로 후보 선택 없이 바로 코스를 생성합니다.
     새 플로우는 /recommend → /generate-from-selection 두 단계를 씁니다.
+
+    앱은 2026-08-22부터 이 경로를 쓰지 않습니다. 그래도 남겨두는 이유는, 그 전에
+    설치된 네이티브 빌드가 아직 이 경로를 부를 수 있어서입니다(웹은 항상 최신이
+    배포되지만 EAS/dev client 빌드는 사용자 기기에 남습니다). Render 로그는 7일치만
+    보관해서 "아무도 안 쓴다"를 확인할 수가 없었습니다 — 그래서 아래 한 줄을 남깁니다.
+    한 달쯤 뒤 이 로그가 한 번도 안 찍혔으면 그때 안심하고 지우면 됩니다.
     """
+    print(f"[legacy] POST /api/courses/generate 호출됨 (user_id={user_id})")
     candidates = await tour_api_client.search_accessible_attractions(
         region=request.region, user_type=request.user_type.value, limit=25
     )
@@ -118,15 +124,6 @@ async def create_course(
 
     await save_course(course, query_text=request.query_text, region=request.region, user_id=user_id)
     return course
-
-
-@courses_router.get("/history")
-async def get_course_history(
-    limit: int = 20,
-    user_id: Optional[str] = Depends(get_optional_user_id),
-):
-    """로그인한 사용자의 최근 코스 이력을 조회합니다 (여행 저장 여부와 상관없이 생성된 것 전부)."""
-    return await list_recent_courses(limit=limit, user_id=user_id)
 
 
 @courses_router.post("/from-attraction/{content_id}", response_model=CourseResponse)

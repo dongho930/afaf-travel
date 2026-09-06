@@ -92,33 +92,12 @@ async def save_course(
         print(f"[supabase] 코스 저장 실패: {e}")
 
 
-async def list_recent_courses(limit: int = 20, user_id: Optional[str] = None) -> list[dict]:
-    """
-    최근 저장된 코스 이력을 조회합니다. Supabase 미설정 시 빈 리스트를 반환합니다.
-    user_id가 없으면(비로그인) 빈 리스트를 반환합니다 — 로그인해야 이력이 보입니다.
-    """
-    if _client is None or not user_id:
-        return []
-    try:
-        result = await _execute(
-            _client.table("courses")
-            .select("*")
-            .eq("user_id", user_id)
-            .order("created_at", desc=True)
-            .limit(limit)
-        )
-        return result.data or []
-    except Exception as e:
-        print(f"[supabase] 코스 조회 실패: {e}")
-        return []
-
-
 async def list_saved_courses(user_id: str, limit: int = 50) -> list[dict]:
     """
     '내 여행' 탭의 '저장한 경로' 통계 카드를 눌렀을 때 보여줄, 실제로 여행에
     저장된(trip_id가 있는) 코스 전체를 여행 구분 없이 한 번에 최신순으로
-    반환합니다. list_recent_courses는 여행에 저장하지 않은 것까지 다 포함해서
-    '저장한 경로' 개수(trips의 course_count 합)와 안 맞을 수 있어 따로 둡니다.
+    반환합니다. trip_id가 없는 코스(생성만 하고 저장하지 않은 것)를 함께 세면
+    '저장한 경로' 개수(trips의 course_count 합)와 안 맞아서 여기서 걸러냅니다.
     """
     if _client is None or not user_id:
         return []

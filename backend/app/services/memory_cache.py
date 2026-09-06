@@ -44,9 +44,6 @@ class TTLCache(Generic[T]):
         self._prune()
         self._entries[key] = (time.monotonic(), value)
 
-    def invalidate(self, key: Hashable) -> None:
-        self._entries.pop(key, None)
-
     async def get_or_compute(
         self,
         key: Hashable,
