@@ -58,6 +58,31 @@ const REPORT_CATEGORY_MAP: Record<CategoryKey, ReportCategory> = {
 
 const PLACES_PAGE_SIZE = 5;
 
+// 유형별 편의시설 항목 수. 서버가 점수를 매길 때 세는 항목 수와 같아야 합니다
+// (backend/app/services/tour_api.py의 fields_by_category / *_score 함수 참고).
+const FEATURE_TOTAL: Record<CategoryKey, number> = {
+  wheelchair_count: 6,
+  visual_count: 7,
+  hearing_count: 3,
+  senior_count: 4,
+  family_count: 3,
+  pregnant_count: 5,
+};
+
+/**
+ * 그 장소가 몇 개 중 몇 개를 갖췄는지 돌려줍니다.
+ *
+ * 서버가 보내준 features(갖춘 항목 목록)가 있으면 그 개수를 그대로 씁니다 —
+ * 카드에 찍히는 칩 개수와 숫자가 정확히 같아야 하기 때문입니다. 통계 캐시가
+ * 아직 갱신되지 않아 features가 비어 있으면 점수에서 되돌려 계산합니다
+ * (score = 갖춘 수 ÷ 전체 × 100 이라 나눗셈을 되돌리면 정확히 떨어집니다).
+ */
+function featureCount(place: AccessibilityPlaceScore, category: CategoryKey): { have: number; total: number } {
+  const total = FEATURE_TOTAL[category];
+  const fromFeatures = place.features?.length ?? 0;
+  return { have: fromFeatures || Math.round((place.score * total) / 100), total };
+}
+
 /**
  * 서버가 보내준 "갖춘 편의시설 필드명 목록"을 AccessibilityIcons가 받는 형태
  * (필드별 true/false)로 바꿔줍니다. 서버가 이미 그 유형과 관련된 항목만 골라
@@ -337,8 +362,8 @@ export default function AccessibilityScreen() {
             (예: 휠체어는 50 다음이 67이라 60~66점이 존재하지 않음). 숫자 대신
             무슨 뜻인지를 한 줄로 설명합니다. */}
         <Text style={styles.legendNote}>
-          아래 목록은 모두 이 유형의 편의시설을 갖춘 곳이며, 등급은 그중 얼마나 여러 가지를 갖췄는지를
-          나타냅니다.
+          아래 목록은 모두 이 유형의 편의시설을 갖춘 곳입니다. 등급 옆 숫자는 이 유형의 전체 항목
+          {` ${FEATURE_TOTAL[selectedCategory]}개`} 중 몇 개를 갖췄는지를 뜻합니다.
         </Text>
 
         <FadeInView key={`places-title-${selectedCategory}`} duration={200} translateY={6}>
@@ -350,6 +375,7 @@ export default function AccessibilityScreen() {
         {selectedPlaces.length ? (
           selectedPlaces.slice(0, visiblePlacesCount).map((place) => {
             const tier = tierLabel(place.score, colors);
+            const count = featureCount(place, selectedCategory);
             return (
               <FadeInView key={place.content_id || place.name} duration={250}>
                 <Pressable
@@ -379,6 +405,11 @@ export default function AccessibilityScreen() {
                         ]}
                       >
                         <Text style={[styles.tierBadgeText, { color: tier.badgeText }]}>{tier.label}</Text>
+                        {/* 등급만으로는 "얼마나"가 안 보여서, 몇 개 중 몇 개인지를 함께
+                            적습니다. 아래 칩 개수와 정확히 같은 숫자입니다. */}
+                        <Text style={[styles.tierBadgeCount, { color: tier.badgeText }]}>
+                          {count.have}/{count.total}
+                        </Text>
                       </View>
                     }
                     title={place.name}
@@ -630,15 +661,18 @@ function makeStyles(colors: ThemeColors) {
   // 예전에는 점수(숫자)를 담은 원형 배지였는데, 숫자만으로는 그 유형에서 어느
   // 정도인지 알기 어려워 등급 문구를 그대로 보여주는 알약 모양으로 바꿨습니다.
   tierBadge: {
-    minWidth: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
     paddingHorizontal: spacing.sm,
     paddingVertical: 6,
     borderRadius: radius.pill,
     borderWidth: 1,
-    alignItems: "center",
     justifyContent: "center",
   },
   tierBadgeText: { fontFamily: fontFamily.bold, fontSize: 12 },
+  // 등급 문구가 주인공이고 개수는 보조 정보라 조금 작고 연하게 둡니다.
+  tierBadgeCount: { fontFamily: fontFamily.semiBold, fontSize: 11, opacity: 0.8 },
   emptyText: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textTertiary },
   moreButton: {
     marginTop: spacing.xs,
