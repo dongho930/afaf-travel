@@ -325,12 +325,16 @@ _CONTENT_TYPE_LABELS: dict[int, str] = {
 # 코스에 기본으로 섞어서 조회할 카테고리 (관광지 + 맛집 + 문화시설 + 레포츠 + 숙박)
 _DEFAULT_CONTENT_TYPE_IDS: list[int] = [12, 39, 14, 28, 32]
 
-# 접근성 통계(get_accessibility_summary)에서 후보 목록을 합칠 때 쓰는 목록 캐시
-# 유효기간. 홈 화면용 기본값(24시간)과 달리 아주 길게 잡습니다 — 여기서 캐시는
-# '화면에 보여줄 최신 목록'이 아니라 '한 번이라도 본 관광지를 후보에서 놓치지
-# 않기 위한 안전망'이라, 오래된 목록도 그대로 쓸모가 있습니다. 24시간을 쓰면
-# 하루만 지나도 None이 돌아와 안전망이 사라집니다.
-_LIST_CACHE_UNION_MAX_AGE_HOURS = 24.0 * 365
+# 목록 캐시를 '나이 상관없이' 읽을 때 쓰는 값 (사실상 무제한).
+#
+# 관광지 목록은 하루아침에 바뀌는 데이터가 아닙니다. 기본 유효기간(24시간)을
+# 그대로 쓰면 하루만 지나도 None이 돌아오고, 그때마다 사용자 요청 중에 전수
+# 조회가 시작됩니다 — 공공데이터포털이 느리거나 죽어 있으면 그 시간이 그대로
+# 사람이 기다리는 시간이 되고, 잘린 목록이 캐시를 덮어쓰는 사고로도 이어졌습니다.
+#
+# 그래서 읽을 때는 오래된 목록도 그대로 씁니다. 목록을 새로 받아오는 일은
+# 자정 갱신 한 곳에서만 합니다(_should_save_list_cache가 온전한 목록인지 검사).
+_LIST_CACHE_ANY_AGE_HOURS = 24.0 * 365
 
 # 목록(areaBasedList2) 한 페이지를 몇 번까지 시도할지, 그리고 재시도 사이 대기 시간.
 # 공공데이터포털은 TCP는 붙는데 응답을 한 바이트도 안 보내는 상태(ReadTimeout)에
@@ -338,6 +342,21 @@ _LIST_CACHE_UNION_MAX_AGE_HOURS = 24.0 * 365
 # 동시에 돌리므로 전부 실패해도 대략 (타임아웃 30초 x 3회 + 대기 4초) 정도에서 끝납니다.
 _LIST_FETCH_ATTEMPTS = 3
 _LIST_FETCH_BACKOFF_SECONDS = (1.0, 3.0)
+
+# 사용자 요청을 처리하는 중에 새로 조회할 수 있는 건수 = 0건.
+#
+# 사람이 화면을 보며 기다리는 경로(홈 화면 목록, 소개문/부가정보 더보기)에서는
+# 공공데이터 API를 부르지 않고 저장된 캐시(DB)만 읽습니다. 캐시를 채우는 일은
+# 자정 갱신(GitHub Actions -> */refresh)이 일일 예산 안에서 담당합니다.
+#
+# 이렇게 나눈 이유:
+#   - 공공데이터포털이 죽어도(실제로 자주 죽습니다) 화면은 그대로 뜹니다.
+#   - 응답 시간이 외부 API 상태와 무관하게 일정해집니다.
+#   - 일일 예산을 사람이 화면을 넘길 때마다 야금야금 쓰지 않고, 자정에 계획대로 씁니다.
+#
+# 대가: 아직 캐시에 없는 항목은 그 자리에서 채워지지 않고 빈 채로 보입니다.
+# 다음 자정 갱신에서 예산만큼 채워지므로, 며칠에 걸쳐 저절로 메워집니다.
+_NO_LIVE_FETCH = 0
 
 # 편의시설 캐시(place_accessibility_cache)를 후보 되살리기에 쓸 수 있는 지역.
 #
@@ -792,6 +811,7 @@ class TourApiClient:
         client: httpx.AsyncClient,
         attractions: list[Attraction],
         max_concurrency: int = 8,
+        max_new_fetches: int | None = None,
     ) -> None:
         """
         attractions 각각의 extra_info(이용시간/요금 등)를 채웁니다. _fill_overview_with_cache와
@@ -820,6 +840,10 @@ class TourApiClient:
             else:
                 to_fetch.append((a, content_type_id))
 
+        # max_new_fetches=0이면 캐시에 있는 것만 채우고 끝냅니다 — 사용자 요청
+        # 경로에서 공공데이터 API를 부르지 않기 위한 설정(_NO_LIVE_FETCH)입니다.
+        if max_new_fetches is not None:
+            to_fetch = to_fetch[:max_new_fetches]
         if not to_fetch:
             return
 
@@ -1281,7 +1305,7 @@ class TourApiClient:
         # 건 유효기간이 지났다는 뜻이라, 기본 TTL로 읽으면 항상 None이 나옵니다.
         try:
             previous = await get_cached_attraction_list(
-                ldong_regn_cd, content_type_id, max_age_hours=_LIST_CACHE_UNION_MAX_AGE_HOURS
+                ldong_regn_cd, content_type_id, max_age_hours=_LIST_CACHE_ANY_AGE_HOURS
             )
         except CacheUnavailable as e:
             # 기존 캐시를 못 읽으면 '얼마나 줄었는지'를 판단할 수 없습니다. 판단
@@ -1323,8 +1347,14 @@ class TourApiClient:
         # offset은 이 캐시된 전체 목록 안에서의 시작 위치입니다 — 홈 화면이
         # 스크롤로 다음 페이지를 요청할 때(예: offset=6, offset=12, ...), 매번
         # 전체 목록을 다시 보내는 대신 그 구간만 잘라 돌려줍니다.
+        # 유효기간이 지났다고 사용자 요청 중에 전수 조회를 시작하지 않습니다 —
+        # 오래된 목록도 그대로 씁니다. 새로 받아오는 일은 자정 갱신이 합니다.
         cached_items = await _optional_cache(
-            get_cached_attraction_list(ldong_regn_cd, content_type_id), None, "관광지 목록"
+            get_cached_attraction_list(
+                ldong_regn_cd, content_type_id, max_age_hours=_LIST_CACHE_ANY_AGE_HOURS
+            ),
+            None,
+            "관광지 목록",
         )
         if cached_items is not None:
             attractions = [self._attraction_from_cache_dict(d) for d in cached_items]
@@ -1572,7 +1602,7 @@ class TourApiClient:
             try:
                 await asyncio.wait_for(
                     self._fill_accessibility_with_cache(
-                        client, attractions, max_new_fetches=len(attractions)
+                        client, attractions, max_new_fetches=_NO_LIVE_FETCH
                     ),
                     timeout=8.0,
                 )
@@ -1712,7 +1742,9 @@ class TourApiClient:
             async with httpx.AsyncClient(timeout=15) as overview_client:
                 try:
                     await asyncio.wait_for(
-                        self._fill_overview_with_cache(overview_client, results),
+                        self._fill_overview_with_cache(
+                            overview_client, results, max_new_fetches=_NO_LIVE_FETCH
+                        ),
                         timeout=6.0,
                     )
                 except asyncio.TimeoutError:
@@ -1738,8 +1770,12 @@ class TourApiClient:
                 try:
                     await asyncio.wait_for(
                         asyncio.gather(
-                            self._fill_overview_with_cache(detail_client, head),
-                            self._fill_extra_info_with_cache(detail_client, head),
+                            self._fill_overview_with_cache(
+                                detail_client, head, max_new_fetches=_NO_LIVE_FETCH
+                            ),
+                            self._fill_extra_info_with_cache(
+                                detail_client, head, max_new_fetches=_NO_LIVE_FETCH
+                            ),
                         ),
                         timeout=8.0,
                     )
@@ -1784,7 +1820,9 @@ class TourApiClient:
         async with httpx.AsyncClient(timeout=15) as client:
             try:
                 await asyncio.wait_for(
-                    self._fill_overview_with_cache(client, placeholders, max_concurrency=8),
+                    self._fill_overview_with_cache(
+                        client, placeholders, max_concurrency=8, max_new_fetches=_NO_LIVE_FETCH
+                    ),
                     timeout=6.0,
                 )
             except asyncio.TimeoutError:
@@ -1819,7 +1857,9 @@ class TourApiClient:
         async with httpx.AsyncClient(timeout=15) as client:
             try:
                 await asyncio.wait_for(
-                    self._fill_extra_info_with_cache(client, placeholders, max_concurrency=8),
+                    self._fill_extra_info_with_cache(
+                        client, placeholders, max_concurrency=8, max_new_fetches=_NO_LIVE_FETCH
+                    ),
                     timeout=6.0,
                 )
             except CacheUnavailable as e:
@@ -2554,7 +2594,7 @@ class TourApiClient:
                 cached_per_type = await asyncio.gather(
                     *(
                         get_cached_attraction_list(
-                            ldong_regn_cd, content_type_id, max_age_hours=_LIST_CACHE_UNION_MAX_AGE_HOURS
+                            ldong_regn_cd, content_type_id, max_age_hours=_LIST_CACHE_ANY_AGE_HOURS
                         )
                         for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
                     )
