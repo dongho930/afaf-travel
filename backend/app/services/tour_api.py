@@ -88,20 +88,34 @@ def _region_token_sets(sigungu_cd: int | list[int] | None) -> list[list[str]]:
     return [name.split() for name in (signgu_name(code) for code in codes) if name]
 
 
-def _filter_by_regions(
+def _filter_and_mix_by_regions(
     attractions: list[Attraction], region_token_sets: list[list[str]] | None
 ) -> list[Attraction]:
     """
-    주소가 주어진 시/군/구 중 하나에라도 해당하는 관광지만 남깁니다.
-    (필터가 없으면 그대로 돌려줍니다)
+    주소가 주어진 시/군/구 중 하나에라도 해당하는 관광지만 남기되, 구별로 번갈아
+    한 개씩 뽑아 섞어서 돌려줍니다. (필터가 없으면 원래 목록 그대로)
+
+    그냥 걸러내기만 하면 관광공사 API가 주는 순서에 따라 앞부분이 한 구에 몰릴 수
+    있습니다. 예를 들어 '수원'을 골랐는데 첫 화면이 전부 권선구인 식입니다. 구별로
+    나눠 담은 뒤 번갈아 뽑으면 첫 화면부터 그 도시의 여러 구가 고르게 나오고,
+    '더보기'로 넘겨도 계속 섞인 상태로 이어집니다.
     """
     if not region_token_sets:
         return attractions
-    return [
-        a
-        for a in attractions
-        if any(all(token in a.address for token in tokens) for tokens in region_token_sets)
-    ]
+
+    groups: list[list[Attraction]] = [[] for _ in region_token_sets]
+    for a in attractions:
+        for i, tokens in enumerate(region_token_sets):
+            if all(token in a.address for token in tokens):
+                groups[i].append(a)
+                break  # 한 곳은 한 구에만 속하므로 첫 번째로 맞는 구에만 담습니다
+
+    mixed: list[Attraction] = []
+    for i in range(max((len(g) for g in groups), default=0)):
+        for group in groups:
+            if i < len(group):
+                mixed.append(group[i])
+    return mixed
 
 
 def _accessibility_benefit_labels(features: AccessibilityFeatures) -> list[str]:
@@ -1144,7 +1158,7 @@ class TourApiClient:
             attractions = [self._attraction_from_cache_dict(d) for d in cached_items]
             # 시/군/구 필터가 있으면 "자르기 전에" 먼저 거릅니다 — 앞에서 잘라낸
             # 표본만 거르면 그 지역에 있는 곳 대부분이 빠집니다.
-            attractions = _filter_by_regions(attractions, region_token_sets)
+            attractions = _filter_and_mix_by_regions(attractions, region_token_sets)
             return attractions[offset : offset + num_of_rows]
 
         try:
@@ -1160,7 +1174,7 @@ class TourApiClient:
             await save_attraction_list_cache(
                 ldong_regn_cd, content_type_id, [self._attraction_to_cache_dict(a) for a in attractions]
             )
-            return _filter_by_regions(attractions, region_token_sets)[offset : offset + num_of_rows]
+            return _filter_and_mix_by_regions(attractions, region_token_sets)[offset : offset + num_of_rows]
         except Exception as exc:
             # 특정 카테고리 조회가 실패해도 다른 카테고리 결과는 살립니다 — 다만
             # 예전엔 원인을 그냥 삼켜버려서, 5개 카테고리가 전부 실패해 목록이
