@@ -3,7 +3,7 @@ import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import React from "react";
-import { View } from "react-native";
+import { Platform, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { BottomTabBar } from "../components/BottomTabBar";
@@ -80,7 +80,13 @@ function ThemedApp() {
 }
 
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts(fontsToLoad);
+  // 웹에서는 폰트를 여기서 불러오지 않습니다 — app/+html.tsx가 넣어주는 CSS로
+  // 브라우저가 알아서, 그것도 화면에 실제로 나온 글자가 든 조각만 받아옵니다.
+  // 예전처럼 여기서 OTF 5개(약 7.5MB)를 다 받을 때까지 기다리면 그동안 웹 화면이
+  // 통째로 비어 있었습니다. 빈 목록을 넘기면 useFonts는 곧바로 '완료'를 돌려줍니다.
+  // 앱(네이티브)은 그대로입니다 — 빌드에 심어둔 폰트를 쓰고(app.json의 expo-font),
+  // 아직 안 심긴 빌드에서는 지금까지처럼 여기서 불러옵니다.
+  const [fontsLoaded] = useFonts(Platform.OS === "web" ? {} : fontsToLoad);
 
   const onLayoutRootView = React.useCallback(() => {
     if (fontsLoaded) {
