@@ -4,20 +4,19 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../services/ThemeContext";
 import { fontFamily } from "../constants/fonts";
+import { TAB_ROUTES } from "../constants/tabs";
 import { spacing } from "../constants/tokens";
 import { AccessibilityIcon, AirplaneIcon, HomeIcon, MapIcon, NotebookIcon } from "./TabIcons";
 
-const TABS: {
-  path: "/" | "/planner" | "/accessibility" | "/trips" | "/posts";
-  Icon: React.ComponentType<{ color?: string; size?: number }>;
-  label: string;
-}[] = [
-  { path: "/accessibility", Icon: AccessibilityIcon, label: "접근성" },
-  { path: "/planner", Icon: AirplaneIcon, label: "AI 플래너" },
-  { path: "/", Icon: HomeIcon, label: "홈" },
-  { path: "/posts", Icon: NotebookIcon, label: "게시물" },
-  { path: "/trips", Icon: MapIcon, label: "내 여행" },
-];
+// 탭 순서와 이름은 constants/tabs.ts 한 곳에서 관리합니다 — 밀어서 넘기는 순서
+// (app/(tabs)/_layout.tsx)와 어긋나지 않게 하기 위함입니다. 여기서는 아이콘만 붙입니다.
+const TAB_ICONS: Record<string, React.ComponentType<{ color?: string; size?: number }>> = {
+  accessibility: AccessibilityIcon,
+  planner: AirplaneIcon,
+  index: HomeIcon,
+  posts: NotebookIcon,
+  trips: MapIcon,
+};
 
 /**
  * 앱의 어느 화면(관광지 상세, 코스 결과, 로그인 등 탭 밖의 화면 포함)에서도
@@ -44,16 +43,17 @@ export function BottomTabBar() {
         { paddingBottom: Math.max(insets.bottom, 8), backgroundColor: colors.surface, borderTopColor: colors.border },
       ]}
     >
-      {TABS.map((tab) => {
+      {TAB_ROUTES.map((tab) => {
         const isActive = tab.path === "/" ? pathname === "/" : pathname.startsWith(tab.path);
         const tintColor = isActive ? colors.primary : colors.textTertiary;
+        const TabIcon = TAB_ICONS[tab.name];
         return (
           <Pressable
             key={tab.path}
             style={({ pressed }) => [styles.tabButton, pressed && styles.tabButtonPressed]}
             onPress={() => router.push(tab.path)}
           >
-            <tab.Icon color={tintColor} size={22} />
+            <TabIcon color={tintColor} size={22} />
             <Text style={[styles.label, { color: tintColor }]}>{tab.label}</Text>
           </Pressable>
         );

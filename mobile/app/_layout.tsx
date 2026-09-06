@@ -8,6 +8,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { BottomTabBar } from "../components/BottomTabBar";
 import { WebFrame } from "../components/WebFrame";
+import { WebTabArrows } from "../components/WebTabArrows";
 import { fontFamily, fontsToLoad } from "../constants/fonts";
 import { AuthProvider } from "../services/AuthContext";
 import { CourseProvider } from "../services/CourseContext";
@@ -71,6 +72,9 @@ function ThemedApp() {
               <Stack.Screen name="post-create" options={{ title: "게시물 작성" }} />
               <Stack.Screen name="post-manage" options={{ title: "게시물 관리" }} />
             </Stack>
+            {/* PC 웹에서 마우스를 화면 좌우 끝으로 가져가면 나타나는 탭 이동 버튼입니다.
+                앱과 모바일 브라우저는 밀어서 넘길 수 있어서 그리지 않습니다. */}
+            <WebTabArrows />
           </View>
           <BottomTabBar />
         </View>
