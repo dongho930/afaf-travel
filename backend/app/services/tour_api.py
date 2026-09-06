@@ -314,6 +314,18 @@ _DEFAULT_CONTENT_TYPE_IDS: list[int] = [12, 39, 14, 28, 32]
 # 하루만 지나도 None이 돌아와 안전망이 사라집니다.
 _LIST_CACHE_UNION_MAX_AGE_HOURS = 24.0 * 365
 
+# 목록(areaBasedList2) 한 페이지를 몇 번까지 시도할지, 그리고 재시도 사이 대기 시간.
+# 공공데이터포털은 TCP는 붙는데 응답을 한 바이트도 안 보내는 상태(ReadTimeout)에
+# 종종 빠지는데, 예전에는 첫 실패에 바로 포기해서 목록이 잘렸습니다. 카테고리 5개를
+# 동시에 돌리므로 전부 실패해도 대략 (타임아웃 30초 x 3회 + 대기 4초) 정도에서 끝납니다.
+_LIST_FETCH_ATTEMPTS = 3
+_LIST_FETCH_BACKOFF_SECONDS = (1.0, 3.0)
+
+# 새로 받아온 목록이 기존 캐시의 이 비율 미만이면 캐시를 덮어쓰지 않습니다.
+# 관광지가 하루 사이에 20% 넘게 사라질 일은 없으므로, 그만큼 줄었다면 이번 조회가
+# 잘린 것으로 봅니다.
+_LIST_CACHE_SHRINK_THRESHOLD = 0.8
+
 # 카테고리 한글 라벨 -> contentTypeId 역매핑 (Attraction.category로 detailIntro2
 # 호출 시 필요한 contentTypeId를 되돌려 찾을 때 씁니다).
 _CONTENT_TYPE_ID_BY_LABEL: dict[str, int] = {v: k for k, v in _CONTENT_TYPE_LABELS.items()}
@@ -1005,51 +1017,81 @@ class TourApiClient:
         total_count: int | None = None
 
         while page_no <= max_pages:
-            try:
-                resp = await client.get(
-                    f"{settings.tour_api_base_url}/KorWithService2/areaBasedList2",
-                    params=self._common_params(
-                        {
-                            "lDongRegnCd": ldong_regn_cd,
-                            "contentTypeId": content_type_id,
-                            "numOfRows": page_size,
-                            "pageNo": page_no,
-                        }
-                    ),
-                )
-                resp.raise_for_status()
-                payload = resp.json()
-                raw_items = self._extract_items(payload)
+            page_items: list[dict] | None = None
+            last_error: Exception | None = None
 
-                if total_count is None:
-                    try:
-                        total_count = int(payload["response"]["body"].get("totalCount", 0))
-                    except Exception:
-                        total_count = None
+            # 한 페이지를 최대 _LIST_FETCH_ATTEMPTS번까지 시도합니다. 공공데이터포털은
+            # TCP는 붙는데 응답을 한 바이트도 안 보내는 상태(ReadTimeout)에 종종
+            # 빠지는데, 예전에는 첫 실패에 바로 포기하고 부분 목록을 돌려줬습니다.
+            # 그 부분 목록이 캐시를 덮어쓰면서 후보가 계속 깎였습니다.
+            for attempt in range(_LIST_FETCH_ATTEMPTS):
+                try:
+                    resp = await client.get(
+                        f"{settings.tour_api_base_url}/KorWithService2/areaBasedList2",
+                        params=self._common_params(
+                            {
+                                "lDongRegnCd": ldong_regn_cd,
+                                "contentTypeId": content_type_id,
+                                "numOfRows": page_size,
+                                "pageNo": page_no,
+                            }
+                        ),
+                    )
+                    resp.raise_for_status()
+                    payload = resp.json()
+                    page_items = self._extract_items(payload)
 
-                if not raw_items:
+                    if total_count is None:
+                        try:
+                            total_count = int(payload["response"]["body"].get("totalCount", 0))
+                        except Exception:
+                            total_count = None
+                    last_error = None
                     break
+                except Exception as e:
+                    last_error = e
+                    if diag is not None:
+                        diag["list_page_attempt_errors"] = diag.get("list_page_attempt_errors", 0) + 1
+                    if attempt < _LIST_FETCH_ATTEMPTS - 1:
+                        delay = _LIST_FETCH_BACKOFF_SECONDS[attempt]
+                        logger.info(
+                            "_fetch_all_by_content_type(contentTypeId=%s): %d페이지 %d번째 시도 실패"
+                            "(%s), %.1f초 뒤 재시도합니다.",
+                            content_type_id,
+                            page_no,
+                            attempt + 1,
+                            type(e).__name__,
+                            delay,
+                        )
+                        await asyncio.sleep(delay)
 
-                all_items.extend(self._map_item_to_attraction(item, content_type_id) for item in raw_items)
-
-                # totalCount를 확인했으면 그걸로, 아니면 '이번 페이지가 요청보다 적게 왔으면 마지막 페이지'로 판단
-                if total_count is not None and len(all_items) >= total_count:
-                    break
-                if len(raw_items) < page_size:
-                    break
-                page_no += 1
-            except Exception as e:
+            if last_error is not None:
+                # 재시도까지 다 실패. 여기서 멈추면 목록이 잘린 채로 남습니다.
                 if diag is not None:
                     diag["list_page_errors"] = diag.get("list_page_errors", 0) + 1
                 logger.warning(
-                    "_fetch_all_by_content_type(contentTypeId=%s): %d페이지에서 조회가 실패해 "
-                    "여기까지(%d건)만 반환합니다 — 목록이 잘렸습니다: %s",
+                    "_fetch_all_by_content_type(contentTypeId=%s): %d페이지를 %d번 시도했는데 모두 "
+                    "실패해 여기까지(%d건)만 반환합니다 — 목록이 잘렸습니다: %s: %s",
                     content_type_id,
                     page_no,
+                    _LIST_FETCH_ATTEMPTS,
                     len(all_items),
-                    e,
+                    type(last_error).__name__,
+                    last_error,
                 )
                 break
+
+            if not page_items:
+                break
+
+            all_items.extend(self._map_item_to_attraction(item, content_type_id) for item in page_items)
+
+            # totalCount를 확인했으면 그걸로, 아니면 '이번 페이지가 요청보다 적게 왔으면 마지막 페이지'로 판단
+            if total_count is not None and len(all_items) >= total_count:
+                break
+            if len(page_items) < page_size:
+                break
+            page_no += 1
 
         # totalCount를 알고 있는데 그보다 적게 받았다면, 오류가 안 났더라도(예: 빈
         # 페이지가 먼저 와서 break) 목록이 잘린 것으로 봅니다.
@@ -1168,6 +1210,65 @@ class TourApiClient:
                 attraction.accessibility = _accessibility_from_cache_row(row)
         _ = stopped_early  # 로그/필요 시 확장을 위해 남겨둠 (현재는 diag로 충분히 노출됨)
 
+    async def _should_save_list_cache(
+        self,
+        ldong_regn_cd: str,
+        content_type_id: int,
+        attractions: list[Attraction],
+        list_diag: dict,
+    ) -> bool:
+        """
+        이번에 받아온 목록을 attraction_list_cache에 저장해도 되는지 판단합니다.
+
+        목록 캐시는 관광지 목록 API가 죽어 있을 때 후보를 지켜주는 마지막 안전망인데,
+        정작 그 API가 죽었을 때 빈 목록으로 덮어써져서 안전망이 같이 사라졌습니다.
+        그래서 '온전한 목록'일 때만 저장합니다.
+
+        - 빈 목록은 절대 저장하지 않습니다. 관광지가 0곳일 리는 없고, 이건 조회
+          실패의 다른 표현입니다.
+        - 페이지 조회가 실패했거나(list_page_errors) totalCount에 못 미치면
+          (list_truncated) 잘린 목록이므로 저장하지 않습니다.
+        - 실패 신호가 없더라도 기존 캐시보다 눈에 띄게 줄었으면 저장하지 않습니다.
+          잘림을 감지 못 하는 경로가 남아 있을 수 있어서 두는 마지막 안전망입니다.
+        """
+        if not attractions:
+            logger.warning(
+                "목록 캐시 저장을 건너뜁니다 (contentTypeId=%s): 받아온 목록이 비어 있습니다 — "
+                "기존 캐시를 그대로 둡니다.",
+                content_type_id,
+            )
+            return False
+
+        if list_diag.get("list_page_errors", 0) > 0 or list_diag.get("list_truncated", 0) > 0:
+            logger.warning(
+                "목록 캐시 저장을 건너뜁니다 (contentTypeId=%s): 목록이 잘렸습니다 "
+                "(페이지오류 %d, 잘림 %d, 누락 %d건 / 이번 수집 %d건) — 기존 캐시를 그대로 둡니다.",
+                content_type_id,
+                list_diag.get("list_page_errors", 0),
+                list_diag.get("list_truncated", 0),
+                list_diag.get("list_missing_items", 0),
+                len(attractions),
+            )
+            return False
+
+        # TTL을 무시하고 '예전에 저장해둔 목록'과 크기를 비교합니다. 여기까지 왔다는
+        # 건 유효기간이 지났다는 뜻이라, 기본 TTL로 읽으면 항상 None이 나옵니다.
+        previous = await get_cached_attraction_list(
+            ldong_regn_cd, content_type_id, max_age_hours=_LIST_CACHE_UNION_MAX_AGE_HOURS
+        )
+        previous_count = len(previous or [])
+        if previous_count and len(attractions) < previous_count * _LIST_CACHE_SHRINK_THRESHOLD:
+            logger.warning(
+                "목록 캐시 저장을 건너뜁니다 (contentTypeId=%s): 이번 %d건이 기존 %d건보다 "
+                "크게 줄었습니다 — 기존 캐시를 그대로 둡니다.",
+                content_type_id,
+                len(attractions),
+                previous_count,
+            )
+            return False
+
+        return True
+
     async def _fetch_by_content_type(
         self,
         client: httpx.AsyncClient,
@@ -1201,12 +1302,23 @@ class TourApiClient:
             # 또 안 부르고 캐시에서 바로 잘라 쓸 수 있습니다. 목록 조회 자체는
             # 개별 상세 조회(detailCommon2/detailWithTour2)와 달리 페이지 몇 번
             # 부르는 정도라 일일 트래픽 한도에 미치는 영향이 작습니다.
-            attractions = await self._fetch_all_by_content_type(client, ldong_regn_cd, content_type_id)
+            list_diag: dict = {}
+            attractions = await self._fetch_all_by_content_type(
+                client, ldong_regn_cd, content_type_id, diag=list_diag
+            )
 
             # 캐시에는 거르기 전 '전체 목록'을 저장해야 다음에 다른 지역을 골라도 씁니다.
-            await save_attraction_list_cache(
-                ldong_regn_cd, content_type_id, [self._attraction_to_cache_dict(a) for a in attractions]
-            )
+            #
+            # 단, '온전하게 받아온 목록'만 저장합니다. _fetch_all_by_content_type은
+            # 실패해도 예외를 던지지 않고 부분 목록(때로는 빈 목록)을 돌려주는데,
+            # 예전에는 그걸 그대로 덮어썼습니다. 공공데이터포털이 타임아웃되던 동안
+            # 빈 목록/잘린 목록이 멀쩡했던 전체 목록을 밀어내면서, 경기도 후보가
+            # 5개 카테고리 중 관광지 493건만 남고 나머지 4개는 통째로 비었습니다
+            # (무장애 여행지 수가 1247건이 아니라 491건으로 나온 직접적 원인).
+            if await self._should_save_list_cache(ldong_regn_cd, content_type_id, attractions, list_diag):
+                await save_attraction_list_cache(
+                    ldong_regn_cd, content_type_id, [self._attraction_to_cache_dict(a) for a in attractions]
+                )
             return _filter_and_mix_by_regions(attractions, region_token_sets)[offset : offset + num_of_rows]
         except Exception as exc:
             # 특정 카테고리 조회가 실패해도 다른 카테고리 결과는 살립니다 — 다만
@@ -2263,15 +2375,45 @@ class TourApiClient:
 
             async with httpx.AsyncClient(timeout=30) as client:
                 # 1) 카테고리별로 전 페이지를 끝까지 가져옵니다 (전수조사).
-                list_diag: dict = {}
+                #    진단은 카테고리별로 따로 받습니다 — 아래에서 "이 카테고리는
+                #    온전히 받아왔는가"를 각각 판단해 목록 캐시를 되살리기 때문입니다.
+                per_type_diags: list[dict] = [{} for _ in _DEFAULT_CONTENT_TYPE_IDS]
                 results_per_type = await asyncio.gather(
                     *(
                         self._fetch_all_by_content_type(
-                            client, ldong_regn_cd, content_type_id, diag=list_diag
+                            client, ldong_regn_cd, content_type_id, diag=d
                         )
-                        for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
+                        for content_type_id, d in zip(_DEFAULT_CONTENT_TYPE_IDS, per_type_diags)
                     )
                 )
+                list_diag: dict = {}
+                for d in per_type_diags:
+                    for k, v in d.items():
+                        list_diag[k] = list_diag.get(k, 0) + v
+
+                # 온전하게 받아온 카테고리는 목록 캐시에 다시 채워 넣습니다.
+                #
+                # 목록 캐시는 홈 화면 경로(_fetch_by_content_type)에서만 저장돼서,
+                # 한 번 빈 목록으로 오염되면 그 경로가 다시 돌 때까지 계속 망가진
+                # 상태로 남았습니다. 갱신을 호출하는 시점이 보통 "뭔가 이상해서
+                # 고치려는" 때이므로, 여기서 성한 목록을 받으면 바로 되살립니다.
+                restored: list[int] = []
+                for content_type_id, group, d in zip(
+                    _DEFAULT_CONTENT_TYPE_IDS, results_per_type, per_type_diags
+                ):
+                    if await self._should_save_list_cache(ldong_regn_cd, content_type_id, group, d):
+                        await save_attraction_list_cache(
+                            ldong_regn_cd,
+                            content_type_id,
+                            [self._attraction_to_cache_dict(a) for a in group],
+                        )
+                        restored.append(content_type_id)
+                if restored:
+                    logger.info(
+                        "get_accessibility_summary: 목록 캐시를 다시 채웠습니다 (contentTypeId=%s).",
+                        restored,
+                    )
+                debug_info["list_cache_restored"] = restored
                 # 카테고리별로 몇 건씩 수집됐는지 기록 (특정 카테고리만 0건이면 그
                 # 카테고리 호출/파라미터에 문제가 있다는 신호입니다).
                 debug_info["candidates_per_category"] = {
