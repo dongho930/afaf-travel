@@ -197,8 +197,18 @@ export default function HomeScreen() {
   // 앱을 켤 때(지역이 '전체'라 어차피 보낼 코드는 null) 지역 목록 응답이 도착하는
   // 순간 똑같은 조건의 목록 조회가 한 번 더 나갔습니다 — 가장 무거운 API를
   // 콜드스타트마다 두 번 부르던 셈이라, 실제로 값이 달라질 때만 다시 조회합니다.
-  const matchedRegionCode =
-    selectedRegion !== "전체" ? (regionOptions.find((r) => r.name.includes(selectedRegion))?.code ?? null) : null;
+  //
+  // 지역 칩은 '수원'처럼 도시 단위인데, 서버의 시/군/구 목록은 구 단위입니다
+  // (수원시 권선구/영통구/장안구/팔달구). 예전에는 find로 첫 번째 하나만 골라
+  // 보내서 '수원'을 눌러도 권선구 결과만 나왔습니다. 이제 그 도시에 속한 구를
+  // 전부 찾아서 함께 보냅니다.
+  const matchedRegionCodes =
+    selectedRegion !== "전체"
+      ? regionOptions.filter((r) => r.name.includes(selectedRegion)).map((r) => r.code)
+      : [];
+  // useEffect 의존성으로 쓰려면 값이 같을 때 같아야 하는데 배열은 매 렌더마다
+  // 새 객체라, 문자열로 만들어 비교합니다.
+  const matchedRegionKey = matchedRegionCodes.join(",");
 
   React.useEffect(() => {
     // '무장애 여행지' 개수는 휠체어/유모차/고령자·임산부를 모두 합친(중복 제거) 실제 계산값입니다.
@@ -306,7 +316,7 @@ export default function HomeScreen() {
   }, [revealStage, statsSettled]);
 
   React.useEffect(() => {
-    // 지역 코드(matchedRegionCode)는 위에서 계산해둡니다. "전체"거나 아직 지역
+    // 지역 코드(matchedRegionCodes)는 위에서 계산해둡니다. "전체"거나 아직 지역
     // 목록을 못 받아왔으면 null이라, 코드 없이(경기도 전체) 조회합니다.
     setLoadingPlaces(true);
     setVisiblePlacesCount(PLACES_PAGE_SIZE);
@@ -327,7 +337,7 @@ export default function HomeScreen() {
       .listAttractions(
         "경기도",
         wheelchairOnly ? "wheelchair" : "general",
-        matchedRegionCode,
+        matchedRegionCodes,
         PLACES_FETCH_PAGE_SIZE,
         false,
         0,
@@ -373,7 +383,7 @@ export default function HomeScreen() {
           setChipsReady(true);
         }
       });
-  }, [wheelchairOnly, selectedRegion, matchedRegionCode]);
+  }, [wheelchairOnly, selectedRegion, matchedRegionKey]);
 
   // 히어로 배경 사진을 3초마다 후보 목록에서 무작위로 다시 골라 바꿉니다.
   // 지금 보이지 않는(opacity 0) 레이어에 다음 사진을 미리 얹어두고, 두
@@ -469,7 +479,7 @@ export default function HomeScreen() {
         const nextRaw = await api.listAttractions(
           "경기도",
           wheelchairOnly ? "wheelchair" : "general",
-          matchedRegionCode,
+          matchedRegionCodes,
           PLACES_FETCH_PAGE_SIZE,
           false,
           offsetRef.current,

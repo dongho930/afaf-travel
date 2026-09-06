@@ -61,19 +61,23 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const api = {
   // detailFor: 앞의 N개는 소개문/부가정보까지 채워서 함께 받아옵니다. 목록을 받은 뒤
   // 화면에 보이는 만큼의 소개문을 다시 요청하던 왕복 한 번을 없애기 위한 것입니다.
+  // sigunguCds: 시/군/구 코드 여러 개를 함께 넘길 수 있습니다 — 홈 화면 지역 칩은
+  // '수원'처럼 도시 단위인데 실제 시/군/구는 구 단위라, 그 도시의 구를 전부 보냅니다.
   listAttractions: (
     region: string,
     userType: UserType,
-    sigunguCd?: number | null,
+    sigunguCds?: number[] | number | null,
     limit: number = 20,
     includeOverview: boolean = true,
     offset: number = 0,
     detailFor: number = 0
-  ) =>
-    request<Attraction[]>(
+  ) => {
+    const codes = sigunguCds == null ? [] : Array.isArray(sigunguCds) ? sigunguCds : [sigunguCds];
+    return request<Attraction[]>(
       `/api/tourism/attractions?region=${encodeURIComponent(region)}&user_type=${userType}&limit=${limit}&include_overview=${includeOverview}&offset=${offset}&detail_for=${detailFor}` +
-        (sigunguCd ? `&sigungu_cd=${sigunguCd}` : "")
-    ),
+        (codes.length > 0 ? `&sigungu_cd=${codes.join(",")}` : "")
+    );
+  },
 
   // 특정 관광지들의 소개문만 따로 조회 (홈 화면 '더보기'로 새로 보이는 만큼만 채울 때 사용)
   getOverviews: (contentIds: string[]) =>

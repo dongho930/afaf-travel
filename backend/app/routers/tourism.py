@@ -19,6 +19,26 @@ router = APIRouter(prefix="/api/tourism", tags=["tourism"])
 _ATTRACTIONS_CACHE = TTLCache[list[Attraction]](ttl_seconds=300.0)
 
 
+def _parse_sigungu_cds(raw: str | None) -> list[int]:
+    """
+    '41111,41113' 같은 문자열을 시/군/구 코드 목록으로 바꿉니다.
+
+    잘못된 값은 조용히 무시하지 않고 오류로 알려줍니다 — 무시해버리면 지역을
+    골랐는데 시/도 전체 결과가 나와서 원인을 찾기 어렵기 때문입니다.
+    """
+    if not raw:
+        return []
+    codes = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if not part.isdigit():
+            raise HTTPException(status_code=400, detail=f"시/군/구 코드가 올바르지 않아요: {part}")
+        codes.append(int(part))
+    return codes
+
+
 def _is_regression(existing: dict | None, data: dict) -> bool:
     """
     이번에 새로 계산한 data가 기존 캐시(existing)보다 '더 안 좋은 미완성 결과'인지 판단합니다.
@@ -53,7 +73,11 @@ async def list_attractions(
     user_type: UserType = Query(default=UserType.GENERAL),
     limit: int = Query(default=20, le=1500),
     offset: int = Query(default=0, ge=0, description="이미 받아온 개수만큼 건너뛰고 그 다음부터 조회 (페이지네이션)"),
-    sigungu_cd: int | None = Query(default=None, description="특정 시/군/구로 좁혀서 조회 (선택)"),
+    sigungu_cd: str | None = Query(
+        default=None,
+        description="특정 시/군/구로 좁혀서 조회 (선택). 쉼표로 여러 개를 넘길 수 있습니다 — "
+        "'수원'처럼 도시 단위로 고르면 그 안의 구 전부(41111,41113,41115,41117)를 함께 보냅니다.",
+    ),
     include_overview: bool = Query(
         default=True,
         description="False면 소개문 채우기를 건너뜁니다. 목록을 빨리 받고 소개문은 "
@@ -78,13 +102,22 @@ async def list_attractions(
     # 동시에 여러 명이 물어보면 그중 한 번만 실제로 계산하고 나머지는 그 결과를
     # 같이 기다립니다 — 앱을 동시에 켠 사용자들이 각자 무거운 조회를 처음부터
     # 돌리지 않게 하기 위함입니다.
-    cache_key = (region, user_type.value, limit, offset, sigungu_cd, include_overview, detail_for)
+    sigungu_cds = _parse_sigungu_cds(sigungu_cd)
+    cache_key = (
+        region,
+        user_type.value,
+        limit,
+        offset,
+        tuple(sigungu_cds),
+        include_overview,
+        detail_for,
+    )
     try:
         results = await _ATTRACTIONS_CACHE.get_or_compute(
             cache_key,
             lambda: asyncio.wait_for(
                 tour_api_client.search_accessible_attractions(
-                    region, user_type.value, limit, sigungu_cd, include_overview, offset, detail_for
+                    region, user_type.value, limit, sigungu_cds, include_overview, offset, detail_for
                 ),
                 timeout=25.0,
             ),

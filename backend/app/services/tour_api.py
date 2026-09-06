@@ -70,6 +70,40 @@ _BENEFIT_LABELS: list[tuple[str, str]] = [
 ]
 
 
+def _region_token_sets(sigungu_cd: int | list[int] | None) -> list[list[str]]:
+    """
+    시/군/구 코드를 주소 비교용 단어 묶음으로 바꿉니다.
+
+    무장애 관광 API(KorWithService2)는 시/군/구 파라미터를 지원하지 않아서(테스트
+    결과 항상 0건), 받아온 목록의 주소 문자열에 그 시/군/구 이름이 들어있는지로
+    직접 걸러야 합니다. 예: 41115 -> ['수원시', '팔달구']
+
+    코드는 하나만 올 수도 있고(AI 코스 추천), 여러 개가 올 수도 있습니다. 홈 화면
+    지역 칩은 '수원'처럼 도시 단위인데 실제 시/군/구 목록은 구 단위(수원시 권선구,
+    영통구, 장안구, 팔달구)라, 그 도시에 속한 구 전부를 함께 보내옵니다.
+    """
+    if sigungu_cd is None:
+        return []
+    codes = [sigungu_cd] if isinstance(sigungu_cd, int) else list(sigungu_cd)
+    return [name.split() for name in (signgu_name(code) for code in codes) if name]
+
+
+def _filter_by_regions(
+    attractions: list[Attraction], region_token_sets: list[list[str]] | None
+) -> list[Attraction]:
+    """
+    주소가 주어진 시/군/구 중 하나에라도 해당하는 관광지만 남깁니다.
+    (필터가 없으면 그대로 돌려줍니다)
+    """
+    if not region_token_sets:
+        return attractions
+    return [
+        a
+        for a in attractions
+        if any(all(token in a.address for token in tokens) for tokens in region_token_sets)
+    ]
+
+
 def _accessibility_benefit_labels(features: AccessibilityFeatures) -> list[str]:
     return [label for field, label in _BENEFIT_LABELS if getattr(features, field, False)]
 
@@ -1094,6 +1128,7 @@ class TourApiClient:
         content_type_id: int,
         num_of_rows: int,
         offset: int = 0,
+        region_token_sets: list[list[str]] | None = None,
     ) -> list[Attraction]:
         # areaBasedList2(관광지 목록) 자체를 캐싱합니다 — 지금까지 이 조회에
         # 캐시가 없어서, 화면을 열 때마다(카테고리 5개 기준) 매번 새로 호출하다가
@@ -1107,6 +1142,9 @@ class TourApiClient:
         cached_items = await get_cached_attraction_list(ldong_regn_cd, content_type_id)
         if cached_items is not None:
             attractions = [self._attraction_from_cache_dict(d) for d in cached_items]
+            # 시/군/구 필터가 있으면 "자르기 전에" 먼저 거릅니다 — 앞에서 잘라낸
+            # 표본만 거르면 그 지역에 있는 곳 대부분이 빠집니다.
+            attractions = _filter_by_regions(attractions, region_token_sets)
             return attractions[offset : offset + num_of_rows]
 
         try:
@@ -1118,10 +1156,11 @@ class TourApiClient:
             # 부르는 정도라 일일 트래픽 한도에 미치는 영향이 작습니다.
             attractions = await self._fetch_all_by_content_type(client, ldong_regn_cd, content_type_id)
 
+            # 캐시에는 거르기 전 '전체 목록'을 저장해야 다음에 다른 지역을 골라도 씁니다.
             await save_attraction_list_cache(
                 ldong_regn_cd, content_type_id, [self._attraction_to_cache_dict(a) for a in attractions]
             )
-            return attractions[offset : offset + num_of_rows]
+            return _filter_by_regions(attractions, region_token_sets)[offset : offset + num_of_rows]
         except Exception as exc:
             # 특정 카테고리 조회가 실패해도 다른 카테고리 결과는 살립니다 — 다만
             # 예전엔 원인을 그냥 삼켜버려서, 5개 카테고리가 전부 실패해 목록이
@@ -1185,7 +1224,7 @@ class TourApiClient:
         region: str,
         user_type: str,
         limit: int = 20,
-        sigungu_cd: int | None = None,
+        sigungu_cd: int | list[int] | None = None,
         include_overview: bool = True,
         offset: int = 0,
         detail_for: int = 0,
@@ -1241,22 +1280,28 @@ class TourApiClient:
         ldong_regn_map = {"경기도": "41", "서울": "11"}
         ldong_regn_cd = ldong_regn_map.get(region, "41")
 
-        target_signgu_nm = signgu_name(sigungu_cd) if sigungu_cd is not None else None
-        # 시/군/구로 걸러낼 예정이면, 걸러지고 남는 양이 부족하지 않도록 시/도 전체를
-        # 훨씬 넉넉하게(약 6배) 받아옵니다. offset도 같은 배율로 밀어줘야 페이지가
-        # 바뀔 때마다 이전 페이지와 겹치거나 건너뛰는 구간 없이 이어집니다.
-        fetch_limit = limit * 6 if target_signgu_nm else limit
-        fetch_offset = offset * 6 if target_signgu_nm else offset
+        # 시/군/구 필터는 그 지역 목록을 "먼저 걸러낸 뒤" 필요한 만큼 자릅니다.
+        # 예전에는 시/도 전체에서 limit의 6배(=180개)만 표본으로 받아온 다음 주소로
+        # 걸렀는데, 경기도 시군구가 44개라 한 구당 평균 4개꼴밖에 안 걸려서 "그 지역에
+        # 있는 곳이 다 안 나오는" 문제가 있었습니다. 목록 전체는 이미 캐시에 통째로
+        # 들고 있으므로(attraction_list_cache), 거기서 걸러낸 뒤 자르면 그 지역의
+        # 결과가 빠짐없이 나오고 '더보기'(offset)도 그 지역 안에서 이어집니다.
+        region_token_sets = _region_token_sets(sigungu_cd)
 
         # 카테고리(lclsSystm1)가 아니라 contentTypeId 기준으로 여러 카테고리를 동시에 조회해서
         # 숙박에만 치우치지 않고 관광지/음식점/문화시설/레포츠가 골고루 섞이도록 합니다.
-        per_type_rows = max(6, fetch_limit // len(_DEFAULT_CONTENT_TYPE_IDS))
-        per_type_offset = fetch_offset // len(_DEFAULT_CONTENT_TYPE_IDS)
+        per_type_rows = max(6, limit // len(_DEFAULT_CONTENT_TYPE_IDS))
+        per_type_offset = offset // len(_DEFAULT_CONTENT_TYPE_IDS)
         async with httpx.AsyncClient(timeout=15) as client:
             results_per_type = await asyncio.gather(
                 *(
                     self._fetch_by_content_type(
-                        client, ldong_regn_cd, content_type_id, per_type_rows, per_type_offset
+                        client,
+                        ldong_regn_cd,
+                        content_type_id,
+                        per_type_rows,
+                        per_type_offset,
+                        region_token_sets,
                     )
                     for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
                 )
@@ -1274,13 +1319,11 @@ class TourApiClient:
                             seen_ids.add(a.content_id)
                             attractions.append(a)
 
-            if target_signgu_nm:
-                # 주소 문자열에 시군구명(예: '수원시 팔달구')의 각 단어가 모두 포함되는 것만 남깁니다.
-                tokens = target_signgu_nm.split()
-                filtered = [a for a in attractions if all(t in a.address for t in tokens)]
-                # 필터링 결과가 너무 적으면(예: 데이터 자체가 희소한 소도시) 빈 결과보다는
-                # 원래 후보라도 보여주는 게 낫습니다.
-                attractions = filtered if filtered else attractions
+            # 시/군/구 필터는 위 _fetch_by_content_type 안에서 이미 적용됐습니다.
+            # 예전에는 여기서 한 번 더 거르면서 "결과가 0개면 필터를 무시하고 시/도
+            # 전체를 보여주는" 처리를 했는데, 지역을 골랐는데 다른 지역이 나오는 게
+            # 더 혼란스러워서 없앴습니다. 결과가 없으면 앱이 "표시할 여행지를 찾지
+            # 못했어요"라고 안내합니다.
 
             # 각 관광지의 편의시설 상세 정보를 채웁니다. 캐시에 있으면 캐시를 쓰고,
             # 없는 것만 API로 조회합니다 (일일 트래픽 절약).
