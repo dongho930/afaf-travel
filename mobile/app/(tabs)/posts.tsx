@@ -36,26 +36,40 @@ export default function PostsScreen() {
   // FlatList는 화면 밖으로 멀리 나간 카드를 가상화로 언마운트했다가 스크롤로
   // 되돌아오면 다시 마운트합니다. 매번 다시 마운트될 때마다 페이드인이 또
   // 재생되면 스크롤할 때마다 깜빡이는 것처럼 보이므로, 한 번이라도 렌더링된
-  // 게시물 id는 기억해뒀다가 그 다음부터는(같은 방문 안에서는) 애니메이션 없이
-  // 바로 보여줍니다. 다만 이 기록은 탭에 들어올 때마다(useFocusEffect) 비워서,
-  // 게시물 탭에 새로 들어올 때는 지금 불러온 게시물들이 다시 한 번 페이드인되게 합니다.
+  // 게시물 id는 기억해뒀다가 그 다음부터는 애니메이션 없이 바로 보여줍니다.
+  // (탭에 다시 들어올 때 이 기록을 비우면 이미 보고 있던 게시물이 전부 다시
+  // 페이드인돼서 '새로고침된 것처럼' 보이므로 비우지 않습니다. 새로 올라온
+  // 게시물은 id가 여기 없으니 자연스럽게 페이드인됩니다.)
   const animatedPostIdsRef = useRef<Set<string>>(new Set());
+  // 이 탭을 한 번이라도 불러온 적이 있는지. 처음에만 로딩 화면을 보여주고,
+  // 그 뒤로는 보고 있던 목록을 그대로 둔 채 조용히 갱신하기 위해 씁니다.
+  const hasLoadedRef = useRef(false);
 
   const load = useCallback(() => {
-    setLoading(true);
+    // 처음 들어왔을 때만 로딩 화면을 띄웁니다. 예전에는 탭에 들어올 때마다
+    // 목록을 지우고 스피너를 띄워서, 이미 받아둔 게시물이 있는데도 매번
+    // 새로고침되는 것처럼 보였습니다.
+    const isFirstLoad = !hasLoadedRef.current;
+    if (isFirstLoad) setLoading(true);
     api
       .getPostFeed(PAGE_SIZE)
       .then((rows) => {
         setPosts(rows);
         setHasMore(rows.length === PAGE_SIZE);
+        hasLoadedRef.current = true;
       })
-      .catch(() => Alert.alert("불러오기 실패", "게시물을 불러오지 못했어요."))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        // 갱신에 실패해도 보고 있던 목록은 그대로 두고 조용히 넘어갑니다.
+        // 처음 불러오는 중이라면 화면에 아무것도 없으니 알려줍니다.
+        if (isFirstLoad) Alert.alert("불러오기 실패", "게시물을 불러오지 못했어요.");
+      })
+      .finally(() => {
+        if (isFirstLoad) setLoading(false);
+      });
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      animatedPostIdsRef.current = new Set();
       load();
     }, [load])
   );

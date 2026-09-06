@@ -150,9 +150,10 @@ export default function TripsScreen() {
 
   // FlatList는 화면 밖으로 나간 행을 가상화로 언마운트했다가 스크롤로
   // 되돌아오면 다시 마운트합니다. 한 번이라도 보여준 행은 기억해뒀다가 그
-  // 다음부터는(같은 방문/섹션 안에서는) 애니메이션 없이 바로 보여줘서 스크롤할
-  // 때마다 깜빡이지 않게 하고, 탭에 새로 들어오거나 다른 섹션(리뷰/제보/방문)
-  // 으로 바꿀 때는 이 기록을 비워서 그 목록이 다시 한 번 페이드인되게 합니다.
+  // 다음부터는 애니메이션 없이 바로 보여줘서 스크롤할 때마다 깜빡이지 않게 하고,
+  // 다른 섹션(리뷰/제보/방문)으로 바꿀 때만 이 기록을 비워서 그 목록이 새로
+  // 페이드인되게 합니다. (탭에 다시 들어올 때도 비웠더니, 보고 있던 목록이
+  // 전부 다시 페이드인돼서 '새로고침된 것처럼' 보여서 그건 하지 않습니다.)
   const animatedRowIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     animatedRowIdsRef.current = new Set();
@@ -167,13 +168,31 @@ export default function TripsScreen() {
   const [dateModalVisible, setDateModalVisible] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
+  // 이 탭을 한 번이라도 불러온 적이 있는지. 처음에만 로딩 화면을 보여주고,
+  // 그 뒤로는 보고 있던 목록을 그대로 둔 채 조용히 갱신하기 위해 씁니다.
+  const hasLoadedRef = useRef(false);
+
   const load = useCallback(() => {
-    setLoading(true);
+    // 처음 들어왔을 때만 로딩 화면을 띄웁니다. 예전에는 탭에 들어올 때마다
+    // 목록을 지우고 스피너를 띄워서, 이미 받아둔 여행 목록이 있는데도 매번
+    // 새로고침되는 것처럼 보였습니다.
+    const isFirstLoad = !hasLoadedRef.current;
+    if (isFirstLoad) setLoading(true);
     api
       .listTrips()
-      .then(setTrips)
-      .catch(() => Alert.alert("불러오기 실패", "여행 목록을 불러오지 못했어요."))
-      .finally(() => setLoading(false));
+      .then((rows) => {
+        setTrips(rows);
+        hasLoadedRef.current = true;
+      })
+      .catch(() => {
+        // 갱신 실패는 조용히 넘어가고(보고 있던 목록 유지), 처음 불러오는
+        // 중이라면 화면에 아무것도 없으니 알려줍니다.
+        if (isFirstLoad) Alert.alert("불러오기 실패", "여행 목록을 불러오지 못했어요.");
+      })
+      .finally(() => {
+        if (isFirstLoad) setLoading(false);
+      });
+    // 아래 개수 3종은 화면을 가리지 않고 조용히 갱신됩니다(숫자만 바뀜).
     api
       .getMyReviewCount()
       .then((res) => setReviewCount(res.count))
@@ -190,7 +209,6 @@ export default function TripsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      animatedRowIdsRef.current = new Set();
       load();
     }, [load])
   );
