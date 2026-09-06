@@ -12,6 +12,7 @@
 from typing import Literal, Optional
 
 from app.config import get_settings
+from app.services.db import execute as _execute
 
 settings = get_settings()
 
@@ -51,7 +52,7 @@ async def create_report(
             "body": body.strip(),
             "user_id": user_id,
         }
-        result = _client.table(_REPORTS_TABLE).insert(payload).execute()
+        result = await _execute(_client.table(_REPORTS_TABLE).insert(payload))
         rows = result.data or []
         return True, (rows[0] if rows else None)
     except Exception as e:
@@ -64,13 +65,12 @@ async def list_reports_by_category(category: str, limit: int = 20) -> list[dict]
     if _client is None or category not in REPORT_CATEGORIES:
         return []
     try:
-        result = (
+        result = await _execute(
             _client.table(_REPORTS_TABLE)
             .select("*")
             .eq("category", category)
             .order("created_at", desc=True)
             .limit(limit)
-            .execute()
         )
         rows = result.data or []
         if not rows:
@@ -80,11 +80,10 @@ async def list_reports_by_category(category: str, limit: int = 20) -> list[dict]
         usernames: dict[str, str] = {}
         avatar_urls: dict[str, str | None] = {}
         try:
-            profile_result = (
+            profile_result = await _execute(
                 _client.table("profiles")
                 .select("id, username, avatar_url")
                 .in_("id", user_ids)
-                .execute()
             )
             for p in profile_result.data or []:
                 usernames[p["id"]] = p.get("username") or "익명"
@@ -106,11 +105,10 @@ async def count_reports_by_user(user_id: str) -> int:
     if _client is None:
         return 0
     try:
-        result = (
+        result = await _execute(
             _client.table(_REPORTS_TABLE)
             .select("id", count="exact")
             .eq("user_id", user_id)
-            .execute()
         )
         return result.count or 0
     except Exception as e:
@@ -124,13 +122,12 @@ async def list_reports_by_user(user_id: str, limit: int = 50) -> list[dict]:
     if _client is None:
         return []
     try:
-        result = (
+        result = await _execute(
             _client.table(_REPORTS_TABLE)
             .select("*")
             .eq("user_id", user_id)
             .order("created_at", desc=True)
             .limit(limit)
-            .execute()
         )
         return result.data or []
     except Exception as e:

@@ -20,6 +20,7 @@ import time
 from typing import Optional
 
 from app.config import get_settings
+from app.services.db import execute as _execute
 
 settings = get_settings()
 
@@ -79,9 +80,7 @@ async def _attach_authors(rows: list[dict]) -> list[dict]:
     usernames: dict[str, str] = {}
     avatar_urls: dict[str, Optional[str]] = {}
     try:
-        profile_result = (
-            _client.table("profiles").select("id, username, avatar_url").in_("id", user_ids).execute()
-        )
+        profile_result = await _execute(_client.table("profiles").select("id, username, avatar_url").in_("id", user_ids))
         for p in profile_result.data or []:
             usernames[p["id"]] = p.get("username") or "익명"
             avatar_urls[p["id"]] = p.get("avatar_url") or None
@@ -101,7 +100,7 @@ async def _attach_comment_counts(rows: list[dict]) -> list[dict]:
     post_ids = [r["id"] for r in rows]
     counts: dict[str, int] = {pid: 0 for pid in post_ids}
     try:
-        result = _client.table(_COMMENTS_TABLE).select("post_id").in_("post_id", post_ids).execute()
+        result = await _execute(_client.table(_COMMENTS_TABLE).select("post_id").in_("post_id", post_ids))
         for c in result.data or []:
             counts[c["post_id"]] = counts.get(c["post_id"], 0) + 1
     except Exception as e:
@@ -129,7 +128,7 @@ async def create_post(
             "body": body.strip(),
             "photo_urls": photo_urls,
         }
-        result = _client.table(_POSTS_TABLE).insert(payload).execute()
+        result = await _execute(_client.table(_POSTS_TABLE).insert(payload))
         saved_rows = result.data or []
         if not saved_rows:
             return False, "게시물을 저장하지 못했어요. 잠시 후 다시 시도해주세요."
@@ -161,7 +160,7 @@ async def list_posts_feed(
             query = query.lt("created_at", before)
         if content_id:
             query = query.eq("content_id", content_id)
-        result = query.execute()
+        result = await _execute(query)
         rows = result.data or []
         if not rows:
             return []
@@ -181,13 +180,12 @@ async def list_my_posts(user_id: str, limit: int = 100) -> list[dict]:
     if _client is None:
         return []
     try:
-        result = (
+        result = await _execute(
             _client.table(_POSTS_TABLE)
             .select("*")
             .eq("user_id", user_id)
             .order("created_at", desc=True)
             .limit(limit)
-            .execute()
         )
         rows = result.data or []
         if not rows:
@@ -207,7 +205,7 @@ async def get_post(post_id: str, viewer_user_id: Optional[str] = None) -> Option
     if _client is None:
         return None
     try:
-        result = _client.table(_POSTS_TABLE).select("*").eq("id", post_id).limit(1).execute()
+        result = await _execute(_client.table(_POSTS_TABLE).select("*").eq("id", post_id).limit(1))
         rows = result.data or []
         if not rows:
             return None
@@ -227,7 +225,7 @@ async def delete_post(user_id: str, post_id: str) -> bool:
     if _client is None:
         return False
     try:
-        result = _client.table(_POSTS_TABLE).delete().eq("id", post_id).eq("user_id", user_id).execute()
+        result = await _execute(_client.table(_POSTS_TABLE).delete().eq("id", post_id).eq("user_id", user_id))
         return bool(result.data)
     except Exception as e:
         print(f"[post] 게시물 삭제 실패: {e}")
@@ -241,12 +239,11 @@ async def list_comments_for_post(post_id: str, viewer_user_id: Optional[str] = N
     if _client is None:
         return []
     try:
-        result = (
+        result = await _execute(
             _client.table(_COMMENTS_TABLE)
             .select("*")
             .eq("post_id", post_id)
             .order("created_at", desc=False)
-            .execute()
         )
         rows = result.data or []
         if not rows:
@@ -273,12 +270,11 @@ async def create_comment(
         return False, "댓글 내용을 입력해주세요."
     try:
         if parent_comment_id:
-            parent_result = (
+            parent_result = await _execute(
                 _client.table(_COMMENTS_TABLE)
                 .select("id, post_id, parent_comment_id")
                 .eq("id", parent_comment_id)
                 .limit(1)
-                .execute()
             )
             parent_rows = parent_result.data or []
             if not parent_rows or parent_rows[0]["post_id"] != post_id:
@@ -292,7 +288,7 @@ async def create_comment(
             "parent_comment_id": parent_comment_id,
             "body": body.strip(),
         }
-        result = _client.table(_COMMENTS_TABLE).insert(payload).execute()
+        result = await _execute(_client.table(_COMMENTS_TABLE).insert(payload))
         saved_rows = result.data or []
         if not saved_rows:
             return False, "댓글을 저장하지 못했어요. 잠시 후 다시 시도해주세요."
@@ -310,9 +306,7 @@ async def delete_comment(user_id: str, comment_id: str) -> bool:
     if _client is None:
         return False
     try:
-        result = (
-            _client.table(_COMMENTS_TABLE).delete().eq("id", comment_id).eq("user_id", user_id).execute()
-        )
+        result = await _execute(_client.table(_COMMENTS_TABLE).delete().eq("id", comment_id).eq("user_id", user_id))
         return bool(result.data)
     except Exception as e:
         print(f"[post] 댓글 삭제 실패: {e}")

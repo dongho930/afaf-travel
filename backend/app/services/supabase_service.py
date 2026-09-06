@@ -27,6 +27,7 @@ import datetime
 
 from app.config import get_settings
 from app.models.schemas import CourseResponse, CourseStop
+from app.services.db import execute as _execute
 from app.services.memory_cache import TTLCache
 
 settings = get_settings()
@@ -53,7 +54,7 @@ async def save_course(
     if _client is None:
         return
     try:
-        _client.table("courses").insert(
+        await _execute(_client.table("courses").insert(
             {
                 "id": course.course_id,
                 "user_id": user_id,
@@ -65,7 +66,7 @@ async def save_course(
                 "stops": [s.model_dump() for s in course.stops],
                 "trip_id": None,
             }
-        ).execute()
+        ))
     except Exception as e:
         # 저장 실패는 로그만 남기고 사용자 응답은 그대로 내려줍니다.
         print(f"[supabase] 코스 저장 실패: {e}")
@@ -79,13 +80,12 @@ async def list_recent_courses(limit: int = 20, user_id: Optional[str] = None) ->
     if _client is None or not user_id:
         return []
     try:
-        result = (
+        result = await _execute(
             _client.table("courses")
             .select("*")
             .eq("user_id", user_id)
             .order("created_at", desc=True)
             .limit(limit)
-            .execute()
         )
         return result.data or []
     except Exception as e:
@@ -103,14 +103,13 @@ async def list_saved_courses(user_id: str, limit: int = 50) -> list[dict]:
     if _client is None or not user_id:
         return []
     try:
-        result = (
+        result = await _execute(
             _client.table("courses")
             .select("*")
             .eq("user_id", user_id)
             .not_.is_("trip_id", "null")
             .order("created_at", desc=True)
             .limit(limit)
-            .execute()
         )
         return result.data or []
     except Exception as e:
@@ -129,7 +128,7 @@ async def create_trip(
     if _client is None:
         return None
     try:
-        result = (
+        result = await _execute(
             _client.table("trips")
             .insert(
                 {
@@ -140,7 +139,6 @@ async def create_trip(
                     "end_date": end_date,
                 }
             )
-            .execute()
         )
         rows = result.data or []
         return rows[0]["id"] if rows else None
@@ -154,23 +152,21 @@ async def list_trips(user_id: str) -> list[dict]:
     if _client is None:
         return []
     try:
-        trips_result = (
+        trips_result = await _execute(
             _client.table("trips")
             .select("*")
             .eq("user_id", user_id)
             .order("created_at", desc=True)
-            .execute()
         )
         trips = trips_result.data or []
         if not trips:
             return []
 
-        courses_result = (
+        courses_result = await _execute(
             _client.table("courses")
             .select("trip_id")
             .eq("user_id", user_id)
             .not_.is_("trip_id", "null")
-            .execute()
         )
         counts: dict[str, int] = {}
         for row in courses_result.data or []:
@@ -180,12 +176,11 @@ async def list_trips(user_id: str) -> list[dict]:
 
         # 각 여행이 '방문 완료' 처리된 적 있는지(visited_places에 이 trip_id로
         # 저장된 행이 하나라도 있는지)도 같이 계산해서 붙여줍니다.
-        visited_result = (
+        visited_result = await _execute(
             _client.table("visited_places")
             .select("trip_id")
             .eq("user_id", user_id)
             .not_.is_("trip_id", "null")
-            .execute()
         )
         visited_trip_ids = {row.get("trip_id") for row in (visited_result.data or [])}
 
@@ -210,7 +205,7 @@ async def update_trip(
     if _client is None:
         return False, "서버 설정 오류로 수정할 수 없어요."
     try:
-        existing = _client.table("trips").select("user_id").eq("id", trip_id).limit(1).execute()
+        existing = await _execute(_client.table("trips").select("user_id").eq("id", trip_id).limit(1))
         rows = existing.data or []
         if not rows or rows[0].get("user_id") != user_id:
             return False, "해당 여행을 찾을 수 없거나 접근 권한이 없어요."
@@ -228,7 +223,7 @@ async def update_trip(
         if not update_fields:
             return True, None
 
-        _client.table("trips").update(update_fields).eq("id", trip_id).execute()
+        await _execute(_client.table("trips").update(update_fields).eq("id", trip_id))
         return True, None
     except Exception as e:
         print(f"[supabase] 여행 수정 실패: {e}")
@@ -240,13 +235,13 @@ async def delete_trip(trip_id: str, user_id: str) -> tuple[bool, Optional[str]]:
     if _client is None:
         return False, "서버 설정 오류로 삭제할 수 없어요."
     try:
-        existing = _client.table("trips").select("user_id").eq("id", trip_id).limit(1).execute()
+        existing = await _execute(_client.table("trips").select("user_id").eq("id", trip_id).limit(1))
         rows = existing.data or []
         if not rows or rows[0].get("user_id") != user_id:
             return False, "해당 여행을 찾을 수 없거나 접근 권한이 없어요."
 
-        _client.table("courses").delete().eq("trip_id", trip_id).eq("user_id", user_id).execute()
-        _client.table("trips").delete().eq("id", trip_id).execute()
+        await _execute(_client.table("courses").delete().eq("trip_id", trip_id).eq("user_id", user_id))
+        await _execute(_client.table("trips").delete().eq("id", trip_id))
         return True, None
     except Exception as e:
         print(f"[supabase] 여행 삭제 실패: {e}")
@@ -258,17 +253,17 @@ async def attach_course_to_trip(course_id: str, user_id: str, trip_id: str) -> t
     if _client is None:
         return False, "서버 설정 오류로 저장할 수 없어요."
     try:
-        course_row = _client.table("courses").select("user_id").eq("id", course_id).limit(1).execute()
+        course_row = await _execute(_client.table("courses").select("user_id").eq("id", course_id).limit(1))
         course_rows = course_row.data or []
         if not course_rows or course_rows[0].get("user_id") != user_id:
             return False, "해당 코스를 찾을 수 없거나 접근 권한이 없어요."
 
-        trip_row = _client.table("trips").select("user_id").eq("id", trip_id).limit(1).execute()
+        trip_row = await _execute(_client.table("trips").select("user_id").eq("id", trip_id).limit(1))
         trip_rows = trip_row.data or []
         if not trip_rows or trip_rows[0].get("user_id") != user_id:
             return False, "해당 여행을 찾을 수 없거나 접근 권한이 없어요."
 
-        _client.table("courses").update({"trip_id": trip_id}).eq("id", course_id).execute()
+        await _execute(_client.table("courses").update({"trip_id": trip_id}).eq("id", course_id))
         return True, None
     except Exception as e:
         print(f"[supabase] 코스-여행 연결 실패: {e}")
@@ -280,12 +275,12 @@ async def delete_course(course_id: str, user_id: str) -> tuple[bool, Optional[st
     if _client is None:
         return False, "서버 설정 오류로 삭제할 수 없어요."
     try:
-        existing = _client.table("courses").select("user_id").eq("id", course_id).limit(1).execute()
+        existing = await _execute(_client.table("courses").select("user_id").eq("id", course_id).limit(1))
         rows = existing.data or []
         if not rows or rows[0].get("user_id") != user_id:
             return False, "해당 코스를 찾을 수 없거나 접근 권한이 없어요."
 
-        _client.table("courses").delete().eq("id", course_id).execute()
+        await _execute(_client.table("courses").delete().eq("id", course_id))
         return True, None
     except Exception as e:
         print(f"[supabase] 코스 삭제 실패: {e}")
@@ -308,7 +303,7 @@ async def update_course(
     if _client is None:
         return None, "서버 설정 오류로 수정할 수 없어요."
     try:
-        existing = _client.table("courses").select("*").eq("id", course_id).limit(1).execute()
+        existing = await _execute(_client.table("courses").select("*").eq("id", course_id).limit(1))
         rows = existing.data or []
         if not rows or rows[0].get("user_id") != user_id:
             return None, "해당 코스를 찾을 수 없거나 접근 권한이 없어요."
@@ -333,7 +328,7 @@ async def update_course(
         if not update_payload:
             return row, None
 
-        result = _client.table("courses").update(update_payload).eq("id", course_id).execute()
+        result = await _execute(_client.table("courses").update(update_payload).eq("id", course_id))
         updated_rows = result.data or []
         return (updated_rows[0] if updated_rows else row), None
     except Exception as e:
@@ -356,18 +351,17 @@ async def list_trip_courses(trip_id: str, user_id: str) -> list[dict]:
     if _client is None:
         return []
     try:
-        trip_row = _client.table("trips").select("user_id").eq("id", trip_id).limit(1).execute()
+        trip_row = await _execute(_client.table("trips").select("user_id").eq("id", trip_id).limit(1))
         trip_rows = trip_row.data or []
         if not trip_rows or trip_rows[0].get("user_id") != user_id:
             return []
 
-        result = (
+        result = await _execute(
             _client.table("courses")
             .select("*")
             .eq("trip_id", trip_id)
             .eq("user_id", user_id)
             .order("created_at", desc=True)
-            .execute()
         )
         return result.data or []
     except Exception as e:
@@ -380,13 +374,12 @@ async def get_saved_course_detail(course_id: str, user_id: str) -> Optional[dict
     if _client is None:
         return None
     try:
-        result = (
+        result = await _execute(
             _client.table("courses")
             .select("*")
             .eq("id", course_id)
             .eq("user_id", user_id)
             .limit(1)
-            .execute()
         )
         rows = result.data or []
         if not rows:
@@ -395,7 +388,7 @@ async def get_saved_course_detail(course_id: str, user_id: str) -> Optional[dict
 
         trip_id = row.get("trip_id")
         if trip_id:
-            trip_result = _client.table("trips").select("*").eq("id", trip_id).limit(1).execute()
+            trip_result = await _execute(_client.table("trips").select("*").eq("id", trip_id).limit(1))
             trip_rows = trip_result.data or []
             row["_trip"] = trip_rows[0] if trip_rows else None
         else:
@@ -414,12 +407,11 @@ async def get_cached_accessibility_stats(region: str) -> Optional[dict]:
     if _client is None:
         return None
     try:
-        result = (
+        result = await _execute(
             _client.table("accessibility_stats")
             .select("*")
             .eq("region", region)
             .limit(1)
-            .execute()
         )
         rows = result.data or []
         return rows[0] if rows else None
@@ -437,13 +429,13 @@ async def save_accessibility_stats(region: str, data: dict) -> None:
     if _client is None:
         return
     try:
-        existing = _client.table("accessibility_stats").select("id").eq("region", region).limit(1).execute()
+        existing = await _execute(_client.table("accessibility_stats").select("id").eq("region", region).limit(1))
         rows = existing.data or []
         payload = {**data, "region": region}
         if rows:
-            _client.table("accessibility_stats").update(payload).eq("region", region).execute()
+            await _execute(_client.table("accessibility_stats").update(payload).eq("region", region))
         else:
-            _client.table("accessibility_stats").insert(payload).execute()
+            await _execute(_client.table("accessibility_stats").insert(payload))
     except Exception as e:
         print(f"[supabase] 접근성 통계 캐시 저장 실패: {e}")
 
@@ -485,11 +477,10 @@ async def get_cached_place_accessibility(content_ids: list[str]) -> dict[str, di
     try:
         for i in range(0, len(content_ids), chunk_size):
             chunk = content_ids[i : i + chunk_size]
-            result = (
+            result = await _execute(
                 _client.table(_PLACE_ACCESSIBILITY_TABLE)
                 .select("*")
                 .in_("content_id", chunk)
-                .execute()
             )
             for row in result.data or []:
                 found[row["content_id"]] = row
@@ -510,7 +501,7 @@ async def save_place_accessibility_batch(rows: list[dict]) -> None:
     try:
         for i in range(0, len(rows), chunk_size):
             chunk = rows[i : i + chunk_size]
-            _client.table(_PLACE_ACCESSIBILITY_TABLE).upsert(chunk).execute()
+            await _execute(_client.table(_PLACE_ACCESSIBILITY_TABLE).upsert(chunk))
     except Exception as e:
         print(f"[supabase] 장소별 무장애 정보 캐시 저장 실패: {e}")
 
@@ -544,11 +535,10 @@ async def get_cached_congestion_rates(signgu_cds: list[int]) -> dict[tuple[int, 
         return {}
     found: dict[tuple[int, str], dict] = {}
     try:
-        result = (
+        result = await _execute(
             _client.table(_CONGESTION_TABLE)
             .select("*")
             .in_("signgu_cd", signgu_cds)
-            .execute()
         )
         for row in result.data or []:
             found[(row["signgu_cd"], row["tats_nm"])] = row
@@ -563,7 +553,7 @@ async def get_cached_congestion_signgu_cds() -> set[int]:
     if _client is None:
         return set()
     try:
-        result = _client.table(_CONGESTION_TABLE).select("signgu_cd").execute()
+        result = await _execute(_client.table(_CONGESTION_TABLE).select("signgu_cd"))
         return {row["signgu_cd"] for row in (result.data or [])}
     except Exception as e:
         print(f"[supabase] 집중률 캐시 시군구 목록 조회 실패: {e}")
@@ -578,7 +568,7 @@ async def save_congestion_rates_batch(rows: list[dict]) -> None:
     try:
         for i in range(0, len(rows), chunk_size):
             chunk = rows[i : i + chunk_size]
-            _client.table(_CONGESTION_TABLE).upsert(chunk).execute()
+            await _execute(_client.table(_CONGESTION_TABLE).upsert(chunk))
     except Exception as e:
         print(f"[supabase] 집중률 캐시 저장 실패: {e}")
 
@@ -620,9 +610,7 @@ async def get_cached_overviews(content_ids: list[str]) -> dict[str, str]:
     try:
         for i in range(0, len(content_ids), chunk_size):
             chunk = content_ids[i : i + chunk_size]
-            result = (
-                _client.table(_OVERVIEW_TABLE).select("*").in_("content_id", chunk).execute()
-            )
+            result = await _execute(_client.table(_OVERVIEW_TABLE).select("*").in_("content_id", chunk))
             for row in result.data or []:
                 found[row["content_id"]] = row.get("overview") or ""
     except Exception as e:
@@ -639,12 +627,11 @@ async def get_cached_attraction_basic(content_id: str) -> dict | None:
     if _client is None or not content_id:
         return None
     try:
-        result = (
+        result = await _execute(
             _client.table(_OVERVIEW_TABLE)
             .select("*")
             .eq("content_id", content_id)
             .limit(1)
-            .execute()
         )
         rows = result.data or []
         if not rows or not rows[0].get("name"):
@@ -660,7 +647,7 @@ async def save_attraction_basic(row: dict) -> None:
     if _client is None or not row:
         return
     try:
-        _client.table(_OVERVIEW_TABLE).upsert(row).execute()
+        await _execute(_client.table(_OVERVIEW_TABLE).upsert(row))
     except Exception as e:
         print(f"[supabase] 관광지 기본정보 캐시 저장 실패: {e}")
 
@@ -673,7 +660,7 @@ async def save_overviews_batch(rows: list[dict]) -> None:
     try:
         for i in range(0, len(rows), chunk_size):
             chunk = rows[i : i + chunk_size]
-            _client.table(_OVERVIEW_TABLE).upsert(chunk).execute()
+            await _execute(_client.table(_OVERVIEW_TABLE).upsert(chunk))
     except Exception as e:
         print(f"[supabase] 관광지 소개문 캐시 저장 실패: {e}")
 
@@ -700,12 +687,11 @@ async def get_cached_intro_info(content_id: str) -> dict | None:
     if _client is None or not content_id:
         return None
     try:
-        result = (
+        result = await _execute(
             _client.table(_INTRO_TABLE)
             .select("*")
             .eq("content_id", content_id)
             .limit(1)
-            .execute()
         )
         rows = result.data or []
         return rows[0] if rows else None
@@ -719,7 +705,7 @@ async def save_intro_info(row: dict) -> None:
     if _client is None or not row:
         return
     try:
-        _client.table(_INTRO_TABLE).upsert(row).execute()
+        await _execute(_client.table(_INTRO_TABLE).upsert(row))
     except Exception as e:
         print(f"[supabase] 관광지 부가정보 캐시 저장 실패: {e}")
 
@@ -733,7 +719,7 @@ async def get_cached_intro_info_batch(content_ids: list[str]) -> dict[str, dict]
     try:
         for i in range(0, len(content_ids), chunk_size):
             chunk = content_ids[i : i + chunk_size]
-            result = _client.table(_INTRO_TABLE).select("*").in_("content_id", chunk).execute()
+            result = await _execute(_client.table(_INTRO_TABLE).select("*").in_("content_id", chunk))
             for row in result.data or []:
                 found[row["content_id"]] = row
     except Exception as e:
@@ -750,7 +736,7 @@ async def save_intro_info_batch(rows: list[dict]) -> None:
     try:
         for i in range(0, len(rows), chunk_size):
             chunk = rows[i : i + chunk_size]
-            _client.table(_INTRO_TABLE).upsert(chunk).execute()
+            await _execute(_client.table(_INTRO_TABLE).upsert(chunk))
     except Exception as e:
         print(f"[supabase] 관광지 부가정보 캐시 일괄 저장 실패: {e}")
 
@@ -767,14 +753,12 @@ async def mark_trip_as_visited(trip_id: str, user_id: str) -> int:
     if _client is None:
         return 0
     try:
-        trip_row = _client.table("trips").select("user_id").eq("id", trip_id).limit(1).execute()
+        trip_row = await _execute(_client.table("trips").select("user_id").eq("id", trip_id).limit(1))
         trip_rows = trip_row.data or []
         if not trip_rows or trip_rows[0].get("user_id") != user_id:
             return 0
 
-        courses_result = (
-            _client.table("courses").select("stops").eq("trip_id", trip_id).eq("user_id", user_id).execute()
-        )
+        courses_result = await _execute(_client.table("courses").select("stops").eq("trip_id", trip_id).eq("user_id", user_id))
         places: dict[str, str] = {}  # content_id -> place_name, 중복 제거용
         for row in courses_result.data or []:
             for stop in row.get("stops") or []:
@@ -790,7 +774,7 @@ async def mark_trip_as_visited(trip_id: str, user_id: str) -> int:
             {"user_id": user_id, "content_id": cid, "place_name": name, "trip_id": trip_id}
             for cid, name in places.items()
         ]
-        _client.table("visited_places").upsert(rows, on_conflict="user_id,content_id").execute()
+        await _execute(_client.table("visited_places").upsert(rows, on_conflict="user_id,content_id"))
         return len(places)
     except Exception as e:
         print(f"[supabase] 여행 방문 완료 처리 실패: {e}")
@@ -808,17 +792,16 @@ async def unmark_trip_as_visited(trip_id: str, user_id: str) -> int:
     if _client is None:
         return 0
     try:
-        trip_row = _client.table("trips").select("user_id").eq("id", trip_id).limit(1).execute()
+        trip_row = await _execute(_client.table("trips").select("user_id").eq("id", trip_id).limit(1))
         trip_rows = trip_row.data or []
         if not trip_rows or trip_rows[0].get("user_id") != user_id:
             return 0
 
-        result = (
+        result = await _execute(
             _client.table("visited_places")
             .delete()
             .eq("trip_id", trip_id)
             .eq("user_id", user_id)
-            .execute()
         )
         return len(result.data or [])
     except Exception as e:
@@ -831,9 +814,7 @@ async def count_visited_places(user_id: str) -> int:
     if _client is None:
         return 0
     try:
-        result = (
-            _client.table("visited_places").select("id", count="exact").eq("user_id", user_id).execute()
-        )
+        result = await _execute(_client.table("visited_places").select("id", count="exact").eq("user_id", user_id))
         return result.count or 0
     except Exception as e:
         print(f"[supabase] 방문한 여행지 개수 조회 실패: {e}")
@@ -846,13 +827,12 @@ async def list_visited_places(user_id: str, limit: int = 50) -> list[dict]:
     if _client is None:
         return []
     try:
-        result = (
+        result = await _execute(
             _client.table("visited_places")
             .select("*")
             .eq("user_id", user_id)
             .order("visited_at", desc=True)
             .limit(limit)
-            .execute()
         )
         return result.data or []
     except Exception as e:
@@ -865,12 +845,11 @@ async def delete_visited_place(visited_id: str, user_id: str) -> bool:
     if _client is None:
         return False
     try:
-        result = (
+        result = await _execute(
             _client.table("visited_places")
             .delete()
             .eq("id", visited_id)
             .eq("user_id", user_id)
-            .execute()
         )
         return len(result.data or []) > 0
     except Exception as e:
@@ -883,12 +862,11 @@ async def update_visited_place_date(visited_id: str, user_id: str, visited_at: s
     if _client is None:
         return None
     try:
-        result = (
+        result = await _execute(
             _client.table("visited_places")
             .update({"visited_at": visited_at})
             .eq("id", visited_id)
             .eq("user_id", user_id)
-            .execute()
         )
         rows = result.data or []
         return rows[0] if rows else None
@@ -922,13 +900,12 @@ async def get_cached_attraction_list(
         return memoized
 
     try:
-        result = (
+        result = await _execute(
             _client.table("attraction_list_cache")
             .select("*")
             .eq("ldong_regn_cd", ldong_regn_cd)
             .eq("content_type_id", content_type_id)
             .limit(1)
-            .execute()
         )
         rows = result.data or []
         if not rows:
@@ -956,7 +933,7 @@ async def save_attraction_list_cache(ldong_regn_cd: str, content_type_id: int, i
         (ldong_regn_cd, content_type_id, _ATTRACTION_LIST_DEFAULT_MAX_AGE_HOURS), items
     )
     try:
-        _client.table("attraction_list_cache").upsert(
+        await _execute(_client.table("attraction_list_cache").upsert(
             {
                 "ldong_regn_cd": ldong_regn_cd,
                 "content_type_id": content_type_id,
@@ -964,6 +941,6 @@ async def save_attraction_list_cache(ldong_regn_cd: str, content_type_id: int, i
                 "fetched_at": datetime.datetime.utcnow().isoformat(),
             },
             on_conflict="ldong_regn_cd,content_type_id",
-        ).execute()
+        ))
     except Exception as e:
         print(f"[supabase] 관광지 목록 캐시 저장 실패: {e}")

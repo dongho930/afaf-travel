@@ -16,6 +16,7 @@ import time
 from typing import Optional
 
 from app.config import get_settings
+from app.services.db import execute as _execute
 
 settings = get_settings()
 
@@ -92,13 +93,12 @@ async def create_review(
     try:
         photo_urls = await _process_review_photos(user_id, content_id, photos or [])
 
-        existing = (
+        existing = await _execute(
             _client.table(_REVIEWS_TABLE)
             .select("id")
             .eq("content_id", content_id)
             .eq("user_id", user_id)
             .limit(1)
-            .execute()
         )
         rows = existing.data or []
         payload = {
@@ -109,11 +109,9 @@ async def create_review(
             "photo_urls": photo_urls,
         }
         if rows:
-            result = (
-                _client.table(_REVIEWS_TABLE).update(payload).eq("id", rows[0]["id"]).execute()
-            )
+            result = await _execute(_client.table(_REVIEWS_TABLE).update(payload).eq("id", rows[0]["id"]))
         else:
-            result = _client.table(_REVIEWS_TABLE).insert(payload).execute()
+            result = await _execute(_client.table(_REVIEWS_TABLE).insert(payload))
         saved_rows = result.data or []
         return True, (saved_rows[0] if saved_rows else None)
     except Exception as e:
@@ -126,12 +124,11 @@ async def list_reviews_for_place(content_id: str) -> list[dict]:
     if _client is None:
         return []
     try:
-        result = (
+        result = await _execute(
             _client.table(_REVIEWS_TABLE)
             .select("*")
             .eq("content_id", content_id)
             .order("created_at", desc=True)
-            .execute()
         )
         rows = result.data or []
         if not rows:
@@ -141,11 +138,10 @@ async def list_reviews_for_place(content_id: str) -> list[dict]:
         usernames: dict[str, str] = {}
         avatar_urls: dict[str, str | None] = {}
         try:
-            profile_result = (
+            profile_result = await _execute(
                 _client.table("profiles")
                 .select("id, username, avatar_url")
                 .in_("id", user_ids)
-                .execute()
             )
             for p in profile_result.data or []:
                 usernames[p["id"]] = p.get("username") or "익명"
@@ -167,11 +163,10 @@ async def count_reviews_by_user(user_id: str) -> int:
     if _client is None:
         return 0
     try:
-        result = (
+        result = await _execute(
             _client.table(_REVIEWS_TABLE)
             .select("id", count="exact")
             .eq("user_id", user_id)
-            .execute()
         )
         return result.count or 0
     except Exception as e:
@@ -185,13 +180,12 @@ async def list_reviews_by_user(user_id: str, limit: int = 50) -> list[dict]:
     if _client is None:
         return []
     try:
-        result = (
+        result = await _execute(
             _client.table(_REVIEWS_TABLE)
             .select("*")
             .eq("user_id", user_id)
             .order("created_at", desc=True)
             .limit(limit)
-            .execute()
         )
         return result.data or []
     except Exception as e:
@@ -210,11 +204,10 @@ async def get_average_ratings(content_ids: list[str]) -> dict[str, dict]:
     if _client is None or not content_ids:
         return {}
     try:
-        result = (
+        result = await _execute(
             _client.table(_REVIEWS_TABLE)
             .select("content_id, rating")
             .in_("content_id", content_ids)
-            .execute()
         )
         rows = result.data or []
     except Exception as e:

@@ -24,6 +24,7 @@ rank 순으로 상위 N개만 읽는 가벼운 조회만 합니다(read_region_p
 import datetime
 
 from app.config import get_settings
+from app.services.db import execute as _execute
 from app.services.sigungu_codes import find_area_signgu, signgu_name
 from app.services.supabase_service import get_cached_attraction_list
 
@@ -118,12 +119,11 @@ async def refresh_region_popularity(limit: int = 5) -> list[dict]:
     review_count: dict[str, int] = {}
     review_sum: dict[str, int] = {}
     try:
-        reviews = (
+        reviews = (await _execute(
             _client.table(_REVIEWS_TABLE)
             .select("content_id, rating, created_at")
             .gte("created_at", cutoff)
-            .execute()
-        ).data or []
+        )).data or []
     except Exception as e:
         print(f"[region_popularity] 리뷰 조회 실패: {e}")
         reviews = []
@@ -136,12 +136,11 @@ async def refresh_region_popularity(limit: int = 5) -> list[dict]:
 
     post_count: dict[str, int] = {}
     try:
-        posts = (
+        posts = (await _execute(
             _client.table(_POSTS_TABLE)
             .select("content_id, created_at")
             .gte("created_at", cutoff)
-            .execute()
-        ).data or []
+        )).data or []
     except Exception as e:
         print(f"[region_popularity] 게시물 조회 실패: {e}")
         posts = []
@@ -153,13 +152,12 @@ async def refresh_region_popularity(limit: int = 5) -> list[dict]:
 
     save_count: dict[str, int] = {}
     try:
-        courses = (
+        courses = (await _execute(
             _client.table(_COURSES_TABLE)
             .select("stops, trip_id, created_at")
             .not_.is_("trip_id", "null")
             .gte("created_at", cutoff)
-            .execute()
-        ).data or []
+        )).data or []
     except Exception as e:
         print(f"[region_popularity] 저장된 코스 조회 실패: {e}")
         courses = []
@@ -264,8 +262,8 @@ async def _replace_cache_table(rows: list[dict]) -> None:
         # 어제 순위에는 있었지만 오늘은 밀려난 도시가 남아있지 않도록, 매번
         # 테이블을 통째로 비우고 새로 씁니다(city_name이 PK라 실제 존재하지
         # 않을 값으로 neq를 걸어 '전부'를 지우는 흔한 방식).
-        _client.table(_POPULARITY_TABLE).delete().neq("city_name", "__never_matches__").execute()
-        _client.table(_POPULARITY_TABLE).insert(rows).execute()
+        await _execute(_client.table(_POPULARITY_TABLE).delete().neq("city_name", "__never_matches__"))
+        await _execute(_client.table(_POPULARITY_TABLE).insert(rows))
     except Exception as e:
         print(f"[region_popularity] 캐시 테이블 갱신 실패: {e}")
 
@@ -275,12 +273,11 @@ async def read_region_popularity(limit: int = 5) -> list[dict]:
     if _client is None:
         return []
     try:
-        result = (
+        result = await _execute(
             _client.table(_POPULARITY_TABLE)
             .select("city_name, rank, score, review_count, post_count, save_count, avg_rating")
             .order("rank")
             .limit(limit)
-            .execute()
         )
         return result.data or []
     except Exception as e:

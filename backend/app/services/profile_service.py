@@ -21,6 +21,7 @@ import time
 from typing import Optional
 
 from app.config import get_settings
+from app.services.db import execute as _execute
 
 settings = get_settings()
 
@@ -44,12 +45,11 @@ async def resolve_login_email(identifier: str) -> Optional[str]:
     if _client is None:
         return None
     try:
-        result = (
+        result = await _execute(
             _client.table("profiles")
             .select("email")
             .eq("username", identifier)
             .limit(1)
-            .execute()
         )
         rows = result.data or []
         return rows[0]["email"] if rows else None
@@ -71,9 +71,9 @@ async def create_profile(user_id: str, username: str, email: str) -> tuple[bool,
         return False, "아이디는 2~20자로 입력해주세요."
 
     try:
-        _client.table("profiles").insert(
+        await _execute(_client.table("profiles").insert(
             {"id": user_id, "username": username, "email": email}
-        ).execute()
+        ))
         return True, None
     except Exception as e:
         message = str(e)
@@ -88,7 +88,7 @@ async def get_profile_by_user_id(user_id: str) -> Optional[dict]:
     if _client is None:
         return None
     try:
-        result = _client.table("profiles").select("*").eq("id", user_id).limit(1).execute()
+        result = await _execute(_client.table("profiles").select("*").eq("id", user_id).limit(1))
         rows = result.data or []
         return rows[0] if rows else None
     except Exception as e:
@@ -160,7 +160,7 @@ async def update_profile(
         return True, None
 
     try:
-        _client.table("profiles").update(update_fields).eq("id", user_id).execute()
+        await _execute(_client.table("profiles").update(update_fields).eq("id", user_id))
         return True, None
     except Exception as e:
         message = str(e)
