@@ -360,18 +360,20 @@ export default function MapScreen() {
                 return;
               }
 
-              const url = `kakaomap://route?ep=${first.latitude},${first.longitude}&by=FOOT`;
-              Linking.canOpenURL(url)
-                .then((supported) =>
-                  Linking.openURL(supported ? url : `https://map.kakao.com/link/to/${to}`)
-                )
-                // 열지 못했는데 화면이 그대로면 사용자는 버튼이 죽은 줄 압니다.
-                .catch(() =>
+              // 앱에서는 카카오맵을 바로 열어보고, 받아줄 앱이 없을 때만 웹으로
+              // 넘깁니다. canOpenURL로 미리 확인하지 않는 이유는, 안드로이드 11부터
+              // AndroidManifest에 <queries> 선언이 없으면 카카오맵이 깔려 있어도
+              // 무조건 false를 돌려주기 때문입니다. 앱을 실행하는 것 자체는 그 제한을
+              // 받지 않아서, 열어보고 실패하면 그때 넘기는 쪽이 실제 설치 여부와 맞습니다.
+              // by는 웹에서 열릴 때(카카오 기본값 car)와 같게 맞췄습니다.
+              const appUrl = `kakaomap://route?ep=${first.latitude},${first.longitude}&by=CAR`;
+              Linking.openURL(appUrl).catch(() =>
+                Linking.openURL(`https://map.kakao.com/link/to/${to}`).catch(() =>
                   Alert.alert("길찾기 실패", "카카오맵을 열지 못했어요. 잠시 후 다시 시도해주세요.")
-                );
+                )
+              );
             }}
           >
-            <PersonSimpleWalkIcon size={16} color={colors.onPrimary} weight="bold" />
             <Text style={styles.navButtonText}>카카오맵 앱으로 길찾기</Text>
           </Pressable>
         </View>

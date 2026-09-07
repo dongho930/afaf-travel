@@ -14,7 +14,7 @@ _TEMPLATE = """<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <style>
     html, body, #map {{ width: 100%; height: 100%; margin: 0; padding: 0; }}
-    #debug {{ position: fixed; top: 0; left: 0; right: 0; background: #fff3cd; color: #664d03;
+    #debug {{ display: none; position: fixed; top: 0; left: 0; right: 0; background: #fff3cd; color: #664d03;
       font-family: monospace; font-size: 12px; padding: 8px; z-index: 999; white-space: pre-wrap; }}
   </style>
 </head>
@@ -22,7 +22,12 @@ _TEMPLATE = """<!DOCTYPE html>
   <div id="debug"></div>
   <div id="map"></div>
   <script>
-    function showDebug(msg) {{ document.getElementById('debug').textContent = msg; }}
+    // 지도가 안 뜨는 이유를 알려줘야 할 때만 상단에 노란 띠로 보여줍니다.
+    function showDebug(msg) {{
+      var el = document.getElementById('debug');
+      el.textContent = msg;
+      el.style.display = 'block';
+    }}
     window.onerror = function (message, source, lineno) {{
       showDebug('JS 에러: ' + message + ' (line ' + lineno + ')');
     }};
@@ -73,9 +78,6 @@ _TEMPLATE = """<!DOCTYPE html>
 
       routeDrawn = true;
       if (fallbackTimer) {{ clearTimeout(fallbackTimer); fallbackTimer = null; }}
-
-      showDebug('경로 갱신 (' + usePoints.length + '개 점' + (isReal ? ', 실제 도로 경로' : ', 직선 폴백') + ')');
-      setTimeout(function () {{ document.getElementById('debug').style.display = 'none'; }}, 3000);
 
       // 앱(부모)에게 "경로를 그렸다"고 알려줍니다. 앱은 이 신호를 받은 뒤에야
       // 로딩 오버레이를 걷어내고 지도를 보여줘서, 사용자가 직선이 잠깐이라도
