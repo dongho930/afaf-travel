@@ -47,7 +47,13 @@ export default function LoginScreen() {
         Alert.alert("로그인 실패", error);
         return;
       }
-      router.back();
+      // 로그인하러 오기 직전 화면(게시물 탭, 관광지 상세 등)으로 되돌아갑니다.
+      // 웹에서 /login 주소로 바로 들어온 경우처럼 돌아갈 곳이 없으면 홈으로 보냅니다.
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace("/(tabs)");
+      }
     } finally {
       setIsSubmitting(false);
     }

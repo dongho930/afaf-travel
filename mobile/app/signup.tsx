@@ -29,6 +29,10 @@ export default function SignupScreen() {
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // 로그인 화면으로 돌아갈 때는 replace/push 대신 dismissTo 를 씁니다 — replace 는
+  // 스택에 [로그인, 로그인] 처럼 같은 화면을 두 번 쌓아서, 로그인 성공 후 뒤로 가도
+  // 똑같은 로그인 화면이 다시 나오는 문제가 있었습니다. dismissTo 는 스택에 이미 있는
+  // 로그인 화면까지 되돌아가고(없으면 새로 띄웁니다) 그 위 화면들을 정리해줍니다.
   const handleSignup = async () => {
     if (!username.trim() || !email.trim() || !password) {
       Alert.alert("입력이 필요해요", "아이디, 이메일, 비밀번호를 모두 입력해주세요.");
@@ -62,7 +66,7 @@ export default function SignupScreen() {
         Alert.alert(
           "가입은 완료됐지만 아이디 설정에 실패했어요",
           "잠시 후 로그인해서 다시 시도해주세요.",
-          [{ text: "확인", onPress: () => router.replace("/login") }]
+          [{ text: "확인", onPress: () => router.dismissTo("/login") }]
         );
         return;
       }
@@ -76,12 +80,12 @@ export default function SignupScreen() {
           "이미 사용 중인 아이디이거나 오류가 발생했어요. 로그인 후 다른 아이디로 다시 시도해주세요.\n" +
             String(profileErr)
         );
-        router.replace("/login");
+        router.dismissTo("/login");
         return;
       }
 
       Alert.alert("가입 완료", "회원가입이 완료됐어요. 로그인해주세요.", [
-        { text: "확인", onPress: () => router.replace("/login") },
+        { text: "확인", onPress: () => router.dismissTo("/login") },
       ]);
     } finally {
       setIsSubmitting(false);
@@ -141,7 +145,7 @@ export default function SignupScreen() {
         {isSubmitting ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={styles.buttonText}>회원가입</Text>}
       </Pressable>
 
-      <Pressable onPress={() => router.push("/login")} style={styles.linkButton}>
+      <Pressable onPress={() => router.dismissTo("/login")} style={styles.linkButton}>
         <Text style={styles.linkText}>이미 계정이 있으신가요? 로그인</Text>
       </Pressable>
     </View>
