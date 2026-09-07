@@ -276,6 +276,15 @@ export interface PostItem {
   created_at: string;
 }
 
+/**
+ * 게시물 작성 응답. 저장된 게시물에 더해, 이번 요청에서 서버가 올리지 못한
+ * 사진 장 수가 함께 옵니다 (사진 일부가 실패해도 글은 저장됩니다).
+ * 조회 응답에는 없는 값이라 작성에만 쓰는 별도 타입으로 둡니다.
+ */
+export interface CreatedPost extends PostItem {
+  photo_upload_failed: number;
+}
+
 export interface PostComment {
   id: string;
   post_id: string;

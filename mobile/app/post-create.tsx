@@ -30,7 +30,12 @@ const MAX_POST_PHOTOS = 5;
 // uri는 미리보기용(payload를 data URI로 감싼 값), payload는 서버로 보낼 base64
 // 값입니다. 사진을 고르면 원본을 바로 쓰지 않고 PhotoEditor(크롭/필터/꾸미기)를
 // 거쳐 이미 편집이 끝난 결과물만 여기 들어옵니다.
+//
+// id는 uri와 별개로 둡니다 — 같은 사진을 두 번 붙이면 편집 결과가 완전히 같아서
+// uri(=base64)도 같아집니다. 예전에는 그 uri를 목록 key와 삭제 기준으로 써서,
+// 한 장을 지우면 같은 사진이 전부 함께 사라졌습니다.
 interface PhotoDraft {
+  id: string;
   uri: string;
   payload: string;
 }
@@ -57,8 +62,11 @@ export default function PostCreateScreen() {
   const [submitting, setSubmitting] = useState(false);
   // 여러 장을 한 번에 고르면, 한 장씩 순서대로 PhotoEditor를 띄워 편집을
   // 마친 것부터 photoDrafts에 추가합니다. 큐의 첫 항목이 곧 '지금 편집 중인 사진'.
-  const [editQueue, setEditQueue] = useState<string[]>([]);
-  const editingUri = editQueue[0] ?? null;
+  // 항목마다 고유 key를 함께 들고 다닙니다 — 같은 사진을 두 장 고르면 uri가
+  // 같아서, uri만 key로 쓰면 다음 사진 차례에 편집기가 새로 열리지 않고 앞
+  // 사진의 편집 상태(크롭/필터/꾸미기)를 그대로 이어받았습니다.
+  const [editQueue, setEditQueue] = useState<{ key: string; uri: string }[]>([]);
+  const editing = editQueue[0] ?? null;
   // 게시물 피드 카드의 사진과 같은 크기(카드 폭 기준 정사각형)로 미리보기를
   // 보여주기 위해, 이 화면에서도 같은 방식(onLayout으로 실제 폭 측정)을 씁니다.
   const [previewWidth, setPreviewWidth] = useState(0);
@@ -101,7 +109,10 @@ export default function PostCreateScreen() {
 
       const picked = result.assets.slice(0, MAX_POST_PHOTOS - photoDrafts.length);
       // 바로 photoDrafts에 넣지 않고, 한 장씩 편집기를 거치도록 큐에 쌓아둡니다.
-      setEditQueue((prev) => [...prev, ...picked.map((a) => a.uri)]);
+      setEditQueue((prev) => [
+        ...prev,
+        ...picked.map((a, i) => ({ key: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`, uri: a.uri })),
+      ]);
     } catch (err) {
       Alert.alert("사진을 불러오지 못했어요", String(err));
     } finally {
@@ -109,13 +120,14 @@ export default function PostCreateScreen() {
     }
   };
 
-  const handleRemovePhoto = (uri: string) => {
-    setPhotoDrafts((prev) => prev.filter((p) => p.uri !== uri));
+  const handleRemovePhoto = (id: string) => {
+    setPhotoDrafts((prev) => prev.filter((p) => p.id !== id));
   };
 
   const handleEditorConfirm = (base64: string) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setPhotoDrafts((prev) =>
-      [...prev, { uri: `data:image/jpeg;base64,${base64}`, payload: base64 }].slice(0, MAX_POST_PHOTOS)
+      [...prev, { id, uri: `data:image/jpeg;base64,${base64}`, payload: base64 }].slice(0, MAX_POST_PHOTOS)
     );
     setEditQueue((prev) => prev.slice(1));
   };
@@ -135,12 +147,23 @@ export default function PostCreateScreen() {
     }
     setSubmitting(true);
     try {
-      await api.createPost(
+      const created = await api.createPost(
         selectedPlace.content_id,
         selectedPlace.place_name,
         bodyInput.trim(),
         photoDrafts.map((p) => p.payload)
       );
+      // 사진 일부가 서버에 올라가지 못해도 글은 저장됩니다. 예전에는 그걸
+      // 알리지 않아서, 사용자는 피드에서 사진이 사라진 걸 보고서야 알았습니다.
+      if (created.photo_upload_failed > 0) {
+        Alert.alert(
+          "사진 일부를 올리지 못했어요",
+          `게시물은 등록됐지만 사진 ${created.photo_upload_failed}장은 올라가지 않았어요. ` +
+            "'게시물 관리'에서 지우고 다시 올려주세요.",
+          [{ text: "확인", onPress: () => router.replace("/posts") }]
+        );
+        return;
+      }
       router.replace("/posts");
     } catch (err) {
       Alert.alert("등록 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
@@ -189,14 +212,14 @@ export default function PostCreateScreen() {
               pageCount={photoDrafts.length + (photoDrafts.length < MAX_POST_PHOTOS ? 1 : 0)}
             >
               {photoDrafts.map((p) => (
-                <View key={p.uri} style={[styles.photoPreviewWrap, { width: previewWidth, height: previewWidth }]}>
+                <View key={p.id} style={[styles.photoPreviewWrap, { width: previewWidth, height: previewWidth }]}>
                   <Image
                     source={{ uri: p.uri }}
                     style={{ width: previewWidth, height: previewWidth, backgroundColor: colors.background }}
                   />
                   <TouchableOpacity
                     style={styles.photoRemoveButtonLarge}
-                    onPress={() => handleRemovePhoto(p.uri)}
+                    onPress={() => handleRemovePhoto(p.id)}
                     hitSlop={8}
                   >
                     <XIcon size={14} color="#FFFFFF" weight="bold" />
@@ -286,8 +309,8 @@ export default function PostCreateScreen() {
         </View>
       </Modal>
 
-      {editingUri && (
-        <PhotoEditor key={editingUri} imageUri={editingUri} onCancel={handleEditorCancel} onConfirm={handleEditorConfirm} />
+      {editing && (
+        <PhotoEditor key={editing.key} imageUri={editing.uri} onCancel={handleEditorCancel} onConfirm={handleEditorConfirm} />
       )}
     </ScrollView>
   );

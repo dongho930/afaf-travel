@@ -14,13 +14,17 @@ posts 테이블에 (user_id, content_id, place_name, body, photo_urls)를 저장
 사진 업로드는 리뷰 사진과 같은 방식입니다: 앱이 base64로 인코딩해서 보내면,
 이 서비스가 서비스 키(관리자 권한)로 Supabase Storage(post-photos 버킷)에
 대신 업로드하고, 공개 URL 목록을 photo_urls(jsonb 배열)에 저장합니다.
+업로드/삭제는 services/storage.py를 거칩니다 — 동기 호출이라 그냥 부르면
+사진이 다 올라갈 때까지 서버 전체가 멈춥니다.
 """
 import base64
 import time
+import uuid
 from typing import Optional
 
 from app.config import get_settings
 from app.services.db import execute as _execute
+from app.services.storage import path_from_public_url, remove_objects, upload_public
 
 settings = get_settings()
 
@@ -36,17 +40,27 @@ _PHOTOS_BUCKET = "post-photos"
 _MAX_PHOTOS = 5
 
 
-async def _process_post_photos(user_id: str, photos: list[str]) -> list[str]:
+async def _process_post_photos(user_id: str, photos: list[str]) -> tuple[list[str], int]:
     """
-    게시물 사진 목록을 처리해서 최종 공개 URL 목록을 반환합니다.
-    review_service._process_review_photos와 동일한 방식입니다 — 개별 사진
-    업로드가 실패해도 나머지는 계속 시도하고, 실패한 사진은 결과에서 빠집니다.
+    게시물 사진 목록을 처리해서 (최종 공개 URL 목록, 실패한 장 수)를 반환합니다.
+    개별 사진 업로드가 실패해도 나머지는 계속 시도하고, 실패한 사진은 결과에서
+    빠집니다 — 사진 한 장 때문에 글 전체를 못 올리게 하는 것보다 낫습니다.
+
+    다만 실패한 장 수는 세서 돌려줍니다. 예전에는 로그만 남기고 조용히 넘어가서,
+    사진 5장이 전부 실패해도 앱에는 '등록 성공'으로 보이고 사용자는 피드에서
+    사진이 사라진 걸 보고서야 알 수 있었습니다.
+
+    파일 경로에 게시물마다 다른 임의값(batch)을 넣습니다. 예전에는 초 단위
+    시간만 써서, 같은 사용자가 1초 안에 두 게시물을 올리면 upsert로 앞 사진을
+    덮어썼습니다.
     """
     if _client is None or not photos:
-        return []
+        return [], 0
 
     urls: list[str] = []
+    failed = 0
     timestamp = int(time.time())
+    batch = uuid.uuid4().hex[:8]
     for idx, photo in enumerate(photos[:_MAX_PHOTOS]):
         if photo.startswith("http"):
             urls.append(photo)
@@ -54,21 +68,17 @@ async def _process_post_photos(user_id: str, photos: list[str]) -> list[str]:
         try:
             raw = photo.split(",", 1)[1] if photo.startswith("data:") else photo
             file_bytes = base64.b64decode(raw)
-            path = f"{user_id}/{timestamp}_{idx}.jpg"
-            _client.storage.from_(_PHOTOS_BUCKET).upload(
-                path, file_bytes, {"content-type": "image/jpeg", "upsert": "true"}
-            )
-            public_url_result = _client.storage.from_(_PHOTOS_BUCKET).get_public_url(path)
-            public_url = (
-                public_url_result
-                if isinstance(public_url_result, str)
-                else public_url_result.get("publicUrl", "")
-            )
+            path = f"{user_id}/{timestamp}_{batch}_{idx}.jpg"
+            public_url = await upload_public(_client, _PHOTOS_BUCKET, path, file_bytes)
             if public_url:
                 urls.append(public_url)
+            else:
+                failed += 1
+                print(f"[post] 게시물 사진 공개 URL을 받지 못했습니다({idx})")
         except Exception as e:
+            failed += 1
             print(f"[post] 게시물 사진 업로드 실패({idx}): {e}")
-    return urls
+    return urls, failed
 
 
 async def _attach_authors(rows: list[dict]) -> list[dict]:
@@ -120,7 +130,7 @@ async def create_post(
     if not body.strip():
         return False, "내용을 입력해주세요."
     try:
-        photo_urls = await _process_post_photos(user_id, photos or [])
+        photo_urls, photo_upload_failed = await _process_post_photos(user_id, photos or [])
         payload = {
             "user_id": user_id,
             "content_id": content_id,
@@ -135,6 +145,9 @@ async def create_post(
         row = (await _attach_authors([saved_rows[0]]))[0]
         row["comment_count"] = 0
         row["is_mine"] = True
+        # 앱이 "사진 N장은 올리지 못했어요"라고 알려줄 수 있도록 함께 넘깁니다.
+        # 저장된 값이 아니라 이번 작성 요청의 결과라, 조회할 때는 붙지 않습니다.
+        row["photo_upload_failed"] = photo_upload_failed
         return True, row
     except Exception as e:
         print(f"[post] 게시물 저장 실패: {e}")
@@ -221,15 +234,38 @@ async def get_post(post_id: str, viewer_user_id: Optional[str] = None) -> Option
 
 async def delete_post(user_id: str, post_id: str) -> bool:
     """본인 게시물만 삭제합니다 (필터 자체로 소유권을 강제). 댓글/답글은 DB
-    on delete cascade로 함께 삭제됩니다."""
+    on delete cascade로 함께 삭제됩니다.
+
+    사진 파일도 Storage에서 같이 지웁니다. 예전에는 posts 행만 지워서, 지운
+    게시물의 사진이 공개 버킷에 그대로 남아 URL을 아는 사람은 계속 볼 수
+    있었습니다(저장공간도 계속 쌓였습니다). 파일 삭제가 실패해도 게시물 삭제
+    자체는 성공으로 둡니다 — 사용자가 원한 건 게시물이 사라지는 것이고,
+    남은 파일은 어디서도 참조되지 않습니다."""
     if _client is None:
         return False
     try:
         result = await _execute(_client.table(_POSTS_TABLE).delete().eq("id", post_id).eq("user_id", user_id))
-        return bool(result.data)
+        deleted_rows = result.data or []
+        if not deleted_rows:
+            return False
+        await _remove_post_photos(deleted_rows)
+        return True
     except Exception as e:
         print(f"[post] 게시물 삭제 실패: {e}")
         return False
+
+
+async def _remove_post_photos(rows: list[dict]) -> None:
+    """삭제된 게시물 행들이 쓰던 사진 파일을 Storage에서 지웁니다."""
+    if _client is None:
+        return
+    paths = [
+        path
+        for row in rows
+        for url in (row.get("photo_urls") or [])
+        if (path := path_from_public_url(url, _PHOTOS_BUCKET))
+    ]
+    await remove_objects(_client, _PHOTOS_BUCKET, paths)
 
 
 async def list_comments_for_post(post_id: str, viewer_user_id: Optional[str] = None) -> list[dict]:

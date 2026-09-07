@@ -17,6 +17,7 @@ from typing import Optional
 
 from app.config import get_settings
 from app.services.db import execute as _execute
+from app.services.storage import upload_public
 
 settings = get_settings()
 
@@ -55,15 +56,7 @@ async def _process_review_photos(
             raw = photo.split(",", 1)[1] if photo.startswith("data:") else photo
             file_bytes = base64.b64decode(raw)
             path = f"{user_id}/{content_id}/{timestamp}_{idx}.jpg"
-            _client.storage.from_(_PHOTOS_BUCKET).upload(
-                path, file_bytes, {"content-type": "image/jpeg", "upsert": "true"}
-            )
-            public_url_result = _client.storage.from_(_PHOTOS_BUCKET).get_public_url(path)
-            public_url = (
-                public_url_result
-                if isinstance(public_url_result, str)
-                else public_url_result.get("publicUrl", "")
-            )
+            public_url = await upload_public(_client, _PHOTOS_BUCKET, path, file_bytes)
             if public_url:
                 urls.append(public_url)
         except Exception as e:

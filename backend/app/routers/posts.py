@@ -32,6 +32,15 @@ class PostItem(BaseModel):
     created_at: str
 
 
+class CreatePostResponse(PostItem):
+    """게시물 작성 응답. 저장된 게시물에 더해, 이번 요청에서 올리지 못한 사진
+    장 수를 함께 알려줍니다 — 사진 일부가 실패해도 글은 저장되므로, 앱이
+    '사진 N장은 올리지 못했어요'라고 알려줄 수 있게 하려는 값입니다.
+    조회(피드/내 게시물)에는 없는 값이라 작성 응답에만 붙입니다."""
+
+    photo_upload_failed: int = 0
+
+
 class CreatePostRequest(BaseModel):
     content_id: str
     place_name: str
@@ -74,7 +83,7 @@ async def list_feed(
     return await list_posts_feed(limit=limit, before=before, viewer_user_id=user_id, content_id=content_id)
 
 
-@router.post("", response_model=PostItem)
+@router.post("", response_model=CreatePostResponse)
 async def submit_post(
     request: CreatePostRequest,
     user_id: Optional[str] = Depends(get_optional_user_id),

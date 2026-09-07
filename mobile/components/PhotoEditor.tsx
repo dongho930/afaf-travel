@@ -28,6 +28,10 @@ import { PHOTO_FILTER_PRESETS, PhotoFilterPreset } from "../utils/photoFilters";
 import { WebFrame } from "./WebFrame";
 
 const OUTPUT_SIZE = 1080;
+// 화면 밖 내보내기 캔버스가 준비됐다는 신호(onLoad)를 최대 이만큼만 기다립니다.
+// 오래 걸리는 작업이 아니라(이미 잘라둔 파일을 그리기만 함), 이걸 넘겼다면
+// 기다려도 오지 않는 상황으로 보고 사용자에게 알린 뒤 다시 시도하게 합니다.
+const EXPORT_READY_TIMEOUT_MS = 10000;
 const MAX_PINCH_SCALE = 4;
 const MIN_OVERLAY_SCALE = 0.4;
 const MAX_OVERLAY_SCALE = 3;
@@ -254,13 +258,30 @@ export function PhotoEditor({
 
       setExportRect({ x: destOffsetX, y: destOffsetY, width: destWidth, height: destHeight });
       setExportUri(cropped.uri);
-      await new Promise<void>((resolve) => {
-        exportReadyResolveRef.current = resolve;
+      // 화면 밖 내보내기 캔버스에 사진이 다 그려졌다고 알려주는 onLoad를 기다립니다.
+      // 그 신호가 끝내 오지 않는 경우(이미지 디코딩 실패 등)를 대비해 시간
+      // 제한을 둡니다 — 예전에는 제한이 없어서, 신호가 안 오면 '처리 중'
+      // 상태로 멈춘 채 취소 말고는 빠져나갈 방법이 없었습니다.
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          exportReadyResolveRef.current = null;
+          reject(new Error("사진을 내보내는 데 시간이 너무 오래 걸렸어요."));
+        }, EXPORT_READY_TIMEOUT_MS);
+        exportReadyResolveRef.current = () => {
+          clearTimeout(timer);
+          exportReadyResolveRef.current = null;
+          resolve();
+        };
       });
       if (!exportViewRef.current) throw new Error("내보내기 화면을 찾지 못했어요.");
       const base64 = await captureRef(exportViewRef, { format: "jpg", quality: 0.9, result: "base64" });
       onConfirm(base64);
     } catch (err) {
+      // 내보내기 캔버스를 비워서, 다시 시도할 때 사진이 새로 그려지고 준비
+      // 신호(onLoad)도 다시 오도록 합니다 — 같은 uri를 그대로 두면 화면이
+      // 바뀌지 않아 신호가 오지 않고 또 시간만 초과합니다.
+      setExportUri(null);
+      exportReadyResolveRef.current = null;
       Alert.alert("사진 처리 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
     } finally {
       setProcessing(false);

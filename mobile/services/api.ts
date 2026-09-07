@@ -9,6 +9,7 @@ import {
   AttractionSearchResult,
   CourseCategory,
   CourseResponse,
+  CreatedPost,
   MyReportItem,
   MyReviewItem,
   NearbyAttraction,
@@ -368,7 +369,7 @@ export const api = {
 
   // 여행기록 게시물 작성 (로그인 필요). photos는 base64 인코딩된 이미지 배열(최대 5장)
   createPost: (contentId: string, placeName: string, body: string, photos: string[] = []) =>
-    request<PostItem>("/api/posts", {
+    request<CreatedPost>("/api/posts", {
       method: "POST",
       body: JSON.stringify({ content_id: contentId, place_name: placeName, body, photos }),
     }),

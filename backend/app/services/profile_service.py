@@ -22,6 +22,7 @@ from typing import Optional
 
 from app.config import get_settings
 from app.services.db import execute as _execute
+from app.services.storage import upload_public
 
 settings = get_settings()
 
@@ -115,18 +116,14 @@ async def upload_avatar(user_id: str, image_base64: str, file_ext: str) -> tuple
     path = f"{user_id}/avatar.{file_ext}"
 
     try:
-        _client.storage.from_("avatars").upload(
-            path,
-            file_bytes,
-            {"content-type": content_type, "upsert": "true"},
-        )
+        public_url = await upload_public(_client, "avatars", path, file_bytes, content_type)
     except Exception as e:
         print(f"[profile] 프로필 사진 업로드 실패: {e}")
         return None, "업로드 중 오류가 발생했어요."
 
-    public_url_result = _client.storage.from_("avatars").get_public_url(path)
-    # supabase-py 버전에 따라 문자열을 바로 주기도 하고, dict로 주기도 해서 둘 다 처리
-    public_url = public_url_result if isinstance(public_url_result, str) else public_url_result.get("publicUrl", "")
+    if not public_url:
+        print("[profile] 프로필 사진 공개 URL을 받지 못했습니다.")
+        return None, "업로드 중 오류가 발생했어요."
     avatar_url = f"{public_url}?t={int(time.time())}"  # 캐시 무효화용 타임스탬프
 
     ok, message = await update_profile(user_id, avatar_url=avatar_url)
