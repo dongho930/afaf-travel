@@ -76,6 +76,34 @@ export function PhotoCarousel({
     restoreTimer.current = setTimeout(() => setTabSwipe(true), 3000);
   }, [pageCount, setTabSwipe]);
 
+  // 웹에서는 ScrollView의 onTouchStart/onPointerDown prop이 DOM까지 전달되지
+  // 않습니다(react-native-web). 실제 터치를 보내 확인해 보니 핸들러가 한 번도
+  // 불리지 않았습니다. 그래서 웹에서는 스크롤 노드에 리스너를 직접 붙입니다.
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    const scrollable = scrollRef.current as unknown as {
+      getScrollableNode?: () => unknown;
+    } | null;
+    const node = (scrollable?.getScrollableNode?.() ?? scrollable) as HTMLElement | null;
+    if (!node?.addEventListener) return;
+
+    const opts = { passive: true } as const;
+    node.addEventListener("touchstart", lockTabSwipe, opts);
+    node.addEventListener("pointerdown", lockTabSwipe, opts);
+    node.addEventListener("touchend", unlockTabSwipe, opts);
+    node.addEventListener("touchcancel", unlockTabSwipe, opts);
+    node.addEventListener("pointerup", unlockTabSwipe, opts);
+    node.addEventListener("pointercancel", unlockTabSwipe, opts);
+    return () => {
+      node.removeEventListener("touchstart", lockTabSwipe);
+      node.removeEventListener("pointerdown", lockTabSwipe);
+      node.removeEventListener("touchend", unlockTabSwipe);
+      node.removeEventListener("touchcancel", unlockTabSwipe);
+      node.removeEventListener("pointerup", unlockTabSwipe);
+      node.removeEventListener("pointercancel", unlockTabSwipe);
+    };
+  }, [lockTabSwipe, unlockTabSwipe]);
+
   // 스크롤 도중에 화면을 떠나도 반드시 되살립니다.
   useEffect(() => unlockTabSwipe, [unlockTabSwipe]);
 
@@ -103,17 +131,8 @@ export function PhotoCarousel({
         disableIntervalMomentum
         onMomentumScrollEnd={handleScrollSettled}
         onScrollEndDrag={handleScrollSettled}
-        // 손가락이 닿는 순간 탭 스와이프를 꺼서, 사진을 미는 동작이 화면
-        // 전환으로 새어 나가지 않게 합니다. 탭 페이저는 '움직임'이 감지될 때
-        // 제스처를 채가므로(PanResponderAdapter의 onMoveShouldSetPanResponderCapture),
-        // 그전 단계인 '닿는 순간'에 꺼야 합니다.
-        //
-        // pointer와 touch를 모두 거는 이유: 웹(react-native-web)은 pointer 이벤트로
-        // 제스처를 판정하고, 네이티브는 touch 이벤트를 씁니다. 둘 다 걸어두면
-        // 어느 쪽이든 '움직임'보다 먼저 잠깁니다.
-        onPointerDown={lockTabSwipe}
-        onPointerUp={unlockTabSwipe}
-        onPointerCancel={unlockTabSwipe}
+        // 네이티브는 이 prop들이 그대로 동작합니다. 웹은 아래 useEffect가
+        // DOM에 직접 리스너를 붙입니다(이 prop들이 웹에서는 호출되지 않습니다).
         onTouchStart={lockTabSwipe}
         onTouchEnd={unlockTabSwipe}
         onTouchCancel={unlockTabSwipe}
