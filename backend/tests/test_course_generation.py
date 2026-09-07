@@ -66,10 +66,19 @@ def test_이동유형과_관련_있는_편의시설만_추린다():
     assert "visual_accessibility_count" not in wheelchair  # 휠체어와 무관한 항목은 빠집니다
 
 
-def test_general은_전체를_그대로_넘긴다():
+def test_general은_유형별_개수만_넘긴다():
+    """general도 개수 5개로 추려야 합니다 — 프롬프트가 Groq의 분당 토큰 한도를
+    넘겨 후보가 많은 지역에서 추천이 통째로 실패하던 원인이었습니다."""
     features = _attraction("1", "x").accessibility.model_dump()
 
-    assert ai_service._relevant_accessibility_payload(features, "general") == features
+    general = ai_service._relevant_accessibility_payload(features, "general")
+
+    assert set(general) == {
+        "wheelchair_accessibility_count", "visual_accessibility_count",
+        "hearing_accessibility_count", "family_accessibility_count",
+        "pregnant_accessibility_count",
+    }
+    assert "has_ramp" not in general  # 개별 편의시설 항목은 빠집니다
 
 
 # ---- _build_user_prompt ----
@@ -150,3 +159,75 @@ def test_후보가_없으면_오류를_알린다():
 
     with pytest.raises(ValueError):
         asyncio.run(ai_service.recommend_places(PlaceRecommendationRequest(query_text="x"), []))
+
+
+# ---- Groq 한도 응답 처리 ----
+
+class _FakeResponse:
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+
+    def raise_for_status(self):  # pragma: no cover - 여기까지 오면 테스트 실패
+        raise AssertionError("한도 응답은 raise_for_status까지 가면 안 됩니다")
+
+    def json(self):  # pragma: no cover - 여기까지 오면 테스트 실패
+        raise AssertionError("한도 응답의 본문을 읽으려 하면 안 됩니다")
+
+
+class _FakeClient:
+    """httpx.AsyncClient 대신 끼워 넣어, 항상 같은 상태 코드를 돌려줍니다."""
+
+    def __init__(self, status_code: int, calls: list):
+        self._status_code = status_code
+        self._calls = calls
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def post(self, *args, **kwargs):
+        self._calls.append(kwargs.get("json"))
+        return _FakeResponse(self._status_code)
+
+
+def _patch_groq(monkeypatch, status_code: int) -> list:
+    """Groq 키가 있는 상태에서 지정한 상태 코드만 돌아오게 만듭니다."""
+    calls: list = []
+    monkeypatch.setattr(ai_service.settings, "groq_api_key", "test-key")
+    monkeypatch.setattr(
+        ai_service.httpx, "AsyncClient", lambda *a, **kw: _FakeClient(status_code, calls)
+    )
+    return calls
+
+
+def test_요청이_토큰_한도보다_크면_재시도_없이_대체_로직을_쓴다(monkeypatch, candidates):
+    """413(요청 하나가 분당 토큰 한도 초과)은 기다려도 풀리지 않으므로 바로
+    규칙 기반 추천으로 넘어가야 합니다 — 예전엔 그대로 터져서 앱에 '장소 추천
+    실패'가 떴습니다."""
+    calls = _patch_groq(monkeypatch, 413)
+
+    result = asyncio.run(
+        ai_service.recommend_places(PlaceRecommendationRequest(query_text="산책로"), candidates)
+    )
+
+    assert [c.attraction.content_id for c in result] == ["1", "2", "3"]
+    assert len(calls) == 1  # 재시도하지 않습니다
+
+
+def test_순간적인_한도_초과는_재시도한_뒤_대체_로직을_쓴다(monkeypatch, candidates):
+    """429는 잠깐 기다리면 풀리는 경우가 많아 재시도합니다 (413과 다른 처리)."""
+    calls = _patch_groq(monkeypatch, 429)
+
+    async def _no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(ai_service.asyncio, "sleep", _no_sleep)
+
+    result = asyncio.run(
+        ai_service.recommend_places(PlaceRecommendationRequest(query_text="산책로"), candidates)
+    )
+
+    assert [c.attraction.content_id for c in result] == ["1", "2", "3"]
+    assert len(calls) == 3  # 최초 1회 + 재시도 2회

@@ -46,12 +46,23 @@ _RELEVANT_FIELDS_BY_USER_TYPE: dict[str, list[str]] = {
     "pregnant": ["has_rest_area", "pregnant_accessibility_count"],
     "visual": ["has_visual_accessibility", "visual_accessibility_count"],
     "hearing": ["has_hearing_accessibility", "hearing_accessibility_count"],
+    # general(접근성 조건 없음)은 특정 편의시설을 우선할 이유가 없어서, 개별
+    # 항목 대신 유형별 개수 5개만 넘깁니다. 예전엔 매핑에 없다는 이유로
+    # accessibility 30개 필드를 통째로 넘겼는데, 그러면 (1) AI가 "일반" 추천인데도
+    # 점자블록·수화안내처럼 무관한 근거를 들고, (2) 프롬프트가 다른 유형의 서너 배로
+    # 커져서 후보가 많은 지역(수원시 팔달구·성남시 분당구 등)에서는 Groq의 분당 토큰
+    # 한도를 넘겨 요청 자체가 거절당했습니다.
+    "general": [
+        "wheelchair_accessibility_count", "visual_accessibility_count",
+        "hearing_accessibility_count", "family_accessibility_count",
+        "pregnant_accessibility_count",
+    ],
 }
 
 
 def _relevant_accessibility_payload(features: dict, user_type: str) -> dict:
     """이동유형(user_type)과 실제로 관련 있는 접근성 필드만 골라 반환합니다.
-    general이거나 매핑에 없는 유형이면 전체를 그대로 넘깁니다."""
+    매핑에 없는 유형이면 전체를 그대로 넘깁니다."""
     relevant_keys = _RELEVANT_FIELDS_BY_USER_TYPE.get(user_type)
     if not relevant_keys:
         return features
@@ -205,8 +216,14 @@ def _mock_generate(request: CourseRequest, candidates: list[Attraction]) -> dict
 
 
 class GroqRateLimitedError(Exception):
-    """Groq API가 요청 한도(429)에 걸렸을 때 발생시켜서, 호출한 쪽이 규칙 기반
-    대체 로직으로 넘어갈 수 있게 신호를 줍니다."""
+    """Groq API가 요청 한도에 걸렸을 때 발생시켜서, 호출한 쪽이 규칙 기반
+    대체 로직으로 넘어갈 수 있게 신호를 줍니다.
+
+    한도는 두 가지 형태로 옵니다.
+    - 429: 순간적으로 요청이 몰렸을 때. 잠깐 기다리면 풀리는 경우가 많습니다.
+    - 413: 이번 요청 하나가 분당 토큰 한도(TPM)보다 커서 아예 못 받는 경우.
+      기다린다고 풀리지 않으니 재시도 없이 바로 대체 로직으로 넘깁니다.
+    """
 
 
 async def _groq_call(system_prompt: str, user_prompt: str) -> dict:
@@ -226,10 +243,21 @@ async def _groq_call(system_prompt: str, user_prompt: str) -> dict:
     # 풀리는 경우가 많아서 최대 2번까지 짧게 재시도합니다. 그래도 안 되면
     # GroqRateLimitedError를 던져서, 호출한 쪽이 규칙 기반 대체 로직으로
     # 자연스럽게 넘어가게 합니다 (사용자는 500 에러 대신 결과를 받습니다).
+    #
+    # 413(Payload Too Large)도 같은 대체 로직으로 넘깁니다. 프롬프트가 커서
+    # 이번 요청 하나가 분당 토큰 한도를 통째로 넘긴 경우인데, 예전에는 이걸
+    # 처리하지 않아 raise_for_status()에서 그대로 터지면서 500이 됐습니다
+    # (후보가 많은 지역 — 예: 수원시 팔달구/성남시 분당구 — 을 고르면 AI
+    # 플래너가 "장소 추천 실패"로 끝나던 원인). 재시도해도 같은 크기라 똑같이
+    # 실패하므로 기다리지 않고 바로 넘깁니다.
     max_retries = 2
     for attempt in range(max_retries + 1):
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(GROQ_ENDPOINT, headers=headers, json=payload)
+        if resp.status_code == 413:
+            raise GroqRateLimitedError(
+                "Groq API 요청이 분당 토큰 한도보다 큽니다(413) — 프롬프트 길이 초과"
+            )
         if resp.status_code == 429:
             if attempt < max_retries:
                 await asyncio.sleep(1.5 * (attempt + 1))
