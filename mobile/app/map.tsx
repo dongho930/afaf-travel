@@ -3,6 +3,7 @@ import { BusIcon, CarIcon, type Icon, PersonSimpleWalkIcon } from "phosphor-reac
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Linking,
   Modal,
   Platform,
@@ -346,14 +347,28 @@ export default function MapScreen() {
             onPress={() => {
               const first = course.stops[0]?.attraction;
               if (!first) return;
+              const to = `${encodeURIComponent(first.name)},${first.latitude},${first.longitude}`;
+
+              // 웹에는 카카오맵 앱 스킴(kakaomap://)을 열 방법이 없습니다. 그런데
+              // react-native-web의 canOpenURL은 무엇을 물어도 true를 돌려주기 때문에,
+              // 브라우저에서도 항상 스킴 쪽으로 갔습니다. 브라우저가 모르는 스킴이라
+              // 빈 탭만 열렸다 닫히면서 아무 일도 일어나지 않았고, 아래 웹 주소는
+              // 실행될 일이 없었습니다. 그래서 웹에서는 처음부터 도착지만 채운
+              // 카카오맵 페이지를 엽니다 (관광지 상세 화면의 길찾기와 같은 방식).
+              if (Platform.OS === "web") {
+                Linking.openURL(`https://map.kakao.com/link/to/${to}`);
+                return;
+              }
+
               const url = `kakaomap://route?ep=${first.latitude},${first.longitude}&by=FOOT`;
-              Linking.canOpenURL(url).then((supported) => {
-                if (supported) Linking.openURL(url);
-                else
-                  Linking.openURL(
-                    `https://map.kakao.com/link/to/${encodeURIComponent(first.name)},${first.latitude},${first.longitude}`
-                  );
-              });
+              Linking.canOpenURL(url)
+                .then((supported) =>
+                  Linking.openURL(supported ? url : `https://map.kakao.com/link/to/${to}`)
+                )
+                // 열지 못했는데 화면이 그대로면 사용자는 버튼이 죽은 줄 압니다.
+                .catch(() =>
+                  Alert.alert("길찾기 실패", "카카오맵을 열지 못했어요. 잠시 후 다시 시도해주세요.")
+                );
             }}
           >
             <PersonSimpleWalkIcon size={16} color={colors.onPrimary} weight="bold" />
