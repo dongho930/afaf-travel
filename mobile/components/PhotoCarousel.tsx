@@ -87,22 +87,61 @@ export function PhotoCarousel({
     const node = (scrollable?.getScrollableNode?.() ?? scrollable) as HTMLElement | null;
     if (!node?.addEventListener) return;
 
+    // 한 장씩 딱 멈추게 + 끝에서 더 밀어도 부모로 새어 나가지 않게.
+    //
+    // react-native-web은 snapToInterval / disableIntervalMomentum을 구현하지
+    // 않습니다(네이티브 전용). 그래서 웹에서는 사진이 한 장 단위로 멈추지 않고
+    // 관성으로 여러 장을 지나쳤습니다. CSS 스크롤 스냅으로 대체합니다.
+    //
+    // overscroll-behavior-x: contain은 마지막 사진에서 더 밀었을 때 그 스크롤이
+    // 부모(탭 페이저)로 이어지는 것을 막습니다 — 다음 장이 없을 때 화면이
+    // 넘어가던 경우에 대한 브라우저 차원의 차단입니다.
+    // 정렬(사진 경계에 딱 맞추기)은 브라우저 스냅에 맡깁니다.
+    node.style.scrollSnapType = "x mandatory";
+    node.style.overscrollBehaviorX = "contain";
+    const content = node.firstElementChild;
+    if (content) {
+      for (const child of Array.from(content.children)) {
+        (child as HTMLElement).style.scrollSnapAlign = "start";
+        // 세게 밀어도 관성으로 여러 장을 지나치지 않고 한 장씩 멈춥니다.
+        (child as HTMLElement).style.scrollSnapStop = "always";
+      }
+    }
+
     const opts = { passive: true } as const;
-    node.addEventListener("touchstart", lockTabSwipe, opts);
-    node.addEventListener("pointerdown", lockTabSwipe, opts);
-    node.addEventListener("touchend", unlockTabSwipe, opts);
-    node.addEventListener("touchcancel", unlockTabSwipe, opts);
-    node.addEventListener("pointerup", unlockTabSwipe, opts);
-    node.addEventListener("pointercancel", unlockTabSwipe, opts);
-    return () => {
-      node.removeEventListener("touchstart", lockTabSwipe);
-      node.removeEventListener("pointerdown", lockTabSwipe);
-      node.removeEventListener("touchend", unlockTabSwipe);
-      node.removeEventListener("touchcancel", unlockTabSwipe);
-      node.removeEventListener("pointerup", unlockTabSwipe);
-      node.removeEventListener("pointercancel", unlockTabSwipe);
+    // 해제는 '손을 뗐을 때'만 듣습니다.
+    //
+    // pointercancel / touchcancel을 해제 신호로 쓰면 안 됩니다 — 브라우저는
+    // 터치 스크롤이 시작되는 순간 이 이벤트를 보냅니다. 실제로 측정해 보니
+    // 잠근 지 11ms 만에 풀려서, 사진을 미는 바로 그 순간 탭 스와이프가 다시
+    // 켜지고 화면이 넘어갔습니다. 손을 떼는 이벤트가 유실되는 경우는 아래
+    // 3초 안전장치가 처리합니다.
+    // touchstart와 pointerdown이 한 번의 터치에 둘 다 발생합니다(touchend/
+    // pointerup도 마찬가지). 그대로 두면 '한 장만 이동'이 두 번 계산되면서
+    // 두 번째 계산이 이미 움직이는 위치를 기준으로 삼아 엉뚱한 곳으로 갑니다.
+    let gestureActive = false;
+    const onDown = () => {
+      if (gestureActive) return;
+      gestureActive = true;
+      lockTabSwipe();
     };
-  }, [lockTabSwipe, unlockTabSwipe]);
+    const onUp = () => {
+      if (!gestureActive) return;
+      gestureActive = false;
+      unlockTabSwipe();
+    };
+    node.addEventListener("touchstart", onDown, opts);
+    node.addEventListener("pointerdown", onDown, opts);
+    node.addEventListener("touchend", onUp, opts);
+    node.addEventListener("pointerup", onUp, opts);
+    return () => {
+      node.removeEventListener("touchstart", onDown);
+      node.removeEventListener("pointerdown", onDown);
+      node.removeEventListener("touchend", onUp);
+      node.removeEventListener("pointerup", onUp);
+    };
+    // pageCount가 바뀌면 사진 요소도 바뀌므로 스냅 정렬을 다시 걸어야 합니다.
+  }, [lockTabSwipe, unlockTabSwipe, pageCount]);
 
   // 스크롤 도중에 화면을 떠나도 반드시 되살립니다.
   useEffect(() => unlockTabSwipe, [unlockTabSwipe]);
@@ -135,7 +174,6 @@ export function PhotoCarousel({
         // DOM에 직접 리스너를 붙입니다(이 prop들이 웹에서는 호출되지 않습니다).
         onTouchStart={lockTabSwipe}
         onTouchEnd={unlockTabSwipe}
-        onTouchCancel={unlockTabSwipe}
         onScrollBeginDrag={lockTabSwipe}
       >
         {children}
