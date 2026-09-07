@@ -58,8 +58,11 @@ function ThemedApp() {
               }}
             >
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen name="select" options={{ title: "장소 선택하기" }} />
-              <Stack.Screen name="results" options={{ title: "추천 코스" }} />
+              {/* 이 두 화면은 고정 헤더 대신, 화면 안에서 스크롤과 함께 밀려 올라가는
+                  상단 바(components/ScreenHeader)를 직접 그립니다 — 홈 화면과 같은 방식입니다.
+                  title은 웹 브라우저 탭 제목으로 계속 쓰이므로 그대로 둡니다. */}
+              <Stack.Screen name="select" options={{ title: "장소 선택하기", headerShown: false }} />
+              <Stack.Screen name="results" options={{ title: "추천 코스", headerShown: false }} />
               <Stack.Screen name="map" options={{ title: "지도로 보기" }} />
               <Stack.Screen name="login" options={{ title: "로그인" }} />
               <Stack.Screen name="signup" options={{ title: "회원가입" }} />

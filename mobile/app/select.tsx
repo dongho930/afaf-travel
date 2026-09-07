@@ -10,12 +10,14 @@ import {
   Text,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Alert } from "../services/crossPlatformAlert";
 
 import { AccessibilityIcons } from "../components/AccessibilityIcons";
 import { EXTRA_INFO_LABELS_BY_CATEGORY, renderExtraInfo } from "../components/ExtraInfoList";
 import { FadeInView } from "../components/FadeInView";
 import { PhotoCardHeader } from "../components/PhotoCardHeader";
+import { ScreenHeader } from "../components/ScreenHeader";
 import { getCongestionDisplay } from "../constants/congestion";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
@@ -96,28 +98,40 @@ export default function SelectPlacesScreen() {
 
   if (recommendations.length === 0) {
     return (
-      <View style={styles.empty}>
-        <Text style={styles.emptyText}>추천받은 장소가 없어요. 먼저 원하는 여행을 말씀해주세요.</Text>
-        <Pressable style={styles.emptyButton} onPress={() => router.push("/(tabs)/planner")}>
-          <Text style={styles.emptyButtonText}>여행 요청하러 가기</Text>
-        </Pressable>
-      </View>
+      <SafeAreaView style={styles.screen} edges={["top"]}>
+        <ScreenHeader title="장소 선택하기" style={styles.standaloneHeader} />
+        <View style={styles.empty}>
+          <Text style={styles.emptyText}>추천받은 장소가 없어요. 먼저 원하는 여행을 말씀해주세요.</Text>
+          <Pressable style={styles.emptyButton} onPress={() => router.push("/(tabs)/planner")}>
+            <Text style={styles.emptyButtonText}>여행 요청하러 가기</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
     );
   }
 
-  return (
-    <View style={styles.container}>
+  // 상단 바와 제목은 목록의 맨 위 콘텐츠로 넣습니다 — 그래야 홈 화면처럼
+  // 스크롤을 내릴 때 목록과 함께 위로 밀려 사라집니다.
+  const listHeader = (
+    <>
+      <ScreenHeader title="장소 선택하기" style={styles.listHeaderBar} />
       <Text style={styles.title}>마음에 드는 장소를 골라주세요</Text>
       <Text style={styles.subtitle}>
         "{pendingQueryText}" 요청에 맞춰 추천된 장소예요. 선택한 곳들로 코스를 만들어드려요.
       </Text>
+    </>
+  );
 
+  return (
+    // edges=["top"]로 상태표시줄(시계/배터리) 영역만 피해서 그립니다 — 홈 화면과 같습니다.
+    <SafeAreaView style={styles.container} edges={["top"]}>
       {extraInfoReady ? (
         <FadeInView duration={250} style={{ flex: 1 }}>
           <FlatList
             data={recommendations}
             keyExtractor={(item) => item.attraction.content_id}
-            contentContainerStyle={{ paddingBottom: 110 }}
+            ListHeaderComponent={listHeader}
+            contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
             renderItem={({ item }) => (
               <PlaceOptionCard
@@ -131,7 +145,11 @@ export default function SelectPlacesScreen() {
           />
         </FadeInView>
       ) : (
-        <ActivityIndicator style={{ marginTop: 20 }} color={colors.primary} />
+        // 부가 정보를 불러오는 동안에도 상단 바와 제목은 같은 자리에 그대로 둡니다.
+        <View style={styles.listContent}>
+          {listHeader}
+          <ActivityIndicator style={{ marginTop: 20 }} color={colors.primary} />
+        </View>
       )}
 
       <View style={styles.footer}>
@@ -150,7 +168,7 @@ export default function SelectPlacesScreen() {
           )}
         </Pressable>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -228,7 +246,13 @@ function PlaceOptionCard({
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { flex: 1, padding: spacing.xl - 4, backgroundColor: colors.background },
+  screen: { flex: 1, backgroundColor: colors.background },
+  // 위쪽 여백만 목록 안(listContent)으로 옮겨서, 스크롤한 콘텐츠가 화면 맨 위까지
+  // 올라갔다가 사라지게 합니다. 좌우/아래 여백은 그대로 둬야 하단 버튼 위치가 유지됩니다.
+  container: { flex: 1, paddingHorizontal: spacing.xl - 4, paddingBottom: spacing.xl - 4, backgroundColor: colors.background },
+  listContent: { paddingTop: spacing.md, paddingBottom: 110 },
+  listHeaderBar: { marginBottom: spacing.md },
+  standaloneHeader: { paddingHorizontal: spacing.xl - 4, paddingTop: spacing.md },
   title: { fontSize: 21, fontFamily: fontFamily.bold, color: colors.text, marginBottom: spacing.xs },
   subtitle: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginBottom: spacing.lg, lineHeight: 18 },
   card: {

@@ -9,12 +9,14 @@ import {
 } from "phosphor-react-native";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Alert } from "../services/crossPlatformAlert";
 import DraggableFlatList, { ScaleDecorator } from "react-native-draggable-flatlist";
 import { AttractionCard } from "../components/AttractionCard";
 import { EXTRA_INFO_LABELS_BY_CATEGORY } from "../components/ExtraInfoList";
 import { FadeInView } from "../components/FadeInView";
 import { SaveCourseModal, SaveCourseParams } from "../components/SaveCourseModal";
+import { ScreenHeader } from "../components/ScreenHeader";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
@@ -137,17 +139,24 @@ export default function ResultsScreen() {
 
   if (!course) {
     return (
-      <View style={styles.empty}>
-        <Text style={styles.emptyText}>표시할 코스가 없어요.</Text>
-        <TouchableOpacity style={styles.emptyButton} onPress={() => router.push("/(tabs)/planner")}>
-          <Text style={styles.emptyButtonText}>AI 플래너로 이동</Text>
-        </TouchableOpacity>
-      </View>
+      <SafeAreaView style={styles.screen} edges={["top"]}>
+        <ScreenHeader title="추천 코스" style={styles.standaloneHeader} />
+        <View style={styles.empty}>
+          <Text style={styles.emptyText}>표시할 코스가 없어요.</Text>
+          <TouchableOpacity style={styles.emptyButton} onPress={() => router.push("/(tabs)/planner")}>
+            <Text style={styles.emptyButtonText}>AI 플래너로 이동</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
     );
   }
 
-  return (
-    <View style={styles.container}>
+  // 상단 바와 코스 제목·안내문은 목록의 맨 위 콘텐츠로 넣습니다 — 그래야 홈
+  // 화면처럼 스크롤을 내릴 때 목록과 함께 위로 밀려 사라집니다.
+  const listHeader = (
+    <>
+      <ScreenHeader title="추천 코스" style={styles.listHeaderBar} />
+
       {offlineNotice && (
         <View style={styles.offlineBanner}>
           <WifiSlashIcon size={13} color={colors.warningText} weight="bold" />
@@ -189,7 +198,12 @@ export default function ResultsScreen() {
           </TouchableOpacity>
         )}
       </View>
+    </>
+  );
 
+  return (
+    // edges=["top"]로 상태표시줄(시계/배터리) 영역만 피해서 그립니다 — 홈 화면과 같습니다.
+    <SafeAreaView style={styles.container} edges={["top"]}>
       {extraInfoReady ? (
         <FadeInView duration={250} style={{ flex: 1 }}>
           <DraggableFlatList
@@ -197,7 +211,8 @@ export default function ResultsScreen() {
             containerStyle={{ flex: 1 }}
             data={course.stops}
             keyExtractor={(item) => item.attraction.content_id}
-            contentContainerStyle={{ paddingBottom: 90 }}
+            ListHeaderComponent={listHeader}
+            contentContainerStyle={styles.listContent}
             onDragEnd={handleDragEnd}
             renderItem={({ item, drag, isActive, getIndex }) => (
               <ScaleDecorator>
@@ -247,7 +262,11 @@ export default function ResultsScreen() {
           />
         </FadeInView>
       ) : (
-        <ActivityIndicator style={{ marginTop: 20 }} color={colors.primary} />
+        // 부가 정보를 불러오는 동안에도 상단 바와 제목은 같은 자리에 그대로 둡니다.
+        <View style={styles.listContent}>
+          {listHeader}
+          <ActivityIndicator style={{ marginTop: 20 }} color={colors.primary} />
+        </View>
       )}
 
       <Pressable
@@ -265,13 +284,19 @@ export default function ResultsScreen() {
         defaultNewTripName={course.title}
         onConfirm={handleConfirmSave}
       />
-    </View>
+    </SafeAreaView>
   );
 }
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { flex: 1, padding: spacing.xl - 4, backgroundColor: colors.background },
+  screen: { flex: 1, backgroundColor: colors.background },
+  // 위쪽 여백만 목록 안(listContent)으로 옮겨서, 스크롤한 콘텐츠가 화면 맨 위까지
+  // 올라갔다가 사라지게 합니다. 좌우/아래 여백은 그대로 둬야 하단 버튼 위치가 유지됩니다.
+  container: { flex: 1, paddingHorizontal: spacing.xl - 4, paddingBottom: spacing.xl - 4, backgroundColor: colors.background },
+  listContent: { paddingTop: spacing.md, paddingBottom: 90 },
+  listHeaderBar: { marginBottom: spacing.md },
+  standaloneHeader: { paddingHorizontal: spacing.xl - 4, paddingTop: spacing.md },
   titleRow: { flexDirection: "row", alignItems: "flex-start", marginBottom: spacing.lg, gap: spacing.sm + 2 },
   title: { fontSize: 21, fontFamily: fontFamily.bold, color: colors.text, marginBottom: spacing.xs },
   summary: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary },
