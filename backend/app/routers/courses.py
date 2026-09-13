@@ -1,13 +1,16 @@
+import logging
 import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.models.schemas import (
+    Attraction,
     CourseRequest,
     CourseResponse,
     CourseStop,
     GenerateFromSelectionRequest,
+    ParsedQuery,
     PlaceRecommendationRequest,
     PlaceRecommendationResponse,
     SaveCourseRequest,
@@ -21,7 +24,12 @@ from app.models.schemas import (
     UserType,
     VisitedPlace,
 )
-from app.services.ai_service import generate_course, generate_course_from_selection, recommend_places
+from app.services.ai_service import (
+    generate_course,
+    generate_course_from_selection,
+    parse_query,
+    recommend_places,
+)
 from app.services.auth import get_optional_user_id
 from app.services.supabase_service import (
     attach_course_to_trip,
@@ -46,9 +54,55 @@ from app.services.supabase_service import (
 from app.services.tour_api import tour_api_client
 
 router = APIRouter(tags=["courses"])
+logger = logging.getLogger(__name__)
 
 courses_router = APIRouter(prefix="/api/courses", tags=["courses"])
 trips_router = APIRouter(prefix="/api/trips", tags=["trips"])
+
+# 1·2단계가 후보를 받아올 때 쓰는 개수. 두 단계가 같은 값을 써야 2단계에서
+# "1단계에서 고른 장소가 후보에 없다"는 상황이 덜 생깁니다.
+_CANDIDATE_LIMIT = 25
+
+
+async def _candidates_with_conditions(
+    query_text: str, user_type: str, region: str, sigungu_cd: Optional[int]
+) -> tuple[list[Attraction], ParsedQuery]:
+    """
+    질의에서 조건을 뽑아낸 뒤, 그 조건(특히 지역)으로 좁힌 무장애 관광지 후보를 돌려줍니다.
+
+    1단계(추천)와 2단계(코스 생성)가 똑같은 방식으로 후보를 만들어야, 사용자가
+    1단계에서 고른 장소를 2단계가 그대로 찾을 수 있습니다. 그래서 두 단계가 이
+    함수 하나를 공유합니다 (parse_query는 같은 질의를 10분간 캐시하므로, 2단계에서
+    AI를 다시 부르지 않습니다).
+
+    질의에서 읽어낸 지역으로 좁혔는데 후보가 하나도 없으면 지역 제한을 풀고 다시
+    찾습니다 — 사용자가 직접 고른 지역이 아니라 문장에서 넘겨짚은 지역이라,
+    잘못 읽었을 때 빈 화면을 주는 것보다 넓게 찾아주는 편이 낫습니다.
+    """
+    parsed = await parse_query(query_text, sigungu_cd, region)
+
+    candidates = await tour_api_client.search_accessible_attractions(
+        region=region,
+        user_type=user_type,
+        limit=_CANDIDATE_LIMIT,
+        sigungu_cd=parsed.sigungu_cds or None,
+    )
+
+    if not candidates and parsed.region_source == "query_text":
+        logger.info(
+            "질의에서 읽어낸 지역(%s)으로는 후보가 없어 지역 제한 없이 다시 찾습니다: %r",
+            parsed.region_text,
+            query_text,
+        )
+        candidates = await tour_api_client.search_accessible_attractions(
+            region=region, user_type=user_type, limit=_CANDIDATE_LIMIT, sigungu_cd=None
+        )
+        # 캐시에 들어있는 원본을 그대로 고치면 다른 단계까지 오염되므로 복사본을 만듭니다.
+        parsed = parsed.model_copy(
+            update={"sigungu_cds": [], "region_source": "none", "region_text": None}
+        )
+
+    return candidates, parsed
 
 
 @courses_router.post("/recommend", response_model=PlaceRecommendationResponse)
@@ -56,16 +110,22 @@ async def recommend_course_places(request: PlaceRecommendationRequest):
     """
     1단계: 사용자의 자연어 질의에 맞는 장소 후보를 넓게 추천합니다.
     아직 코스(순서/시간)를 확정하지 않고, 사용자가 이 중에서 직접 고를 수 있게 목록만 보여줍니다.
+
+    질의는 그대로 AI에게 넘기기만 하는 게 아니라, 먼저 지역·동행자·목적을 뽑아
+    (parse_query) 지역은 후보 검색 범위로, 동행자·목적은 추천 조건으로 씁니다.
+    무엇으로 이해했는지는 응답의 parsed에 담아 앱이 보여줄 수 있게 합니다.
     """
-    candidates = await tour_api_client.search_accessible_attractions(
-        region=request.region, user_type=request.user_type.value, limit=25, sigungu_cd=request.sigungu_cd
+    candidates, parsed = await _candidates_with_conditions(
+        request.query_text, request.user_type.value, request.region, request.sigungu_cd
     )
     try:
-        selected = await recommend_places(request, candidates)
+        selected = await recommend_places(request, candidates, parsed)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    return PlaceRecommendationResponse(query_text=request.query_text, candidates=selected)
+    return PlaceRecommendationResponse(
+        query_text=request.query_text, candidates=selected, parsed=parsed
+    )
 
 
 @courses_router.post("/generate-from-selection", response_model=CourseResponse)
@@ -77,20 +137,39 @@ async def create_course_from_selection(
     2단계: 1단계 추천 목록에서 사용자가 직접 고른 장소들로 최종 코스(순서/시간대)를 생성합니다.
     로그인한 사용자면 자동으로 기록되지만, 결과 화면에서 여행에 저장해야
     마이페이지 목록에 나타납니다.
+
+    코스를 짜기 전에 두 가지를 채웁니다.
+    - 질의에서 뽑아낸 조건(지역/동행자/목적) — 1단계와 같은 해석을 씁니다.
+    - 고른 장소들의 날짜별 혼잡도 예보 — 붐비는 곳을 한산한 시간대로 옮기려면
+      실제 혼잡도 값이 있어야 합니다.
     """
-    candidates = await tour_api_client.search_accessible_attractions(
-        region=request.region, user_type=request.user_type.value, limit=25, sigungu_cd=request.sigungu_cd
+    candidates, parsed = await _candidates_with_conditions(
+        request.query_text, request.user_type.value, request.region, request.sigungu_cd
     )
     by_id = {a.content_id: a for a in candidates}
-    selected_attractions = [
-        by_id[cid] for cid in request.selected_content_ids if cid in by_id
-    ]
+
+    selected_attractions: list[Attraction] = []
+    for content_id in request.selected_content_ids:
+        found = by_id.get(content_id)
+        if found is not None:
+            selected_attractions.append(found)
+            continue
+        # 후보 목록에 없으면 단건으로 직접 불러옵니다. 1단계와 2단계 사이에 후보
+        # 구성이 조금만 달라져도(평점 변동에 따른 정렬 변화 등) 방금 고른 장소가
+        # 통째로 빠지면서 "다시 불러오지 못했습니다"가 뜨던 문제를 막습니다.
+        detail = await tour_api_client.get_attraction_detail(content_id)
+        if detail is None:
+            logger.warning("선택한 관광지를 불러오지 못했습니다 (content_id=%s)", content_id)
+            continue
+        selected_attractions.append(detail)
 
     if not selected_attractions:
         raise HTTPException(status_code=422, detail="선택하신 관광지 정보를 다시 불러오지 못했습니다. 다시 시도해주세요.")
 
+    await tour_api_client.fill_congestion_forecasts(selected_attractions)
+
     try:
-        course = await generate_course_from_selection(request, selected_attractions)
+        course = await generate_course_from_selection(request, selected_attractions, parsed)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -114,11 +193,12 @@ async def create_course(
     한 달쯤 뒤 이 로그가 한 번도 안 찍혔으면 그때 안심하고 지우면 됩니다.
     """
     print(f"[legacy] POST /api/courses/generate 호출됨 (user_id={user_id})")
-    candidates = await tour_api_client.search_accessible_attractions(
-        region=request.region, user_type=request.user_type.value, limit=25
+    candidates, parsed = await _candidates_with_conditions(
+        request.query_text, request.user_type.value, request.region, None
     )
+    await tour_api_client.fill_congestion_forecasts(candidates[: request.max_stops])
     try:
-        course = await generate_course(request, candidates)
+        course = await generate_course(request, candidates, parsed)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 

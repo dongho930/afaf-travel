@@ -2471,6 +2471,51 @@ class TourApiClient:
             return []
         return [CongestionForecast(**f) for f in (row.get("forecast") or [])]
 
+    async def fill_congestion_forecasts(self, attractions: list[Attraction]) -> int:
+        """
+        여러 관광지의 날짜별 혼잡도 예보를 캐시에서 한 번에 읽어 채웁니다.
+
+        코스 생성(2단계)에서 씁니다. 예전에는 코스를 짤 때 혼잡도 예보를 아무도
+        채우지 않아서, AI에게 넘어가는 congestion_forecast가 항상 빈 배열이었고
+        "혼잡도가 낮은 시간대를 우선 배치하라"는 지시가 사실상 아무 근거 없이
+        동작했습니다.
+
+        - 캐시(attraction_forecast_cache)만 읽습니다. 여기서 공공데이터 API를
+          부르면 코스 생성이 일일 예산과 응답 속도에 묶이게 됩니다. 캐시는 자정
+          갱신(refresh_forecast_cache)이 채웁니다.
+        - 지난 날짜는 코스를 짜는 데 쓸모가 없어서 오늘 이후만 남깁니다.
+        - 캐시를 못 읽어도(DB 일시 장애) 예보 없이 코스는 만들 수 있어야 하므로
+          조용히 넘어갑니다.
+
+        반환값은 예보를 실제로 채운 관광지 수입니다(로그/진단용).
+        """
+        if not attractions or self.use_mock:
+            return 0
+
+        content_ids = [a.content_id for a in attractions if a.content_id]
+        if not content_ids:
+            return 0
+
+        cached = await _optional_cache(get_cached_forecast(content_ids), {}, "혼잡도 예보")
+        if not cached:
+            return 0
+
+        today = datetime.date.today().isoformat()
+        filled = 0
+        for attraction in attractions:
+            row = cached.get(attraction.content_id)
+            if not row:
+                continue
+            upcoming = [
+                CongestionForecast(**f)
+                for f in (row.get("forecast") or [])
+                if str(f.get("date") or "") >= today
+            ]
+            if upcoming:
+                attraction.congestion_forecast = sorted(upcoming, key=lambda c: c.date)
+                filled += 1
+        return filled
+
     async def refresh_forecast_cache(self, region: str) -> dict:
         """
         상세 페이지의 날짜별 혼잡도를 미리 채웁니다 (자정 갱신용).

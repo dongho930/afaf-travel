@@ -107,8 +107,17 @@ export default function PlannerScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const styles = makeStyles(colors);
-  const { userType, setUserType, sigunguCd, sigunguName, setRegion, setRecommendations, setPendingQueryText, pendingQueryText } =
-    useCourseContext();
+  const {
+    userType,
+    setUserType,
+    sigunguCd,
+    sigunguName,
+    setRegion,
+    setRecommendations,
+    setPendingQueryText,
+    pendingQueryText,
+    setParsedQuery,
+  } = useCourseContext();
   const [queryText, setQueryText] = useState(pendingQueryText || "");
   const [isListening, setIsListening] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -159,12 +168,14 @@ export default function PlannerScreen() {
     }
     setIsSubmitting(true);
     try {
-      const { candidates } = await api.recommendPlaces({ queryText, userType, sigunguCd });
+      const { candidates, parsed } = await api.recommendPlaces({ queryText, userType, sigunguCd });
       if (candidates.length === 0) {
         Alert.alert("추천 결과 없음", "조건에 맞는 장소를 찾지 못했어요. 다른 표현으로 다시 시도해주세요.");
         return;
       }
       setRecommendations(candidates);
+      // 서버가 문장에서 읽어낸 조건(지역/동행자/목적)을 다음 화면에서 보여줍니다.
+      setParsedQuery(parsed ?? null);
       setPendingQueryText(queryText);
       router.push("/select");
     } catch (err) {

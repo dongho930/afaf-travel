@@ -13,6 +13,7 @@ import {
   MyReportItem,
   MyReviewItem,
   NearbyAttraction,
+  ParsedQuery,
   PlaceCandidate,
   PostComment,
   PostItem,
@@ -112,7 +113,7 @@ export const api = {
     region?: string;
     sigunguCd?: number | null;
   }) =>
-    request<{ query_text: string; candidates: PlaceCandidate[] }>("/api/courses/recommend", {
+    request<{ query_text: string; candidates: PlaceCandidate[]; parsed: ParsedQuery | null }>("/api/courses/recommend", {
       method: "POST",
       body: JSON.stringify({
         query_text: params.queryText,

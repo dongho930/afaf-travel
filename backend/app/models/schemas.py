@@ -14,6 +14,48 @@ class UserType(str, Enum):
     GENERAL = "general"                # 일반 (참고용 기본값)
 
 
+class CompanionType(str, Enum):
+    """누구와 가는 여행인지. 질의에서 읽어내지 못하면 UNSPECIFIED."""
+    FAMILY = "가족"
+    COUPLE = "커플"
+    FRIENDS = "친구"
+    SOLO = "혼자"
+    UNSPECIFIED = "미지정"
+
+
+class TravelPurpose(str, Enum):
+    """무엇을 하러 가는 여행인지. 한 질의에 여러 개가 나올 수 있습니다."""
+    REST = "휴식"
+    NATURE = "자연"
+    CULTURE = "문화예술"
+    HISTORY = "역사"
+    FOOD = "식도락"
+    ACTIVITY = "체험"
+    SHOPPING = "쇼핑"
+    PHOTO = "사진"
+
+
+class ParsedQuery(BaseModel):
+    """
+    자연어 질의에서 뽑아낸 여행 조건.
+
+    지역/동행자/목적을 AI가 읽어내고(실패하면 규칙 기반으로 대체), 지역은
+    실제 시군구 코드까지 변환해 후보 검색에 그대로 씁니다.
+    """
+    region_text: Optional[str] = Field(default=None, description="질의에서 읽어낸 지역 표현 (예: '수원', '성남 분당')")
+    sigungu_cds: list[int] = Field(default_factory=list, description="region_text를 변환한 법정동 시군구코드 목록")
+    region_source: Literal["user_selected", "query_text", "none"] = Field(
+        default="none",
+        description="실제 후보 검색에 쓰인 지역이 어디서 왔는지 (직접 선택 / 질의에서 추출 / 지역 제한 없음)",
+    )
+    companion: CompanionType = CompanionType.UNSPECIFIED
+    purposes: list[TravelPurpose] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list, description="지역·동행자·목적 외에 남는 핵심 표현 (예: '산책로')")
+    parsed_by: Literal["ai", "rule"] = Field(
+        default="rule", description="AI가 파싱했는지, 규칙 기반 대체 로직이 파싱했는지"
+    )
+
+
 class AccessibilityFeatures(BaseModel):
     """무장애 여행 정보 API 응답을 매핑한 편의시설 정보"""
     has_ramp: bool = False                  # 경사로
@@ -124,7 +166,11 @@ class CourseRequest(BaseModel):
     user_type: UserType = UserType.GENERAL
     region: str = "경기도"
     preferred_date: Optional[str] = None
-    max_stops: int = Field(default=5, ge=1, le=10)
+    # 상한이 10이던 시절에는, 1단계가 최대 12곳까지 추천하는데 사용자가 11곳
+    # 이상을 고르면 2단계가 max_stops=11로 이 모델을 만들다가 검증 오류로
+    # 실패했습니다("Input should be less than or equal to 10"). 1단계 추천
+    # 개수보다 넉넉하게 잡아둡니다.
+    max_stops: int = Field(default=5, ge=1, le=20)
 
 
 class PlaceRecommendationRequest(BaseModel):
@@ -144,6 +190,10 @@ class PlaceCandidate(BaseModel):
 class PlaceRecommendationResponse(BaseModel):
     query_text: str
     candidates: list[PlaceCandidate]
+    # 질의에서 읽어낸 조건(지역/동행자/목적). 앱이 "무엇으로 이해했는지"를 그대로
+    # 보여줄 수 있게 함께 내려보냅니다 — 특히 지역은 질의에서 추출한 경우
+    # 결과 범위가 달라지므로, 사용자가 확인할 수 있어야 합니다.
+    parsed: Optional[ParsedQuery] = None
 
 
 class GenerateFromSelectionRequest(BaseModel):

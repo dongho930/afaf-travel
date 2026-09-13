@@ -324,3 +324,83 @@ def area_code_for_signgu(code: int) -> int | None:
         if signgu_cd == code:
             return area_cd
     return None
+
+
+# 행정구역명에는 없지만 사람들이 지역을 가리킬 때 실제로 더 자주 쓰는 이름들.
+# "분당 갈 만한 곳"처럼 시 이름 없이 동네 이름만 적는 경우를 위한 최소한의 표입니다
+# (시/군/구 이름이 하나도 안 잡혔을 때만 씁니다).
+_COLLOQUIAL_AREA_ALIASES: dict[str, list[int]] = {
+    "분당": [41135],          # 성남시 분당구
+    "판교": [41135],          # 성남시 분당구
+    "일산": [41285, 41287],   # 고양시 일산동구·일산서구
+    "동탄": [41590],          # 화성시
+    "평촌": [41173],          # 안양시 동안구
+    "광교": [41117],          # 수원시 영통구 (광교호수공원 등)
+}
+
+# 시 이름을 글자 그대로 품고 있지만 지역을 가리키지는 않는 말들.
+# 먼저 지워두지 않으면 "고양이 카페"가 고양시로, "안성맞춤"이 안성시로 잡힙니다.
+_NOT_REGION_WORDS: tuple[str, ...] = ("고양이", "안성맞춤")
+
+# 다른 시 이름을 품은 관광지 이름. '수원화성'은 화성시가 아니라 수원시에 있는
+# 곳이라, 관광지 이름이 나오면 실제 소재지로 바꿔서 읽습니다.
+_ATTRACTION_CITY_HINTS: dict[str, str] = {
+    "수원화성": "수원시",
+    "화성행궁": "수원시",
+    "화성어차": "수원시",
+}
+
+
+def resolve_sigungu_codes(text: str, area_nm: str = "경기도") -> list[int]:
+    """
+    "수원에서 갈 만한 곳" 같은 자연어에서 시/군/구 코드를 찾아냅니다.
+
+    - 시 이름만 나오면 그 시의 모든 구를 반환합니다 ('수원' -> 장안·권선·팔달·영통).
+    - 구 이름이 함께 나오면 그 구로 좁힙니다 ('수원 팔달' -> 팔달구 하나).
+    - 구 이름만 단독으로 쓰는 건 위험해서(예: "하루 동안"의 '동안'이 안양시
+      동안구로 잡힘) 시 이름이 함께 있을 때만 인정하고, 대신 '분당·일산'처럼
+      널리 쓰이는 동네 이름만 별도 표(_COLLOQUIAL_AREA_ALIASES)로 처리합니다.
+    - 긴 이름부터 확인하고 매칭된 자리는 지워서, '남양주'가 '양주'로도 잡히는
+      문제를 막습니다.
+    - '고양이', '수원화성'처럼 시 이름을 글자로만 품은 말은 먼저 정리합니다.
+
+    찾지 못하면 빈 목록을 반환합니다(= 지역 제한 없음).
+    """
+    if not text:
+        return []
+
+    compact = text.replace(" ", "")
+    for name, city in _ATTRACTION_CITY_HINTS.items():
+        compact = compact.replace(name, city)
+    for word in _NOT_REGION_WORDS:
+        compact = compact.replace(word, "·")
+
+    # 시 이름 -> [(시군구코드, 구 이름 앞부분)] (예: '수원' -> [(41111, '장안'), ...])
+    by_city: dict[str, list[tuple[int, str | None]]] = {}
+    for _, signgu_cd, signgu_nm in list_area_signgu_by_area(area_nm):
+        parts = signgu_nm.split()
+        city_base = parts[0][:-1] if parts[0][-1] in "시군구" else parts[0]
+        district_base = None
+        if len(parts) > 1:
+            district_base = parts[1][:-1] if parts[1][-1] in "시군구" else parts[1]
+        by_city.setdefault(city_base, []).append((signgu_cd, district_base))
+
+    remaining = compact
+    matched_cities: list[str] = []
+    for city_base in sorted(by_city, key=len, reverse=True):
+        if city_base and city_base in remaining:
+            matched_cities.append(city_base)
+            remaining = remaining.replace(city_base, "·")
+
+    codes: list[int] = []
+    for city_base in matched_cities:
+        entries = by_city[city_base]
+        narrowed = [code for code, district in entries if district and district in compact]
+        codes.extend(narrowed or [code for code, _ in entries])
+
+    if not codes and area_nm == "경기도":
+        for alias, alias_codes in _COLLOQUIAL_AREA_ALIASES.items():
+            if alias in compact:
+                codes.extend(alias_codes)
+
+    return sorted(set(codes))

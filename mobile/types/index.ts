@@ -84,6 +84,21 @@ export interface PlaceCandidate {
   reason: string;
 }
 
+/**
+ * 서버가 자연어 질의에서 읽어낸 조건. "무엇으로 이해했는지"를 사용자에게 그대로
+ * 보여주기 위해 받아옵니다 — 특히 지역은 질의에서 뽑아낸 경우 결과 범위가
+ * 달라지므로, 화면에 표시해줘야 사용자가 결과를 오해하지 않습니다.
+ */
+export interface ParsedQuery {
+  region_text: string | null;
+  sigungu_cds: number[];
+  region_source: "user_selected" | "query_text" | "none";
+  companion: "가족" | "커플" | "친구" | "혼자" | "미지정";
+  purposes: string[];
+  keywords: string[];
+  parsed_by: "ai" | "rule";
+}
+
 export interface RegionOption {
   code: number;
   name: string;

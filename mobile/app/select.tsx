@@ -37,7 +37,8 @@ export default function SelectPlacesScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const styles = makeStyles(colors);
-  const { userType, sigunguCd, recommendations, pendingQueryText, setCourse } = useCourseContext();
+  const { userType, sigunguCd, recommendations, pendingQueryText, parsedQuery, setCourse } =
+    useCourseContext();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
   // 홈 화면 카드와 같은 부가 정보(이용시간/요금 등). 추천 후보 응답에는 안
@@ -112,6 +113,14 @@ export default function SelectPlacesScreen() {
 
   // 상단 바와 제목은 목록의 맨 위 콘텐츠로 넣습니다 — 그래야 홈 화면처럼
   // 스크롤을 내릴 때 목록과 함께 위로 밀려 사라집니다.
+  // 문장에서 읽어낸 조건을 칩으로 보여줍니다. 특히 지역은 화면에서 고르지 않아도
+  // 문장만으로 좁혀지기 때문에, 무엇으로 찾았는지 보이지 않으면 결과를 오해합니다.
+  const conditionChips: string[] = [
+    ...(parsedQuery?.region_text ? [parsedQuery.region_text] : []),
+    ...(parsedQuery && parsedQuery.companion !== "미지정" ? [parsedQuery.companion] : []),
+    ...(parsedQuery?.purposes ?? []),
+  ];
+
   const listHeader = (
     <>
       <ScreenHeader title="장소 선택하기" style={styles.listHeaderBar} />
@@ -119,6 +128,22 @@ export default function SelectPlacesScreen() {
       <Text style={styles.subtitle}>
         "{pendingQueryText}" 요청에 맞춰 추천된 장소예요. 선택한 곳들로 코스를 만들어드려요.
       </Text>
+      {conditionChips.length > 0 && (
+        <View
+          style={styles.conditionRow}
+          accessibilityRole="text"
+          accessibilityLabel={`이렇게 이해했어요: ${conditionChips.join(", ")}`}
+        >
+          <Text style={styles.conditionLabel}>이렇게 이해했어요</Text>
+          <View style={styles.conditionChips}>
+            {conditionChips.map((chip) => (
+              <View key={chip} style={styles.conditionChip}>
+                <Text style={styles.conditionChipText}>{chip}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
     </>
   );
 
@@ -254,7 +279,23 @@ function makeStyles(colors: ThemeColors) {
   listHeaderBar: { marginBottom: spacing.md },
   standaloneHeader: { paddingHorizontal: spacing.xl - 4, paddingTop: spacing.md },
   title: { fontSize: 21, fontFamily: fontFamily.bold, color: colors.text, marginBottom: spacing.xs },
-  subtitle: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginBottom: spacing.lg, lineHeight: 18 },
+  subtitle: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginBottom: spacing.sm + 2, lineHeight: 18 },
+  // 질의에서 읽어낸 조건(지역/동행자/목적) 표시줄
+  conditionRow: { marginBottom: spacing.lg },
+  conditionLabel: {
+    fontSize: 11,
+    fontFamily: fontFamily.semiBold,
+    color: colors.textTertiary,
+    marginBottom: spacing.xs,
+  },
+  conditionChips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
+  conditionChip: {
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primaryLight,
+  },
+  conditionChipText: { fontSize: 12, fontFamily: fontFamily.semiBold, color: colors.primaryDark },
   card: {
     backgroundColor: colors.surface,
     borderRadius: radius.xl,

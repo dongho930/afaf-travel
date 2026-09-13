@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState } from "react";
-import { CourseResponse, PlaceCandidate, UserType } from "../types";
+import { CourseResponse, ParsedQuery, PlaceCandidate, UserType } from "../types";
 
 interface CourseContextValue {
   userType: UserType;
@@ -17,6 +17,11 @@ interface CourseContextValue {
   setRecommendations: (r: PlaceCandidate[]) => void;
   pendingQueryText: string;
   setPendingQueryText: (q: string) => void;
+
+  // 서버가 질의에서 읽어낸 조건(지역/동행자/목적). 장소 선택 화면에서 "이렇게
+  // 이해했어요"로 보여주기 위해 1단계 응답에서 받아 함께 넘깁니다.
+  parsedQuery: ParsedQuery | null;
+  setParsedQuery: (p: ParsedQuery | null) => void;
 }
 
 const CourseContext = createContext<CourseContextValue | undefined>(undefined);
@@ -28,6 +33,7 @@ export function CourseProvider({ children }: { children: React.ReactNode }) {
   const [sigunguName, setSigunguName] = useState<string | null>(null);
   const [recommendations, setRecommendations] = useState<PlaceCandidate[]>([]);
   const [pendingQueryText, setPendingQueryText] = useState("");
+  const [parsedQuery, setParsedQuery] = useState<ParsedQuery | null>(null);
 
   const setRegion = (cd: number | null, name: string | null) => {
     setSigunguCd(cd);
@@ -48,6 +54,8 @@ export function CourseProvider({ children }: { children: React.ReactNode }) {
         setRecommendations,
         pendingQueryText,
         setPendingQueryText,
+        parsedQuery,
+        setParsedQuery,
       }}
     >
       {children}
