@@ -701,7 +701,15 @@ export default function TripsScreen() {
           const alreadyShown = animatedRowIdsRef.current.has(rowKey);
           animatedRowIdsRef.current.add(rowKey);
           const node = renderItem(info);
-          return alreadyShown ? node : <FadeInView duration={250}>{node}</FadeInView>;
+          // 이미 나타난 행은 애니메이션만 끄고 래퍼는 그대로 둡니다. 조건에 따라
+          // FadeInView를 뺐다 끼웠다 하면, 목록 바깥 상태가 바뀌어 다시 그릴 때마다
+          // 행이 통째로 다시 마운트되면서 화면이 한 번 깜빡입니다(게시물 탭에서
+          // '더보기'를 처음 누를 때 나던 증상과 같은 원인입니다).
+          return (
+            <FadeInView duration={250} animate={!alreadyShown}>
+              {node}
+            </FadeInView>
+          );
         }}
       />
 

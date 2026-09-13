@@ -167,15 +167,19 @@ export default function PostsScreen() {
         renderItem={({ item }) => {
           const alreadyShown = animatedPostIdsRef.current.has(item.id);
           animatedPostIdsRef.current.add(item.id);
-          const card = (
-            <PostCard
-              item={item}
-              bodyNumberOfLines={4}
-              bodyExpanded={expandedPostIds.has(item.id)}
-              onToggleBody={() => toggleBodyExpanded(item.id)}
-            />
+          // 이미 한 번 나타난 카드는 애니메이션만 끄고, 감싸는 구조는 그대로 둡니다.
+          // 조건에 따라 FadeInView를 뺐다 끼웠다 하면 '더보기'를 처음 누를 때
+          // 카드가 통째로 다시 마운트되면서 화면이 한 번 깜빡였습니다.
+          return (
+            <FadeInView duration={300} animate={!alreadyShown}>
+              <PostCard
+                item={item}
+                bodyNumberOfLines={4}
+                bodyExpanded={expandedPostIds.has(item.id)}
+                onToggleBody={() => toggleBodyExpanded(item.id)}
+              />
+            </FadeInView>
           );
-          return alreadyShown ? card : <FadeInView duration={300}>{card}</FadeInView>;
         }}
       />
 

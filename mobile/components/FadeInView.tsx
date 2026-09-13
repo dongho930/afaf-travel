@@ -12,6 +12,7 @@ export function FadeInView({
   style,
   accessible,
   accessibilityLabel,
+  animate = true,
 }: {
   children: React.ReactNode;
   duration?: number;
@@ -21,10 +22,15 @@ export function FadeInView({
   // 읽어주고 싶을 때(예: 홈 화면 통계 카드) 여기로 이름표를 넘깁니다.
   accessible?: boolean;
   accessibilityLabel?: string;
+  // false면 애니메이션 없이 처음부터 보이는 상태로 그립니다. 이미 한 번 나타난
+  // 항목에 씁니다 — 조건에 따라 이 래퍼를 뺐다 끼웠다 하면 안쪽 내용이 통째로
+  // 다시 마운트되면서 화면이 깜빡이기 때문에, 래퍼는 항상 두고 이 값만 바꿉니다.
+  animate?: boolean;
 }) {
-  const progress = useRef(new Animated.Value(0)).current;
+  const progress = useRef(new Animated.Value(animate ? 0 : 1)).current;
 
   useEffect(() => {
+    if (!animate) return;
     Animated.timing(progress, { toValue: 1, duration, useNativeDriver: true }).start();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
