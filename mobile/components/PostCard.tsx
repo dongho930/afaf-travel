@@ -1,7 +1,18 @@
 import { useRouter } from "expo-router";
 import { CaretDownIcon, CaretUpIcon, ChatCircleTextIcon, XIcon } from "phosphor-react-native";
 import React, { useState } from "react";
-import { ActivityIndicator, LayoutChangeEvent, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator,
+  LayoutChangeEvent,
+  NativeSyntheticEvent,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TextLayoutEventData,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
@@ -13,18 +24,59 @@ import { PostComment, PostItem } from "../types";
 import { FadeImage } from "./FadeImage";
 import { PhotoCarousel } from "./PhotoCarousel";
 
+// 웹에서 본문이 잘렸는지 어림잡을 때 쓰는 한 줄당 글자 수. 카드 폭(모바일 기준)에
+// 14px 글자가 대략 이만큼 들어갑니다. 네이티브는 실제 줄 수를 재므로 쓰이지 않습니다.
+const _CHARS_PER_LINE = 22;
+
+/**
+ * 웹용 줄 수 어림값. react-native-web에는 onTextLayout이 없어서 실제 줄 수를 잴
+ * 방법이 없습니다. 잘렸는데 '더보기'가 안 뜨는 쪽이 더 나쁘므로, 한 줄에 들어가는
+ * 글자 수를 넉넉히 잡아(=줄 수를 크게 세어) 버튼이 빠지지 않도록 합니다.
+ */
+function estimateLineCount(text: string): number {
+  return text
+    .split("\n")
+    .reduce((total, line) => total + Math.max(1, Math.ceil(line.length / _CHARS_PER_LINE)), 0);
+}
+
 /**
  * 게시물 피드 카드(사진+글+댓글). 게시물 탭 피드와 '게시물 관리'의 팝업에서
  * 공통으로 씁니다. 댓글은 다른 화면으로 이동하지 않고, '댓글' 줄을 누르면
  * 카드 바로 아래에 펼쳐집니다(flat list + parent_comment_id 그룹핑 방식).
+ *
+ * bodyNumberOfLines를 주면 본문을 그 줄 수까지만 보여주고, 실제로 잘린 경우에만
+ * '더보기'를 답니다(게시물 탭 피드). 값을 안 주면 지금까지처럼 전문이 보입니다
+ * (게시물 관리 팝업, 관광지 상세의 게시물 팝업).
+ *
+ * 펼침 상태는 기본적으로 카드가 스스로 들고 있지만, bodyExpanded/onToggleBody를
+ * 넘기면 부모가 대신 들고 있습니다. 긴 목록에서는 화면 밖으로 나간 카드가
+ * 정리되면서 카드 안의 상태가 사라지기 때문에, 게시물 탭은 부모가 들고 있습니다.
  */
-export function PostCard({ item, bodyNumberOfLines }: { item: PostItem; bodyNumberOfLines?: number }) {
+export function PostCard({
+  item,
+  bodyNumberOfLines,
+  bodyExpanded,
+  onToggleBody,
+}: {
+  item: PostItem;
+  bodyNumberOfLines?: number;
+  bodyExpanded?: boolean;
+  onToggleBody?: () => void;
+}) {
   const router = useRouter();
   const { session } = useAuth();
   const { colors } = useTheme();
   const styles = makeStyles(colors);
 
   const [photoWidth, setPhotoWidth] = useState(0);
+
+  // 본문 접기/펼치기 (아래 expanded는 댓글 영역 토글이라 이름이 다릅니다).
+  // 부모가 상태를 넘겨주면 그것을 따르고, 아니면 카드가 스스로 들고 있습니다.
+  const [ownBodyExpanded, setOwnBodyExpanded] = useState(false);
+  const isBodyExpanded = bodyExpanded ?? ownBodyExpanded;
+  const toggleBody = onToggleBody ?? (() => setOwnBodyExpanded((prev) => !prev));
+  // 네이티브에서 실제로 잰 본문 줄 수. null이면 아직 재기 전입니다.
+  const [measuredLineCount, setMeasuredLineCount] = useState<number | null>(null);
 
   const [expanded, setExpanded] = useState(false);
   const [commentsLoaded, setCommentsLoaded] = useState(false);
@@ -38,6 +90,19 @@ export function PostCard({ item, bodyNumberOfLines }: { item: PostItem; bodyNumb
 
   const handlePhotoAreaLayout = (e: LayoutChangeEvent) => {
     setPhotoWidth(e.nativeEvent.layout.width);
+  };
+
+  // 줄 수 제한이 걸린 화면(게시물 탭)에서만 접기/펼치기가 동작합니다.
+  const clampLines = bodyNumberOfLines ?? 0;
+  const isClampable = clampLines > 0;
+  // 네이티브는 실제로 잰 값을, 웹은 어림값을 씁니다. 아직 재기 전(null)에는
+  // 버튼을 띄우지 않습니다 — 잠깐 나타났다 사라지면 더 어수선합니다.
+  const bodyLineCount =
+    Platform.OS === "web" ? estimateLineCount(item.body) : measuredLineCount;
+  const isTruncated = isClampable && (bodyLineCount ?? 0) > clampLines;
+
+  const handleBodyTextLayout = (e: NativeSyntheticEvent<TextLayoutEventData>) => {
+    setMeasuredLineCount(e.nativeEvent.lines.length);
   };
 
   const toggleExpanded = () => {
@@ -142,9 +207,35 @@ export function PostCard({ item, bodyNumberOfLines }: { item: PostItem; bodyNumb
               </Text>
             </View>
           </View>
-          <Text style={styles.body} numberOfLines={bodyNumberOfLines}>
+          <Text style={styles.body} numberOfLines={isBodyExpanded ? undefined : bodyNumberOfLines}>
             {item.body}
           </Text>
+
+          {/* 잘렸는지 알려면 줄 수 제한 없이 그린 높이를 재봐야 합니다. 눈에 보이지
+              않게 겹쳐 그린 뒤 한 번 재고 나면 사라져서, 이후에는 비용이 없습니다.
+              (웹은 onTextLayout이 없어 글자 수로 어림잡습니다) */}
+          {isClampable && measuredLineCount === null && Platform.OS !== "web" && (
+            <Text
+              style={[styles.body, styles.bodyMeasure]}
+              onTextLayout={handleBodyTextLayout}
+              pointerEvents="none"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
+              {item.body}
+            </Text>
+          )}
+
+          {isTruncated && (
+            <TouchableOpacity
+              onPress={toggleBody}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={isBodyExpanded ? "게시물 접기" : "게시물 전체 보기"}
+            >
+              <Text style={styles.moreButtonText}>{isBodyExpanded ? "접기" : "더보기"}</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -234,6 +325,15 @@ function makeStyles(colors: ThemeColors) {
     username: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.text },
     placeName: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary, marginTop: 1 },
     body: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.text, lineHeight: 20 },
+    // 줄 수를 재기 위해서만 그리는 사본 — 화면에는 보이지 않고 카드 높이에도
+    // 영향을 주지 않도록 절대 위치로 겹쳐 둡니다.
+    bodyMeasure: { position: "absolute", left: 0, right: 0, opacity: 0 },
+    moreButtonText: {
+      marginTop: spacing.xs,
+      fontSize: 13,
+      fontFamily: fontFamily.semiBold,
+      color: colors.textSecondary,
+    },
 
     commentToggleRow: {
       flexDirection: "row",

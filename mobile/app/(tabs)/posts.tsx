@@ -41,6 +41,22 @@ export default function PostsScreen() {
   // 페이드인돼서 '새로고침된 것처럼' 보이므로 비우지 않습니다. 새로 올라온
   // 게시물은 id가 여기 없으니 자연스럽게 페이드인됩니다.)
   const animatedPostIdsRef = useRef<Set<string>>(new Set());
+  // 본문을 펼쳐 놓은 게시물 id. 카드가 스스로 들고 있으면, 스크롤로 화면 밖에
+  // 나갔다가 돌아왔을 때(FlatList가 그 카드를 정리했다가 다시 그리면서) 도로
+  // 접혀버립니다. 그래서 탭이 대신 들고 있습니다.
+  const [expandedPostIds, setExpandedPostIds] = useState<Set<string>>(new Set());
+
+  const toggleBodyExpanded = useCallback((postId: string) => {
+    setExpandedPostIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(postId)) {
+        next.delete(postId);
+      } else {
+        next.add(postId);
+      }
+      return next;
+    });
+  }, []);
   // 이 탭을 한 번이라도 불러온 적이 있는지. 처음에만 로딩 화면을 보여주고,
   // 그 뒤로는 보고 있던 목록을 그대로 둔 채 조용히 갱신하기 위해 씁니다.
   const hasLoadedRef = useRef(false);
@@ -145,16 +161,21 @@ export default function PostsScreen() {
             <Text style={styles.emptyHint}>첫 게시물을 남겨보세요!</Text>
           </View>
         }
+        // 펼친 게시물이 바뀌면 목록도 다시 그려야 합니다 (FlatList는 data가 그대로면
+        // 바깥 상태가 바뀐 걸 모릅니다).
+        extraData={expandedPostIds}
         renderItem={({ item }) => {
           const alreadyShown = animatedPostIdsRef.current.has(item.id);
           animatedPostIdsRef.current.add(item.id);
-          return alreadyShown ? (
-            <PostCard item={item} bodyNumberOfLines={4} />
-          ) : (
-            <FadeInView duration={300}>
-              <PostCard item={item} bodyNumberOfLines={4} />
-            </FadeInView>
+          const card = (
+            <PostCard
+              item={item}
+              bodyNumberOfLines={4}
+              bodyExpanded={expandedPostIds.has(item.id)}
+              onToggleBody={() => toggleBodyExpanded(item.id)}
+            />
           );
+          return alreadyShown ? card : <FadeInView duration={300}>{card}</FadeInView>;
         }}
       />
 
