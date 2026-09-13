@@ -24,12 +24,14 @@ user_id가 함께 오면(로그인한 사용자) 그 코스를 해당 사용자 
 from typing import Optional
 
 import datetime
+import re
+import uuid
 
 from app.config import get_settings
 from app.models.schemas import Attraction, CourseResponse, CourseStop
 from app.services.db import execute as _execute
 from app.services.memory_cache import TTLCache
-from app.services.schedule import build_schedule
+from app.services.schedule import build_schedule, next_day_of
 
 settings = get_settings()
 
@@ -306,6 +308,9 @@ def _rebuild_arrival_times(stops: list[dict]) -> None:
         stop["recommended_arrival_time"] = scheduled.arrival_time
         stop["time_note"] = scheduled.time_note
         # closed_note(방문일 휴무 경고)는 순서와 무관한 정보라 그대로 둡니다.
+        # 다만 '그날 갈 수 있는지'는 시각이 바뀌면 함께 바뀌므로, 순서 기준으로
+        # 다시 판단하되 이미 붙어 있던 휴무 경고는 그대로 반영합니다.
+        stop["fits_today"] = scheduled.fits_today and not stop.get("closed_note")
 
 
 async def update_course(
@@ -369,6 +374,107 @@ def row_to_course_response(row: dict) -> CourseResponse:
         stops=[CourseStop(**s) for s in row.get("stops") or []],
         generated_for=row["user_type"],
     )
+
+
+# "수원 나들이 (2일차)"처럼 제목 끝에 붙는 일차 표기.
+_DAY_SUFFIX_PATTERN = re.compile(r"\s*\((\d+)일차\)\s*$")
+
+
+def _next_day_title(title: str) -> str:
+    """
+    다음 날 코스의 제목. 이미 '(2일차)'가 붙어 있으면 숫자를 올립니다 —
+    한 코스를 두 번 나눠도 '(2일차) (2일차)'가 되지 않게 하기 위함입니다.
+    """
+    match = _DAY_SUFFIX_PATTERN.search(title)
+    if match:
+        return _DAY_SUFFIX_PATTERN.sub(f" ({int(match.group(1)) + 1}일차)", title)
+    return f"{title} (2일차)"
+
+
+def _reschedule_stops(stops: list[dict], visit_date: Optional[str]) -> list[dict]:
+    """
+    떼어낸 stops를 1번부터 다시 번호 매기고, 그 날짜 기준으로 시각을 다시 계산합니다.
+
+    날짜가 바뀌면 휴무일 판단도 달라지므로(월요일 휴관이던 곳이 화요일엔 정상),
+    closed_note까지 새로 계산합니다 — 순서만 바꾸는 _rebuild_arrival_times와
+    다른 점입니다.
+    """
+    renumbered = []
+    for index, stop in enumerate(stops, start=1):
+        copied = dict(stop)
+        copied["order"] = index
+        renumbered.append(copied)
+
+    try:
+        attractions = [Attraction(**stop["attraction"]) for stop in renumbered]
+    except Exception as e:
+        print(f"[supabase] 코스를 나누는 중 관광지 정보를 읽지 못해 시각은 그대로 둡니다: {e}")
+        return renumbered
+
+    for stop, scheduled in zip(renumbered, build_schedule(attractions, visit_date)):
+        stop["recommended_arrival_time"] = scheduled.arrival_time
+        stop["time_note"] = scheduled.time_note
+        stop["closed_note"] = scheduled.closed_note
+        stop["fits_today"] = scheduled.fits_today
+    return renumbered
+
+
+async def split_course(
+    course_id: str, user_id: str, from_order: int, visit_date: Optional[str] = None
+) -> tuple[Optional[dict], Optional[dict], Optional[str]]:
+    """
+    코스를 'from_order 앞'과 'from_order부터 끝까지' 둘로 나눕니다.
+
+    뒤쪽은 같은 여행에 속하는 새 코스로 저장하고, 하루 뒤 날짜로 시각과 휴무일을
+    다시 계산합니다 — 문 닫은 뒤 도착하거나 그날 쉬는 곳을 다음 날로 넘기기 위한
+    기능이라, 날짜가 바뀌면 판단도 다시 해야 하기 때문입니다.
+
+    반환: (그날 코스 행, 다음 날 코스 행, 오류 메시지)
+    """
+    if _client is None:
+        return None, None, "서버 설정 오류로 코스를 나눌 수 없어요."
+    try:
+        existing = await _execute(_client.table("courses").select("*").eq("id", course_id).limit(1))
+        rows = existing.data or []
+        if not rows or rows[0].get("user_id") != user_id:
+            return None, None, "해당 코스를 찾을 수 없거나 접근 권한이 없어요."
+
+        row = rows[0]
+        stops = row.get("stops") or []
+        if len(stops) < 2:
+            return None, None, "장소가 하나뿐이라 나눌 수 없어요."
+        if not 2 <= from_order <= len(stops):
+            return None, None, "첫 장소부터는 나눌 수 없어요. 순서를 바꾸거나 장소를 줄여보세요."
+
+        today_stops = _reschedule_stops(stops[: from_order - 1], visit_date)
+        next_visit_date = next_day_of(visit_date)
+        next_day_stops = _reschedule_stops(stops[from_order - 1 :], next_visit_date)
+
+        next_day_row = {
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "user_type": row.get("user_type"),
+            "query_text": row.get("query_text"),
+            "region": row.get("region"),
+            "title": _next_day_title(row.get("title") or "여행 코스"),
+            "summary": f"하루에 다 돌기 어려워 다음 날로 옮긴 {len(next_day_stops)}곳입니다.",
+            "stops": next_day_stops,
+            # 원본이 이미 여행에 저장돼 있으면 같은 여행에 함께 들어갑니다.
+            "trip_id": row.get("trip_id"),
+        }
+
+        await _execute(_client.table("courses").update({"stops": today_stops}).eq("id", course_id))
+        inserted = await _execute(_client.table("courses").insert(next_day_row))
+        inserted_rows = inserted.data or []
+        if not inserted_rows:
+            return None, None, "다음 날 코스를 만들지 못했어요."
+
+        today_row = dict(row)
+        today_row["stops"] = today_stops
+        return today_row, inserted_rows[0], None
+    except Exception as e:
+        print(f"[supabase] 코스 나누기 실패: {e}")
+        return None, None, "코스를 나누는 중 오류가 발생했어요."
 
 
 async def list_trip_courses(trip_id: str, user_id: str) -> list[dict]:

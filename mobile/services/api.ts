@@ -9,6 +9,7 @@ import {
   AttractionSearchResult,
   CourseCategory,
   CourseResponse,
+  CourseSplitResult,
   CreatedPost,
   MyReportItem,
   MyReviewItem,
@@ -209,6 +210,14 @@ export const api = {
     request<{ ok: boolean }>(`/api/courses/${courseId}`, { method: "DELETE" }),
 
   // 코스 제목 수정 및/또는 관광지 순서 변경 (stopOrder: 새 순서대로 나열한 content_id 목록)
+  // 하루에 다 돌 수 없는 코스를 fromOrder부터 끝까지 다음 날 코스로 나눕니다.
+  // 다음 날 코스는 하루 뒤 날짜로 시각·휴무일을 다시 계산해서 돌아옵니다.
+  splitCourse: (courseId: string, params: { fromOrder: number; visitDate?: string | null }) =>
+    request<CourseSplitResult>(`/api/courses/${courseId}/split`, {
+      method: "POST",
+      body: JSON.stringify({ from_order: params.fromOrder, visit_date: params.visitDate ?? null }),
+    }),
+
   updateCourse: (courseId: string, params: { title?: string; stopOrder?: string[] }) =>
     request<CourseResponse>(`/api/courses/${courseId}`, {
       method: "PATCH",

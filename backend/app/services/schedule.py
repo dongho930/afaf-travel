@@ -100,6 +100,9 @@ class StopSchedule:
     arrival_time: str          # "HH:MM"
     time_note: Optional[str] = None    # 영업시간 때문에 조정했을 때의 안내
     closed_note: Optional[str] = None  # 방문일이 휴무일 때의 경고
+    # 그날 안에 실제로 방문할 수 있는지. False면 '다음 날 코스로 나누기'를 제안합니다
+    # (문 닫은 뒤 도착 / 하루를 넘김 / 그날 휴무).
+    fits_today: bool = True
 
 
 def _to_minutes(hour: int, minute: int) -> Optional[int]:
@@ -286,20 +289,37 @@ def build_schedule(
             note = f"{_format(hours.open_min)} 문을 열어서 그 시간에 맞췄어요"
             current = hours.open_min
 
+        # 그날 안에 실제로 갈 수 있는지 — 셋 중 하나라도 걸리면 다음 날로 넘기는
+        # 편이 낫습니다. 휴무일도 포함하는 이유는, 다음 날이면 요일이 바뀌어
+        # 해결되는 경우가 많기 때문입니다(연속 휴무면 그때 다시 경고합니다).
+        fits_today = True
         if hours.close_min is not None and current >= hours.close_min:
             note = f"{_format(hours.close_min)}에 문을 닫아 도착 예정 시간에는 이용이 어려울 수 있어요"
+            fits_today = False
         elif current > _TOO_LATE_MIN:
             note = "앞 일정이 길어 하루 안에 모두 방문하기는 어려울 수 있어요"
+            fits_today = False
+
+        closed_note = _closed_note(hours, day)
+        if closed_note is not None:
+            fits_today = False
 
         schedules.append(
             StopSchedule(
                 arrival_time=_format(current),
                 time_note=note,
-                closed_note=_closed_note(hours, day),
+                closed_note=closed_note,
+                fits_today=fits_today,
             )
         )
 
     return schedules
+
+
+def next_day_of(visit_date: Optional[str]) -> Optional[str]:
+    """방문 예정일의 다음 날("YYYY-MM-DD"). 날짜를 모르거나 형식이 이상하면 None."""
+    day = _parse_visit_date(visit_date)
+    return (day + datetime.timedelta(days=1)).isoformat() if day else None
 
 
 def is_closed_on(attraction: Attraction, visit_date: Optional[str]) -> bool:

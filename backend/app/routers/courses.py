@@ -8,12 +8,14 @@ from app.models.schemas import (
     Attraction,
     CourseRequest,
     CourseResponse,
+    CourseSplitResponse,
     CourseStop,
     GenerateFromSelectionRequest,
     ParsedQuery,
     PlaceRecommendationRequest,
     PlaceRecommendationResponse,
     SaveCourseRequest,
+    SplitCourseRequest,
     SavedCourseDetail,
     SavedCourseSummary,
     TripCreateRequest,
@@ -46,11 +48,13 @@ from app.services.supabase_service import (
     mark_trip_as_visited,
     row_to_course_response,
     save_course,
+    split_course,
     unmark_trip_as_visited,
     update_course,
     update_trip,
     update_visited_place_date,
 )
+from app.services.schedule import next_day_of
 from app.services.tour_api import tour_api_client
 
 router = APIRouter(tags=["courses"])
@@ -338,6 +342,38 @@ async def update_course_endpoint(
     if row is None:
         raise HTTPException(status_code=404 if "찾을 수 없" in (error or "") else 422, detail=error)
     return row_to_course_response(row)
+
+
+@courses_router.post("/{course_id}/split", response_model=CourseSplitResponse)
+async def split_course_endpoint(
+    course_id: str,
+    request: SplitCourseRequest,
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """
+    하루에 다 돌 수 없는 코스를 둘로 나눕니다 — from_order부터 끝까지를 다음 날 코스로.
+
+    결과 화면에서 "문 닫은 뒤 도착" 또는 "그날 휴무"로 표시된 장소가 있을 때
+    쓰는 기능입니다. 다음 날 코스는 하루 뒤 날짜로 시각과 휴무일을 다시 계산하므로,
+    월요일 휴관이라 못 가던 곳이 화요일로 넘어가면 경고가 사라집니다.
+
+    원본이 이미 여행에 저장돼 있으면 새 코스도 같은 여행에 들어갑니다.
+    """
+    if not user_id:
+        raise HTTPException(status_code=401, detail="코스를 나누려면 로그인이 필요해요.")
+
+    today_row, next_day_row, error = await split_course(
+        course_id, user_id, request.from_order, request.visit_date
+    )
+    if today_row is None or next_day_row is None:
+        raise HTTPException(status_code=404 if "찾을 수 없" in (error or "") else 422, detail=error)
+
+    return CourseSplitResponse(
+        today=row_to_course_response(today_row),
+        next_day=row_to_course_response(next_day_row),
+        visit_date=request.visit_date,
+        next_visit_date=next_day_of(request.visit_date),
+    )
 
 
 @courses_router.get("/saved/{course_id}", response_model=SavedCourseDetail)

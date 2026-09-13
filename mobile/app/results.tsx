@@ -25,11 +25,11 @@ import { useAuth } from "../services/AuthContext";
 import { useCourseContext } from "../services/CourseContext";
 import { useTheme } from "../services/ThemeContext";
 import { storage } from "../services/storage";
-import { Attraction, CourseStop } from "../types";
+import { Attraction, CourseResponse, CourseStop } from "../types";
 
 export default function ResultsScreen() {
   const router = useRouter();
-  const { course, setCourse } = useCourseContext();
+  const { course, setCourse, visitDate } = useCourseContext();
   const { session } = useAuth();
   const { colors } = useTheme();
   const styles = makeStyles(colors);
@@ -37,6 +37,10 @@ export default function ResultsScreen() {
   const [saveModalVisible, setSaveModalVisible] = useState(false);
   const [orderChanged, setOrderChanged] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
+  // 하루에 다 못 도는 코스를 나눴을 때 생기는 '다음 날' 코스.
+  const [nextDayCourse, setNextDayCourse] = useState<CourseResponse | null>(null);
+  const [nextVisitDate, setNextVisitDate] = useState<string | null>(null);
+  const [splitting, setSplitting] = useState(false);
   // 홈 화면 카드와 같은 부가 정보(이용시간/요금 등). 코스 생성 응답에는 안
   // 실려 있어서(별도 API 절약), 여기서 스톱 개수만큼만 따로 조회합니다.
   const [extraInfoMap, setExtraInfoMap] = useState<Record<string, Attraction["extra_info"]>>({});
@@ -88,7 +92,44 @@ export default function ResultsScreen() {
 
   const handleConfirmSave = async (params: SaveCourseParams) => {
     if (!course) return;
-    await api.saveCourse(course.course_id, params);
+    const { trip_id } = await api.saveCourse(course.course_id, params);
+    // 나눠 놓은 다음 날 코스도 같은 여행에 함께 넣어야 1일차·2일차가 한 여행에 모입니다.
+    if (nextDayCourse) {
+      await api.saveCourse(nextDayCourse.course_id, { tripId: trip_id });
+    }
+  };
+
+  // 시간이 뒤로 계속 밀리는 구조라, '오늘 못 가는' 첫 지점부터 뒤는 전부 다음 날로
+  // 넘기는 게 맞습니다. 그 지점을 찾습니다(없으면 -1).
+  const overflowIndex = course?.stops.findIndex((s) => s.fits_today === false) ?? -1;
+  const overflowStop = overflowIndex >= 0 ? course?.stops[overflowIndex] : undefined;
+  // 첫 장소부터 안 맞거나 장소가 하나뿐이면 나눌 수가 없습니다(남는 코스가 없음).
+  const canSplit = overflowIndex >= 1 && !nextDayCourse;
+
+  const handleSplit = async () => {
+    if (!course || overflowIndex < 1) return;
+    if (!session) {
+      Alert.alert("로그인이 필요해요", "코스를 나누려면 먼저 로그인해주세요.", [
+        { text: "취소", style: "cancel" },
+        { text: "로그인하러 가기", onPress: () => router.push("/login") },
+      ]);
+      return;
+    }
+    setSplitting(true);
+    try {
+      const result = await api.splitCourse(course.course_id, {
+        fromOrder: overflowIndex + 1,
+        visitDate,
+      });
+      setCourse(result.today);
+      setNextDayCourse(result.next_day);
+      setNextVisitDate(result.next_visit_date);
+      await storage.saveCourse(result.today);
+    } catch (err) {
+      Alert.alert("코스를 나누지 못했어요", "잠시 후 다시 시도해주세요.\n" + String(err));
+    } finally {
+      setSplitting(false);
+    }
   };
 
   // 드래그가 끝나면 화면에는 바로 새 순서를 반영하고(로컬), '순서 저장'
@@ -179,6 +220,42 @@ export default function ResultsScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* 문 닫은 뒤 도착하거나 그날 쉬는 장소가 있으면 다음 날로 나누자고 제안합니다. */}
+      {overflowStop && !nextDayCourse && (
+        <View style={styles.splitBanner}>
+          <View style={styles.splitBannerTextGroup}>
+            <Text style={styles.splitBannerTitle}>
+              {overflowStop.attraction.name}은(는) 이날 방문이 어려워요
+            </Text>
+            <Text style={styles.splitBannerBody}>
+              {overflowStop.closed_note ?? overflowStop.time_note ?? "도착 예정 시간에 이용이 어렵습니다."}
+            </Text>
+            {!canSplit && (
+              <Text style={styles.splitBannerBody}>
+                첫 장소부터라서 나눌 수 없어요. 순서를 바꾸거나 장소를 줄여보세요.
+              </Text>
+            )}
+          </View>
+          {canSplit && (
+            <TouchableOpacity
+              style={[styles.splitButton, splitting && styles.splitButtonDisabled]}
+              onPress={handleSplit}
+              disabled={splitting}
+              accessibilityRole="button"
+              accessibilityLabel={`${overflowStop.attraction.name}부터 다음 날 코스로 나누기`}
+            >
+              {splitting ? (
+                <ActivityIndicator size="small" color={colors.onPrimary} />
+              ) : (
+                <Text style={styles.splitButtonText}>이 장소부터 다음 날로 나누기</Text>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
+      {nextDayCourse && <Text style={styles.daySectionTitle}>1일차{visitDate ? ` · ${visitDate}` : ""}</Text>}
+
       <View style={styles.orderHintRow}>
         <View style={styles.orderHintTextRow}>
           <HandTapIcon size={13} color={colors.textTertiary} weight="bold" />
@@ -205,6 +282,26 @@ export default function ResultsScreen() {
     </>
   );
 
+  // 나눈 뒤의 '2일차' 구간. 1일차 목록 아래에 이어서 보여줍니다. 순서 바꾸기는
+  // 1일차에만 두고, 2일차는 저장 후 여행 상세에서 열어 조정하도록 했습니다
+  // (한 화면에서 두 코스를 서로 끌어 옮기게 하면 저장 규칙이 복잡해집니다).
+  const nextDaySection = nextDayCourse ? (
+    <View style={styles.nextDaySection}>
+      <Text style={styles.daySectionTitle}>2일차{nextVisitDate ? ` · ${nextVisitDate}` : ""}</Text>
+      <Text style={styles.nextDayHint}>
+        저장하면 1일차와 같은 여행에 함께 담겨요. 순서 조정은 저장 후 여행 상세에서 할 수 있어요.
+      </Text>
+      {nextDayCourse.stops.map((stop) => (
+        <AttractionCard
+          key={stop.attraction.content_id}
+          stop={stop}
+          userType={nextDayCourse.generated_for}
+          extraInfo={extraInfoMap[stop.attraction.content_id]}
+        />
+      ))}
+    </View>
+  ) : null;
+
   return (
     // edges=["top"]로 상태표시줄(시계/배터리) 영역만 피해서 그립니다 — 홈 화면과 같습니다.
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -216,6 +313,7 @@ export default function ResultsScreen() {
             data={course.stops}
             keyExtractor={(item) => item.attraction.content_id}
             ListHeaderComponent={listHeader}
+            ListFooterComponent={nextDaySection}
             contentContainerStyle={styles.listContent}
             onDragEnd={handleDragEnd}
             renderItem={({ item, drag, isActive, getIndex }) => (
@@ -350,6 +448,40 @@ function makeStyles(colors: ThemeColors) {
     marginBottom: spacing.md,
   },
   offlineBannerText: { color: colors.warningText, fontSize: 12, fontFamily: fontFamily.regular, textAlign: "center" },
+  // '이날 방문이 어려워요' 안내와 다음 날로 나누기 버튼
+  splitBanner: {
+    backgroundColor: colors.warningLight,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  splitBannerTextGroup: { gap: 2 },
+  splitBannerTitle: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.warningText },
+  splitBannerBody: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.warningText, lineHeight: 17 },
+  splitButton: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.primary,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md + 2,
+    paddingVertical: spacing.xs + 3,
+  },
+  splitButtonDisabled: { opacity: 0.6 },
+  splitButtonText: { color: colors.onPrimary, fontSize: 12, fontFamily: fontFamily.bold },
+  daySectionTitle: {
+    fontSize: 15,
+    fontFamily: fontFamily.bold,
+    color: colors.text,
+    marginBottom: spacing.xs,
+  },
+  nextDaySection: { marginTop: spacing.lg, paddingTop: spacing.lg, borderTopWidth: 1, borderTopColor: colors.border },
+  nextDayHint: {
+    fontSize: 12,
+    fontFamily: fontFamily.regular,
+    color: colors.textTertiary,
+    marginBottom: spacing.md,
+    lineHeight: 17,
+  },
   mapButton: {
     position: "absolute",
     bottom: spacing.xl - 4,

@@ -676,6 +676,7 @@ def _stops_from_raw(
             reason=reason,
             time_note=scheduled.time_note,
             closed_note=scheduled.closed_note,
+            fits_today=scheduled.fits_today,
         )
         for position, ((_, attraction, reason), scheduled) in enumerate(
             zip(ordered, schedules), start=1

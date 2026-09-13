@@ -224,6 +224,9 @@ class CourseStop(BaseModel):
     # 방문일이 그 장소의 휴무일일 때의 경고. 방문 날짜에 달린 정보라 순서를
     # 바꿔도 그대로 유지됩니다 (어느 날 가는지는 순서와 무관하기 때문입니다).
     closed_note: Optional[str] = None
+    # 그날 안에 실제로 방문할 수 있는지. False인 첫 지점부터 뒤쪽은 시간이 계속
+    # 밀리므로, 앱이 "여기부터 다음 날 코스로 나누기"를 제안합니다.
+    fits_today: bool = True
 
 
 class CourseResponse(BaseModel):
@@ -300,6 +303,28 @@ class UpdateCourseRequest(BaseModel):
     # 새 순서대로 나열한 content_id 목록. 기존 코스에 있는 관광지들과 정확히
     # 같은 집합이어야 하며(추가/제외 불가), 순서만 이 목록 기준으로 바뀝니다.
     stop_order: Optional[list[str]] = None
+
+
+class SplitCourseRequest(BaseModel):
+    """
+    하루에 다 돌 수 없는 코스를 '그 지점부터 뒤 전부'를 떼어내 다음 날 코스로 나눕니다.
+
+    from_order가 1이면 남는 코스가 없으므로 허용하지 않습니다(앱은 그 경우
+    "순서를 바꾸거나 장소를 줄여보세요"로 안내합니다).
+    """
+    from_order: int = Field(..., ge=2, description="이 순번부터 끝까지를 다음 날로 옮깁니다")
+    visit_date: Optional[str] = Field(
+        default=None,
+        description="원래 방문 예정일 (YYYY-MM-DD). 주면 다음 날 코스는 하루 뒤로 계산합니다.",
+    )
+
+
+class CourseSplitResponse(BaseModel):
+    """나눈 결과 — 그날 코스와 다음 날 코스, 그리고 각 날짜."""
+    today: CourseResponse
+    next_day: CourseResponse
+    visit_date: Optional[str] = None
+    next_visit_date: Optional[str] = None
 
 
 class SavedCourseSummary(BaseModel):

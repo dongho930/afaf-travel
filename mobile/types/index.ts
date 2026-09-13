@@ -82,6 +82,17 @@ export interface CourseStop {
   time_note?: string | null;
   // 방문일이 그 장소의 휴무일일 때의 경고.
   closed_note?: string | null;
+  // 그날 안에 실제로 갈 수 있는지. false인 첫 지점부터는 다음 날 코스로
+  // 나누자고 제안합니다(문 닫은 뒤 도착 / 하루 초과 / 그날 휴무).
+  fits_today?: boolean;
+}
+
+/** 코스를 그날/다음 날로 나눈 결과. */
+export interface CourseSplitResult {
+  today: CourseResponse;
+  next_day: CourseResponse;
+  visit_date: string | null;
+  next_visit_date: string | null;
 }
 
 export interface PlaceCandidate {
