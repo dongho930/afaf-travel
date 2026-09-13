@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 import app.routers.courses as courses
 from app.main import app
-from app.models.schemas import Attraction
+from app.models.schemas import Attraction, InfoField
 from app.services import ai_service
 
 SUWON_ALL = [41111, 41113, 41115, 41117]
@@ -130,6 +130,82 @@ def test_2단계에서_예보를_채운_뒤_코스를_만든다(client, searches
 
     assert response.status_code == 200
     assert filled == [["1", "2"]]  # 코스를 만들기 전에 선택한 장소들의 예보를 채웁니다
+
+
+def test_방문일에_쉬는_곳은_추천_뒤로_밀린다(client, monkeypatch):
+    """월요일에 가겠다는 사람에게 월요일 휴관인 곳을 앞세워 추천하면 안 됩니다."""
+    async def fake_search(region, user_type, limit=20, sigungu_cd=None, **kwargs):
+        closed = _attraction("closed", "월요일 휴관 박물관")
+        closed.extra_info = [InfoField(label="쉬는날", value="매주 월요일")]
+        open_place = _attraction("open", "연중무휴 공원")
+        open_place.extra_info = [InfoField(label="쉬는날", value="연중무휴")]
+        return [closed, open_place]
+
+    async def noop_fill(attractions):
+        return 0
+
+    monkeypatch.setattr(courses.tour_api_client, "search_accessible_attractions", fake_search)
+    monkeypatch.setattr(courses.tour_api_client, "fill_extra_info", noop_fill)
+
+    response = client.post(
+        "/api/courses/recommend",
+        json={"query_text": "박물관이나 공원", "user_type": "general", "visit_date": "2026-09-14"},
+    )
+
+    names = [c["attraction"]["content_id"] for c in response.json()["candidates"]]
+    assert names.index("open") < names.index("closed")
+
+
+def test_방문_날짜를_보내면_휴무일을_경고한다(client, monkeypatch):
+    """휴무일에 코스를 짜놓고 현장에서 알게 되는 일을 막습니다."""
+    monday = "2026-09-14"
+
+    async def fake_search(region, user_type, limit=20, sigungu_cd=None, **kwargs):
+        place = _attraction("1", "월요일 휴관 박물관")
+        place.category = "문화시설"
+        place.extra_info = [InfoField(label="쉬는날", value="매주 월요일")]
+        return [place]
+
+    async def noop_fill(attractions):
+        return 0
+
+    monkeypatch.setattr(courses.tour_api_client, "search_accessible_attractions", fake_search)
+    monkeypatch.setattr(courses.tour_api_client, "fill_extra_info", noop_fill)
+    monkeypatch.setattr(courses.tour_api_client, "fill_congestion_forecasts", noop_fill)
+
+    response = client.post(
+        "/api/courses/generate-from-selection",
+        json={
+            "query_text": "박물관 가고 싶어",
+            "user_type": "general",
+            "visit_date": monday,
+            "selected_content_ids": ["1"],
+        },
+    )
+
+    stop = response.json()["stops"][0]
+    assert "쉬는 날" in (stop["closed_note"] or "")
+
+
+def test_코스를_만들기_전에_영업시간_정보를_채운다(client, searches, monkeypatch):
+    filled: list = []
+
+    async def fake_extra(attractions):
+        filled.append([a.content_id for a in attractions])
+        return len(attractions)
+
+    async def noop_fill(attractions):
+        return 0
+
+    monkeypatch.setattr(courses.tour_api_client, "fill_extra_info", fake_extra)
+    monkeypatch.setattr(courses.tour_api_client, "fill_congestion_forecasts", noop_fill)
+
+    client.post(
+        "/api/courses/generate-from-selection",
+        json={"query_text": "수원 나들이", "user_type": "general", "selected_content_ids": ["1", "2"]},
+    )
+
+    assert filled == [["1", "2"]]
 
 
 def test_후보에_없는_선택지는_상세_조회로_살린다(client, searches, monkeypatch):

@@ -29,6 +29,7 @@ from app.models.schemas import (
     TravelPurpose,
 )
 from app.services.memory_cache import TTLCache
+from app.services.schedule import build_schedule, hours_payload, is_closed_on
 from app.services.sigungu_codes import resolve_sigungu_codes, signgu_name
 
 settings = get_settings()
@@ -314,22 +315,28 @@ SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동반 가
 2. 사용자 유형
 3. 질의에서 읽어낸 조건(conditions) — 지역/동행자/목적/키워드. 없을 수도 있습니다.
 4. 무장애 필터링을 이미 통과한 관광지 후보 목록 (편의시설 정보 포함)
-5. 관광지별 혼잡도 정보 — 데이터가 있는 곳에만 붙습니다.
+5. 관광지별 혼잡도·영업 정보 — 데이터가 있는 곳에만 붙습니다.
    - congestion_rate: 0~100. 높을수록 평소 사람이 많이 몰리는 곳입니다.
-   - daily_congestion: 날짜별 예상 혼잡도(low/medium/high). 시간 단위가 아니라
-     하루 단위 예보입니다.
+   - congestion_on_visit_date: 방문일의 예상 혼잡도(low/medium/high).
+   - daily_congestion: 날짜별 예상 혼잡도. 시간 단위가 아니라 하루 단위 예보입니다.
+   - opens_at / closes_at: 문을 여닫는 시각. closed_weekdays: 쉬는 요일.
 
 규칙:
 - 반드시 후보 목록에 있는 관광지만 사용하세요.
-- congestion_rate가 66 이상이거나 daily_congestion에 high가 있는 곳은 사람이 덜
-  몰리는 이른 오전(09:00~10:00)이나 늦은 오후(16:00 이후)에 배치하고, 혼잡도가
-  낮은 곳을 붐비는 시간대(11:00~15:00)에 넣으세요.
-- 혼잡도 정보가 없는 관광지는 혼잡도를 근거로 들지 마세요 (추측 금지).
-- daily_congestion은 하루 단위 예보이므로 "몇 시가 붐빈다"고 단정하지 말고,
-  어느 날이 여유로운지에 대한 근거로만 쓰세요.
-- conditions에 동행자(companion)나 목적(purposes)이 있으면 그에 맞게 장소 순서와
-  시간대를 정하고 reason에도 반영하세요 (예: 가족 동반이면 이동을 짧게, 식도락이
-  목적이면 식사 시간대에 음식점을 배치).
+- 방문 시각은 당신이 정하지 않습니다. 시스템이 영업시간과 장소 사이 이동 시간을
+  계산해서 붙이므로, 당신은 "어떤 순서로 도는지"만 정하면 됩니다.
+- 그래서 reason에 "오전 9시에" 같은 구체적인 시각을 쓰지 마세요. 시스템이 계산한
+  시각과 어긋납니다. 대신 "붐비기 전에 먼저" 같은 표현을 쓰세요.
+- congestion_rate가 66 이상이거나 혼잡도가 high인 곳은 사람이 덜 몰리도록 코스
+  앞쪽(이른 시간)에 배치하세요.
+- opens_at이 늦은 곳(예: 11:00)은 코스 앞쪽에 두지 마세요 — 문을 열 때까지
+  기다리게 됩니다. 반대로 closes_at이 이른 곳은 뒤로 미루지 마세요.
+- 음식점은 식사 시간(점심/저녁)에 들르도록 순서를 잡으세요.
+- closed_weekdays가 방문일과 겹치는 곳은 그날 갈 수 없으므로, 그 사실을 reason에
+  분명히 알려주세요 (순서를 바꿔도 해결되지 않습니다).
+- 혼잡도나 영업 정보가 없는 관광지는 그것을 근거로 들지 마세요 (추측 금지).
+- conditions에 동행자(companion)나 목적(purposes)이 있으면 그에 맞게 순서를 정하고
+  reason에도 반영하세요 (예: 가족 동반이면 이동을 짧게).
 - 사용자 유형에 맞는 이동/휴식 동선을 고려하세요 (예: 고령자/임산부는 휴게 공간이 있는 곳 우선).
 - reason은 반드시 candidates에 주어진 accessibility 필드에 실제로 있는 내용만
   근거로 쓰세요. 주어지지 않은 편의시설(예: 시각장애 사용자에게 경사로나 화장실처럼
@@ -345,7 +352,7 @@ SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동반 가
   "title": "코스 제목",
   "summary": "1~2문장 요약",
   "stops": [
-    {"content_id": "관광지 ID", "order": 1, "recommended_arrival_time": "HH:MM", "reason": "추천 이유"}
+    {"content_id": "관광지 ID", "order": 1, "reason": "추천 이유"}
   ]
 }
 """
@@ -369,6 +376,7 @@ RECOMMEND_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 
   골고루 섞이도록 선택하세요. 후보가 12개보다 적으면 있는 만큼만 반환하세요.
 - conditions에 목적(purposes)이나 동행자(companion)가 있으면 그에 맞는 장소를
   우선 고르세요 (예: 식도락이면 음식점, 가족이면 아이와 함께 가기 좋은 곳).
+- closed_on_visit_date가 true인 곳은 방문일에 문을 닫으므로 고르지 마세요.
 - 질의에 "한적한", "붐비지 않는" 같은 표현이 있으면 congestion_rate가 낮은 곳을
   우선하세요. 그런 표현이 없으면 혼잡도는 참고만 하세요.
 - 순서는 중요하지 않습니다 (사용자가 나중에 직접 고릅니다).
@@ -400,21 +408,28 @@ ORDER_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동�
 2. 사용자 유형
 3. 질의에서 읽어낸 조건(conditions) — 지역/동행자/목적/키워드. 없을 수도 있습니다.
 4. 사용자가 직접 선택한 관광지 목록 (편의시설 정보 포함)
-5. 관광지별 혼잡도 정보 — 데이터가 있는 곳에만 붙습니다.
+5. 관광지별 혼잡도·영업 정보 — 데이터가 있는 곳에만 붙습니다.
    - congestion_rate: 0~100. 높을수록 평소 사람이 많이 몰리는 곳입니다.
-   - daily_congestion: 날짜별 예상 혼잡도(low/medium/high). 시간 단위가 아니라
-     하루 단위 예보입니다.
+   - congestion_on_visit_date: 방문일의 예상 혼잡도(low/medium/high).
+   - daily_congestion: 날짜별 예상 혼잡도. 시간 단위가 아니라 하루 단위 예보입니다.
+   - opens_at / closes_at: 문을 여닫는 시각. closed_weekdays: 쉬는 요일.
 
 규칙:
 - candidates에 주어진 모든 관광지를 빠짐없이 포함하세요 (제외 금지, 추가 금지).
-- congestion_rate가 66 이상이거나 daily_congestion에 high가 있는 곳은 사람이 덜
-  몰리는 이른 오전(09:00~10:00)이나 늦은 오후(16:00 이후)에 배치하고, 혼잡도가
-  낮은 곳을 붐비는 시간대(11:00~15:00)에 넣으세요.
-- 혼잡도 정보가 없는 관광지는 혼잡도를 근거로 들지 마세요 (추측 금지).
-- daily_congestion은 하루 단위 예보이므로 "몇 시가 붐빈다"고 단정하지 말고,
-  어느 날이 여유로운지에 대한 근거로만 쓰세요.
-- conditions에 동행자(companion)나 목적(purposes)이 있으면 그에 맞게 순서와
-  시간대를 정하고 reason에도 반영하세요.
+- 방문 시각은 당신이 정하지 않습니다. 시스템이 영업시간과 장소 사이 이동 시간을
+  계산해서 붙이므로, 당신은 "어떤 순서로 도는지"만 정하면 됩니다.
+- 그래서 reason에 "오전 9시에" 같은 구체적인 시각을 쓰지 마세요. 시스템이 계산한
+  시각과 어긋납니다. 대신 "붐비기 전에 먼저" 같은 표현을 쓰세요.
+- congestion_rate가 66 이상이거나 혼잡도가 high인 곳은 사람이 덜 몰리도록 코스
+  앞쪽(이른 시간)에 배치하세요.
+- opens_at이 늦은 곳(예: 11:00)은 코스 앞쪽에 두지 마세요 — 문을 열 때까지
+  기다리게 됩니다. 반대로 closes_at이 이른 곳은 뒤로 미루지 마세요.
+- 음식점은 식사 시간(점심/저녁)에 들르도록 순서를 잡으세요.
+- closed_weekdays가 방문일과 겹치는 곳은 그날 갈 수 없으므로, 그 사실을 reason에
+  분명히 알려주세요 (순서를 바꿔도 해결되지 않습니다).
+- 혼잡도나 영업 정보가 없는 관광지는 그것을 근거로 들지 마세요 (추측 금지).
+- conditions에 동행자(companion)나 목적(purposes)이 있으면 그에 맞게 순서를 정하고
+  reason에도 반영하세요.
 - 사용자 유형에 맞는 이동/휴식 동선을 고려해 순서를 정하세요.
 - reason은 반드시 candidates에 주어진 accessibility 필드에 실제로 있는 내용만
   근거로 쓰세요. 주어지지 않은 편의시설(예: 시각장애 사용자에게 경사로나 화장실처럼
@@ -430,7 +445,7 @@ ORDER_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동�
   "title": "코스 제목",
   "summary": "1~2문장 요약",
   "stops": [
-    {"content_id": "관광지 ID", "order": 1, "recommended_arrival_time": "HH:MM", "reason": "추천 이유"}
+    {"content_id": "관광지 ID", "order": 1, "reason": "추천 이유"}
   ]
 }
 """
@@ -445,21 +460,30 @@ _MAX_FORECAST_DAYS = 5
 _CROWDED_RATE = 66.0
 
 
-def _congestion_payload(a: Attraction, include_forecast: bool) -> dict:
+def _congestion_payload(
+    a: Attraction, include_forecast: bool, visit_date: str | None = None
+) -> dict:
     """
     프롬프트에 실을 혼잡도 정보. 데이터가 없으면 아무 것도 넣지 않습니다.
 
     없는 항목을 None으로라도 넣으면 AI가 "혼잡도 정보가 있다"고 착각해 근거로
     지어내기 때문에, 값이 있을 때만 넣습니다.
+
+    방문 날짜를 알면 그날 예보 하나만 싣습니다 — 나머지 날짜는 그 여행과 상관이
+    없어서 프롬프트만 길어집니다.
     """
     payload: dict = {}
     if a.congestion_rate is not None:
         payload["congestion_rate"] = round(a.congestion_rate)
     if include_forecast and a.congestion_forecast:
-        payload["daily_congestion"] = [
-            {"date": c.date, "level": c.congestion_level}
-            for c in a.congestion_forecast[:_MAX_FORECAST_DAYS]
-        ]
+        on_visit_date = next((c for c in a.congestion_forecast if c.date == visit_date), None)
+        if on_visit_date is not None:
+            payload["congestion_on_visit_date"] = on_visit_date.congestion_level
+        else:
+            payload["daily_congestion"] = [
+                {"date": c.date, "level": c.congestion_level}
+                for c in a.congestion_forecast[:_MAX_FORECAST_DAYS]
+            ]
     return payload
 
 
@@ -469,6 +493,7 @@ def _build_user_prompt(
     parsed: ParsedQuery | None = None,
     include_forecast: bool = True,
 ) -> str:
+    visit_date = request.preferred_date
     candidate_payload = [
         {
             "content_id": a.content_id,
@@ -477,7 +502,9 @@ def _build_user_prompt(
             "accessibility": _relevant_accessibility_payload(
                 a.accessibility.model_dump(), request.user_type
             ),
-            **_congestion_payload(a, include_forecast),
+            **_congestion_payload(a, include_forecast, visit_date),
+            # 영업시간·휴무일은 순서를 정할 때만 씁니다 (시각 자체는 시스템 계산).
+            **(hours_payload(a) if include_forecast else {}),
         }
         for a in candidates
     ]
@@ -488,15 +515,12 @@ def _build_user_prompt(
         "max_stops": request.max_stops,
         "candidates": candidate_payload,
     }
+    if visit_date:
+        payload["visit_date"] = visit_date
     conditions = _conditions_payload(parsed)
     if conditions:
         payload["conditions"] = conditions
     return json.dumps(payload, ensure_ascii=False)
-
-
-def _fallback_hour(index: int) -> int:
-    """규칙 기반 대체 로직의 방문 시각 — 09시부터 두 시간 간격, 21시에서 멈춥니다."""
-    return min(9 + 2 * index, 21)
 
 
 def _fallback_congestion_key(a: Attraction) -> float:
@@ -522,35 +546,24 @@ def _mock_generate(
     """
     GROQ_API_KEY 미설정 또는 한도 초과 시 사용하는 규칙 기반 대체 로직.
 
-    혼잡도를 실제로 반영합니다 — 붐비는 곳일수록 사람이 몰리기 전인 이른 시간에
-    배정하고, 한산한 곳을 한낮으로 미룹니다. 혼잡도 정보가 없는 곳끼리는 원래
-    순서를 그대로 유지합니다(파이썬 정렬은 안정 정렬이라 동점이면 입력 순서 유지).
+    혼잡도를 실제로 반영합니다 — 붐비는 곳일수록 사람이 몰리기 전에 들르도록
+    코스 앞쪽에 놓습니다. 혼잡도 정보가 없는 곳끼리는 원래 순서를 그대로
+    유지합니다(파이썬 정렬은 안정 정렬이라 동점이면 입력 순서 유지).
+
+    방문 시각은 여기서 정하지 않습니다 — 순서가 정해진 뒤 schedule 모듈이
+    영업시간과 이동 시간을 계산해 붙입니다(AI 경로와 동일).
     """
     ordered = sorted(candidates[: request.max_stops], key=_fallback_congestion_key)
 
     stops = []
     for i, a in enumerate(ordered, start=1):
-        hour = _fallback_hour(i - 1)
         if a.congestion_rate is not None and a.congestion_rate >= _CROWDED_RATE:
-            reason = (
-                f"{a.name}은(는) 평소 사람이 많이 몰리는 곳이라, 비교적 한산한 "
-                f"{hour}시로 배치했습니다."
-            )
+            reason = f"{a.name}은(는) 평소 사람이 많이 몰리는 곳이라 먼저 들르도록 배치했습니다."
         elif a.congestion_rate is not None:
-            reason = (
-                f"{a.name}은(는) 혼잡도가 높지 않은 편이라 {hour}시에 여유롭게 "
-                "둘러보실 수 있습니다."
-            )
+            reason = f"{a.name}은(는) 혼잡도가 높지 않은 편이라 여유롭게 둘러보실 수 있습니다."
         else:
             reason = f"{a.name}은(는) 요청하신 접근성 조건에 맞는 장소입니다."
-        stops.append(
-            {
-                "content_id": a.content_id,
-                "order": i,
-                "recommended_arrival_time": f"{hour:02d}:00",
-                "reason": reason,
-            }
-        )
+        stops.append({"content_id": a.content_id, "order": i, "reason": reason})
 
     conditions = _conditions_payload(parsed)
     condition_text = ""
@@ -633,22 +646,41 @@ async def _groq_generate(
     return await _groq_call(SYSTEM_PROMPT, _build_user_prompt(request, candidates, parsed))
 
 
-def _stops_from_raw(raw: dict, candidates: list[Attraction]) -> list[CourseStop]:
+def _stops_from_raw(
+    raw: dict, candidates: list[Attraction], visit_date: str | None = None
+) -> list[CourseStop]:
+    """
+    AI(또는 대체 로직)가 정한 순서를 실제 코스로 만듭니다.
+
+    방문 시각은 응답에서 받지 않고 여기서 계산합니다 — 영업시간, 장소 사이 이동
+    시간, 체류 시간을 반영해야 하고(schedule.build_schedule), 순서를 바꿨을 때도
+    똑같은 규칙으로 다시 매겨져야 하기 때문입니다.
+    """
     by_id = {a.content_id: a for a in candidates}
-    stops = []
-    for s in raw["stops"]:
-        attraction = by_id.get(s["content_id"])
+    ordered: list[tuple[int, Attraction, str]] = []
+    for index, s in enumerate(raw["stops"]):
+        attraction = by_id.get(s.get("content_id"))
         if not attraction:
             continue
-        stops.append(
-            CourseStop(
-                order=s["order"],
-                attraction=attraction,
-                recommended_arrival_time=s["recommended_arrival_time"],
-                reason=s["reason"],
-            )
+        ordered.append((s.get("order", index + 1), attraction, s.get("reason", "")))
+    ordered.sort(key=lambda item: item[0])
+
+    attractions = [attraction for _, attraction, _ in ordered]
+    schedules = build_schedule(attractions, visit_date)
+
+    return [
+        CourseStop(
+            order=position,
+            attraction=attraction,
+            recommended_arrival_time=scheduled.arrival_time,
+            reason=reason,
+            time_note=scheduled.time_note,
+            closed_note=scheduled.closed_note,
         )
-    return sorted(stops, key=lambda s: s.order)
+        for position, ((_, attraction, reason), scheduled) in enumerate(
+            zip(ordered, schedules), start=1
+        )
+    ]
 
 
 async def generate_course(
@@ -670,7 +702,7 @@ async def generate_course(
         course_id=str(uuid.uuid4()),
         title=raw["title"],
         summary=raw["summary"],
-        stops=_stops_from_raw(raw, candidates),
+        stops=_stops_from_raw(raw, candidates, request.preferred_date),
         generated_for=request.user_type,
     )
 
@@ -694,7 +726,12 @@ def _mock_recommend(
         haystack = f"{a.name} {a.category} {a.address}"
         return sum(1 for k in keywords if k in haystack)
 
-    ranked = sorted(candidates, key=score, reverse=True)
+    # 방문일에 쉬는 곳은 맨 뒤로 미룹니다. 아예 빼지 않는 이유는, 그날 쉬는 곳만
+    # 남는 상황에서 "추천 결과 없음"이 되는 것보다 보여주는 편이 낫기 때문입니다.
+    def rank_key(a: Attraction) -> tuple[int, int]:
+        return (1 if is_closed_on(a, request.visit_date) else 0, -score(a))
+
+    ranked = sorted(candidates, key=rank_key)
     top = ranked[:12] if any(score(a) > 0 for a in ranked) else candidates[:12]
     return [
         {"content_id": a.content_id, "reason": f"'{request.query_text}' 요청과 관련된 {a.category} 장소입니다."}
@@ -722,10 +759,16 @@ async def _groq_recommend(
                 # 1단계는 후보가 25곳까지 실려서 프롬프트가 큽니다. 날짜별 예보는
                 # 빼고 집중률 숫자 하나만 넣습니다(장소 고르기엔 이걸로 충분).
                 **_congestion_payload(a, include_forecast=False),
+                # 방문일에 쉬는 곳만 표시합니다 — 영업시간 전체를 넣으면 후보
+                # 25곳만큼 프롬프트가 길어지는데, 장소를 고르는 단계에서 필요한
+                # 판단은 "그날 문을 여는가" 하나입니다.
+                **({"closed_on_visit_date": True} if is_closed_on(a, request.visit_date) else {}),
             }
             for a in candidates
         ],
     }
+    if request.visit_date:
+        payload["visit_date"] = request.visit_date
     conditions = _conditions_payload(parsed)
     if conditions:
         payload["conditions"] = conditions
@@ -776,11 +819,11 @@ async def generate_course_from_selection(
 ) -> CourseResponse:
     """
     2단계: 사용자가 1단계 추천 목록에서 직접 고른 장소들로만 코스를 구성합니다.
-    AI는 이 장소들을 빼거나 새로 추가하지 않고, 방문 순서와 추천 시간대만 정합니다.
+    AI는 이 장소들을 빼거나 새로 추가하지 않고 방문 순서만 정하고, 실제 시각은
+    schedule 모듈이 영업시간·이동 시간을 계산해 붙입니다.
 
-    selected_attractions에는 라우터가 미리 혼잡도 예보를 채워서 넘겨줍니다
-    (tour_api.fill_congestion_forecasts) — 그래야 AI가 붐비는 곳을 한산한
-    시간대로 옮겨 배치할 수 있습니다.
+    selected_attractions에는 라우터가 미리 혼잡도 예보와 영업시간(부가정보)을
+    채워서 넘겨줍니다 (tour_api.fill_congestion_forecasts / fill_extra_info).
     """
     if not selected_attractions:
         raise ValueError("선택된 관광지가 없습니다.")
@@ -790,6 +833,7 @@ async def generate_course_from_selection(
         user_type=request.user_type,
         region=request.region,
         max_stops=len(selected_attractions),
+        preferred_date=request.visit_date,
     )
 
     if settings.groq_api_key:
@@ -808,6 +852,6 @@ async def generate_course_from_selection(
         course_id=str(uuid.uuid4()),
         title=raw["title"],
         summary=raw["summary"],
-        stops=_stops_from_raw(raw, selected_attractions),
+        stops=_stops_from_raw(raw, selected_attractions, request.visit_date),
         generated_for=request.user_type,
     )

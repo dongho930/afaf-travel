@@ -77,6 +77,11 @@ export interface CourseStop {
   attraction: Attraction;
   recommended_arrival_time: string;
   reason: string;
+  // 그 시각으로 잡은 이유 (예: "10:00 문을 열어서 그 시간에 맞췄어요").
+  // 순서를 바꾸면 서버가 다시 계산해서 내려줍니다.
+  time_note?: string | null;
+  // 방문일이 그 장소의 휴무일일 때의 경고.
+  closed_note?: string | null;
 }
 
 export interface PlaceCandidate {

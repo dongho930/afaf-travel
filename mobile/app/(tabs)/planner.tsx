@@ -1,5 +1,12 @@
 import { useRouter } from "expo-router";
-import { CheckIcon, MapPinIcon, MicrophoneIcon, SparkleIcon, type Icon } from "phosphor-react-native";
+import {
+  CalendarBlankIcon,
+  CheckIcon,
+  MapPinIcon,
+  MicrophoneIcon,
+  SparkleIcon,
+  type Icon,
+} from "phosphor-react-native";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -15,6 +22,7 @@ import {
 } from "react-native";
 import { Alert } from "../../services/crossPlatformAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { DateRangePickerModal } from "../../components/DateRangePickerModal";
 import { FadeInView } from "../../components/FadeInView";
 import { ProfileButton } from "../../components/ProfileButton";
 import { fontFamily } from "../../constants/fonts";
@@ -117,6 +125,8 @@ export default function PlannerScreen() {
     setPendingQueryText,
     pendingQueryText,
     setParsedQuery,
+    visitDate,
+    setVisitDate,
   } = useCourseContext();
   const [queryText, setQueryText] = useState(pendingQueryText || "");
   const [isListening, setIsListening] = useState(false);
@@ -126,6 +136,7 @@ export default function PlannerScreen() {
   const selectedOption = OPTIONS.find((o) => o.type === userType);
 
   const [regionModalVisible, setRegionModalVisible] = useState(false);
+  const [dateModalVisible, setDateModalVisible] = useState(false);
   const [regionOptions, setRegionOptions] = useState<RegionOption[]>([]);
   const [regionLoading, setRegionLoading] = useState(false);
   const [regionSearch, setRegionSearch] = useState("");
@@ -168,7 +179,12 @@ export default function PlannerScreen() {
     }
     setIsSubmitting(true);
     try {
-      const { candidates, parsed } = await api.recommendPlaces({ queryText, userType, sigunguCd });
+      const { candidates, parsed } = await api.recommendPlaces({
+        queryText,
+        userType,
+        sigunguCd,
+        visitDate,
+      });
       if (candidates.length === 0) {
         Alert.alert("추천 결과 없음", "조건에 맞는 장소를 찾지 못했어요. 다른 표현으로 다시 시도해주세요.");
         return;
@@ -228,6 +244,23 @@ export default function PlannerScreen() {
               <Text style={styles.regionButtonChevron}>변경</Text>
             </TouchableOpacity>
 
+            {/* 방문 예정일을 알면 그날 혼잡도 예보를 쓰고, 그날 쉬는 곳은 미리 알려줄 수 있습니다. */}
+            <TouchableOpacity
+              style={styles.regionButton}
+              onPress={() => setDateModalVisible(true)}
+              accessibilityRole="button"
+              accessibilityLabel={`방문 예정일 ${visitDate ?? "미정"}, 변경하려면 누르세요`}
+            >
+              <CalendarBlankIcon size={15} color={colors.text} weight="bold" />
+              <Text style={styles.regionButtonText}>{visitDate ?? "방문 예정일 미정"}</Text>
+              <Text style={styles.regionButtonChevron}>{visitDate ? "변경" : "선택"}</Text>
+            </TouchableOpacity>
+            {visitDate && (
+              <TouchableOpacity onPress={() => setVisitDate(null)} accessibilityRole="button">
+                <Text style={styles.clearDateText}>날짜 지우기</Text>
+              </TouchableOpacity>
+            )}
+
             <Text style={styles.fieldLabel}>어떤 여행을 원하세요?</Text>
             <FadeInView key={`hint-${userType}`} duration={200} translateY={4}>
               <Text style={styles.hint}>예: "{exampleQuery}"</Text>
@@ -271,6 +304,18 @@ export default function PlannerScreen() {
             </Pressable>
           </>
         )}
+      />
+
+      {/* 방문 예정일은 하루만 고르면 되므로, 달력에서 고른 시작일만 씁니다. */}
+      <DateRangePickerModal
+        visible={dateModalVisible}
+        initialStartDate={visitDate}
+        initialEndDate={null}
+        onClose={() => setDateModalVisible(false)}
+        onConfirm={(startDate) => {
+          setVisitDate(startDate);
+          setDateModalVisible(false);
+        }}
       />
 
       <Modal visible={regionModalVisible} animationType="slide" transparent onRequestClose={() => setRegionModalVisible(false)}>
@@ -358,6 +403,14 @@ function makeStyles(colors: ThemeColors) {
   },
   regionButtonText: { flex: 1, fontSize: 15, fontFamily: fontFamily.bold, color: colors.text },
   regionButtonChevron: { fontSize: 13, color: colors.primary, fontFamily: fontFamily.semiBold },
+  clearDateText: {
+    alignSelf: "flex-end",
+    marginTop: -spacing.sm,
+    marginBottom: spacing.sm,
+    fontSize: 12,
+    fontFamily: fontFamily.semiBold,
+    color: colors.textTertiary,
+  },
   typeDescRow: {
     flexDirection: "row",
     alignItems: "center",

@@ -26,9 +26,10 @@ from typing import Optional
 import datetime
 
 from app.config import get_settings
-from app.models.schemas import CourseResponse, CourseStop
+from app.models.schemas import Attraction, CourseResponse, CourseStop
 from app.services.db import execute as _execute
 from app.services.memory_cache import TTLCache
+from app.services.schedule import build_schedule
 
 settings = get_settings()
 
@@ -286,6 +287,27 @@ async def delete_course(course_id: str, user_id: str) -> tuple[bool, Optional[st
         return False, "삭제 중 오류가 발생했어요."
 
 
+def _rebuild_arrival_times(stops: list[dict]) -> None:
+    """
+    새 순서에 맞춰 방문 시각과 시간 안내를 다시 계산합니다 (stops를 직접 고칩니다).
+
+    저장된 stop에는 관광지 정보가 통째로(좌표·카테고리·부가정보까지) 들어 있어서,
+    코스를 처음 만들 때와 같은 계산을 그대로 다시 할 수 있습니다. 옛날에 저장돼
+    형식이 다른 행을 만나면 시각을 건드리지 않고 그냥 둡니다 — 순서 저장이
+    통째로 실패하는 것보다 낫습니다.
+    """
+    try:
+        attractions = [Attraction(**stop["attraction"]) for stop in stops]
+    except Exception as e:
+        print(f"[supabase] 저장된 코스에서 관광지 정보를 읽지 못해 시각은 그대로 둡니다: {e}")
+        return
+
+    for stop, scheduled in zip(stops, build_schedule(attractions)):
+        stop["recommended_arrival_time"] = scheduled.arrival_time
+        stop["time_note"] = scheduled.time_note
+        # closed_note(방문일 휴무 경고)는 순서와 무관한 정보라 그대로 둡니다.
+
+
 async def update_course(
     course_id: str,
     user_id: str,
@@ -295,9 +317,12 @@ async def update_course(
     """
     저장된 코스의 제목을 바꾸거나(title), 관광지 순서를 바꿉니다(stop_order —
     새 순서대로 나열한 content_id 목록). stop_order를 줄 땐 기존 stops에 있는
-    항목들과 정확히 같은 집합이어야 하고(추가/제외 불가), 각 항목의 attraction/
-    reason/recommended_arrival_time 등 나머지 데이터는 그대로 유지한 채 순서와
-    order 번호만 새로 매깁니다.
+    항목들과 정확히 같은 집합이어야 합니다(추가/제외 불가).
+
+    순서를 바꾸면 방문 시각도 새 순서 기준으로 다시 계산합니다. 예전에는 시각이
+    장소에 붙어 그대로 따라다녀서, 순서만 바꾸면 1번이 13:00, 2번이 09:00처럼
+    거꾸로 뒤집히는 일이 있었습니다. 반면 방문일 휴무 경고(closed_note)는 '어느
+    날 가는지'에 달린 정보라 순서와 무관하므로 그대로 둡니다.
     """
     if _client is None:
         return None, "서버 설정 오류로 수정할 수 없어요."
@@ -322,6 +347,7 @@ async def update_course(
                 stop = dict(by_content_id[content_id])
                 stop["order"] = i
                 new_stops.append(stop)
+            _rebuild_arrival_times(new_stops)
             update_payload["stops"] = new_stops
 
         if not update_payload:

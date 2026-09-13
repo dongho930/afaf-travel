@@ -112,6 +112,7 @@ export const api = {
     userType: UserType;
     region?: string;
     sigunguCd?: number | null;
+    visitDate?: string | null;
   }) =>
     request<{ query_text: string; candidates: PlaceCandidate[]; parsed: ParsedQuery | null }>("/api/courses/recommend", {
       method: "POST",
@@ -120,6 +121,7 @@ export const api = {
         user_type: params.userType,
         region: params.region ?? "경기도",
         sigungu_cd: params.sigunguCd ?? null,
+        visit_date: params.visitDate ?? null,
       }),
     }),
 
@@ -129,6 +131,7 @@ export const api = {
     userType: UserType;
     region?: string;
     sigunguCd?: number | null;
+    visitDate?: string | null;
     selectedContentIds: string[];
   }) =>
     request<CourseResponse>("/api/courses/generate-from-selection", {
@@ -138,6 +141,7 @@ export const api = {
         user_type: params.userType,
         region: params.region ?? "경기도",
         sigungu_cd: params.sigunguCd ?? null,
+        visit_date: params.visitDate ?? null,
         selected_content_ids: params.selectedContentIds,
       }),
     }),

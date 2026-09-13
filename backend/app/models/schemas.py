@@ -179,6 +179,10 @@ class PlaceRecommendationRequest(BaseModel):
     user_type: UserType = UserType.GENERAL
     region: str = "경기도"
     sigungu_cd: Optional[int] = Field(default=None, description="특정 시/군/구로 좁혀서 추천 (선택, /api/tourism/regions 참고)")
+    visit_date: Optional[str] = Field(
+        default=None,
+        description="방문 예정일 (YYYY-MM-DD). 그날의 혼잡도 예보와 휴무일을 확인하는 데 씁니다.",
+    )
 
 
 class PlaceCandidate(BaseModel):
@@ -202,6 +206,10 @@ class GenerateFromSelectionRequest(BaseModel):
     user_type: UserType = UserType.GENERAL
     region: str = "경기도"
     sigungu_cd: Optional[int] = Field(default=None, description="1단계에서 사용한 시/군/구와 동일하게 넘겨주세요")
+    visit_date: Optional[str] = Field(
+        default=None,
+        description="방문 예정일 (YYYY-MM-DD). 방문 시각 계산과 휴무일 확인에 씁니다.",
+    )
     selected_content_ids: list[str] = Field(..., min_length=1, description="사용자가 선택한 관광지 content_id 목록")
 
 
@@ -209,7 +217,13 @@ class CourseStop(BaseModel):
     order: int
     attraction: Attraction
     recommended_arrival_time: str
-    reason: str  # AI가 이 장소/시간을 추천한 이유 (혼잡도 회피, 접근성 등)
+    reason: str  # AI가 이 장소를 추천한 이유 (혼잡도 회피, 접근성 등)
+    # 시각을 그렇게 잡은 이유 (예: "10:00 문을 열어서 그 시간에 맞췄어요").
+    # 순서를 바꾸면 다시 계산되는 값입니다.
+    time_note: Optional[str] = None
+    # 방문일이 그 장소의 휴무일일 때의 경고. 방문 날짜에 달린 정보라 순서를
+    # 바꿔도 그대로 유지됩니다 (어느 날 가는지는 순서와 무관하기 때문입니다).
+    closed_note: Optional[str] = None
 
 
 class CourseResponse(BaseModel):

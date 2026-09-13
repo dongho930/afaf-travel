@@ -37,7 +37,7 @@ export default function SelectPlacesScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const styles = makeStyles(colors);
-  const { userType, sigunguCd, recommendations, pendingQueryText, parsedQuery, setCourse } =
+  const { userType, sigunguCd, recommendations, pendingQueryText, parsedQuery, visitDate, setCourse } =
     useCourseContext();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -85,6 +85,7 @@ export default function SelectPlacesScreen() {
         queryText: pendingQueryText,
         userType,
         sigunguCd,
+        visitDate,
         selectedContentIds: Array.from(selectedIds),
       });
       setCourse(course);

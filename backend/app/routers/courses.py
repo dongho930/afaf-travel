@@ -118,6 +118,10 @@ async def recommend_course_places(request: PlaceRecommendationRequest):
     candidates, parsed = await _candidates_with_conditions(
         request.query_text, request.user_type.value, request.region, request.sigungu_cd
     )
+    # 방문 날짜를 알 때만 영업정보를 채웁니다 — 그날 쉬는 곳을 추천에서 빼기 위한
+    # 것이라, 날짜가 없으면 굳이 조회할 이유가 없습니다.
+    if request.visit_date:
+        await tour_api_client.fill_extra_info(candidates)
     try:
         selected = await recommend_places(request, candidates, parsed)
     except ValueError as e:
@@ -166,6 +170,9 @@ async def create_course_from_selection(
     if not selected_attractions:
         raise HTTPException(status_code=422, detail="선택하신 관광지 정보를 다시 불러오지 못했습니다. 다시 시도해주세요.")
 
+    # 방문 시각을 영업시간·휴무일에 맞춰 계산하려면 부가정보가, 붐비는 곳을 앞으로
+    # 당기려면 혼잡도 예보가 필요합니다. 둘 다 캐시만 읽어서 채웁니다.
+    await tour_api_client.fill_extra_info(selected_attractions)
     await tour_api_client.fill_congestion_forecasts(selected_attractions)
 
     try:
@@ -196,6 +203,7 @@ async def create_course(
     candidates, parsed = await _candidates_with_conditions(
         request.query_text, request.user_type.value, request.region, None
     )
+    await tour_api_client.fill_extra_info(candidates[: request.max_stops])
     await tour_api_client.fill_congestion_forecasts(candidates[: request.max_stops])
     try:
         course = await generate_course(request, candidates, parsed)

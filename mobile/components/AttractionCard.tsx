@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { ClockIcon, FirstAidKitIcon } from "phosphor-react-native";
+import { ClockIcon, FirstAidKitIcon, WarningCircleIcon } from "phosphor-react-native";
 import React from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { getCongestionDisplay } from "../constants/congestion";
@@ -65,6 +65,14 @@ export function AttractionCard({
           </View>
           {actions}
         </View>
+        {/* 왜 이 시각인지(개장 시간에 맞춤 등)와, 그날 쉬는 곳이면 그 경고를 함께 보여줍니다. */}
+        {stop.time_note ? <Text style={styles.timeNote}>{stop.time_note}</Text> : null}
+        {stop.closed_note ? (
+          <View style={styles.closedNoticeRow}>
+            <WarningCircleIcon size={13} color={colors.warningText} weight="bold" />
+            <Text style={styles.closedNotice}>{stop.closed_note}</Text>
+          </View>
+        ) : null}
         <Text style={styles.reason}>{stop.reason}</Text>
         {(() => {
           const extraInfoNode = renderExtraInfo(placeWithExtraInfo, colors);
@@ -124,6 +132,18 @@ function makeStyles(colors: ThemeColors) {
   bodyHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
   timeRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   time: { fontSize: 13, fontFamily: fontFamily.semiBold, color: colors.text },
+  timeNote: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary, marginTop: spacing.xs },
+  closedNoticeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+    paddingVertical: 5,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+    backgroundColor: colors.warningLight,
+  },
+  closedNotice: { flex: 1, fontSize: 12, fontFamily: fontFamily.semiBold, color: colors.warningText },
   reason: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: spacing.xs, lineHeight: 18 },
   // 부가 정보 아래 접근성 아이콘 — 부가 정보가 실제로 표시될 때만 구분선을 넣어
   // 섹션을 나눕니다 (홈 화면 카드와 동일한 방식).

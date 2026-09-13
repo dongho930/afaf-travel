@@ -221,7 +221,7 @@ def test_2단계_코스_생성_프롬프트에_혼잡도가_들어간다(monkeyp
 
 # ---- 규칙 기반 대체 로직도 혼잡도를 본다 ----
 
-def test_붐비는_곳을_이른_시간에_배치한다():
+def test_붐비는_곳을_코스_앞쪽에_놓는다():
     request = CourseRequest(query_text="아무거나", max_stops=3)
     candidates = [
         _attraction("1", "한산한곳", congestion_rate=10),
@@ -231,9 +231,25 @@ def test_붐비는_곳을_이른_시간에_배치한다():
 
     raw = ai_service._mock_generate(request, candidates)
 
-    # 붐비는 곳부터 이른 시간대(09시)에 들어가야 합니다
+    # 붐비는 곳부터 먼저 들르도록 순서를 잡습니다 (시각은 schedule 모듈이 붙입니다)
     assert [s["content_id"] for s in raw["stops"]] == ["2", "3", "1"]
-    assert raw["stops"][0]["recommended_arrival_time"] == "09:00"
+
+
+def test_붐비는_곳이_결국_가장_이른_시각을_받는다():
+    """순서(대체 로직) + 시각(스케줄러)이 이어져 실제 코스로 나오는지 확인합니다."""
+    selected = [
+        _attraction("1", "한산한곳", congestion_rate=10),
+        _attraction("2", "아주붐비는곳", congestion_rate=95),
+    ]
+    request = GenerateFromSelectionRequest(
+        query_text="아무거나", selected_content_ids=["1", "2"]
+    )
+
+    course = asyncio.run(ai_service.generate_course_from_selection(request, selected))
+
+    assert course.stops[0].attraction.content_id == "2"
+    assert course.stops[0].recommended_arrival_time == "09:00"
+    assert course.stops[1].recommended_arrival_time > "09:00"
 
 
 def test_혼잡도_정보가_없으면_원래_순서를_지킨다():

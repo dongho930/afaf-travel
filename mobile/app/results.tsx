@@ -128,7 +128,11 @@ export default function ResultsScreen() {
     setSavingOrder(true);
     try {
       const stopOrder = course.stops.map((s) => s.attraction.content_id);
-      await api.updateCourse(course.course_id, { stopOrder });
+      // 서버가 새 순서 기준으로 방문 시각을 다시 계산해서 돌려줍니다 —
+      // 그 결과로 화면을 갱신해야 시각이 순서와 어긋나지 않습니다.
+      const updated = await api.updateCourse(course.course_id, { stopOrder });
+      setCourse(updated);
+      await storage.saveCourse(updated);
       setOrderChanged(false);
     } catch (err) {
       Alert.alert("순서 저장 실패", "잠시 후 다시 시도해주세요.\n" + String(err));

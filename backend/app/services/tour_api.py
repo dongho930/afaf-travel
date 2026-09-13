@@ -2471,6 +2471,42 @@ class TourApiClient:
             return []
         return [CongestionForecast(**f) for f in (row.get("forecast") or [])]
 
+    async def fill_extra_info(self, attractions: list[Attraction]) -> int:
+        """
+        관광지들의 부가정보(이용시간·쉬는날 등)를 캐시에서 채웁니다.
+
+        코스를 짤 때 영업시간과 휴무일을 반영하려면 이 값이 있어야 합니다. 목록
+        조회(search_accessible_attractions)는 속도 때문에 앞쪽 몇 개만 채우므로,
+        코스에 들어갈 장소들은 여기서 따로 채웁니다.
+
+        캐시(attraction_intro_cache)만 읽습니다 — 사용자가 기다리는 경로라
+        공공데이터 API를 새로 부르지 않습니다(캐시는 자정 갱신이 채웁니다).
+        이미 채워져 있으면 그대로 두고, 못 채워도 코스 생성은 계속됩니다.
+
+        반환값은 부가정보가 실제로 들어있는 관광지 수입니다(로그/진단용).
+        """
+        if not attractions or self.use_mock:
+            return sum(1 for a in attractions if a.extra_info)
+
+        need_fill = [a for a in attractions if not a.extra_info]
+        if not need_fill:
+            return len(attractions)
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            try:
+                await asyncio.wait_for(
+                    self._fill_extra_info_with_cache(
+                        client, need_fill, max_concurrency=8, max_new_fetches=_NO_LIVE_FETCH
+                    ),
+                    timeout=6.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("fill_extra_info: 6초 안에 끝나지 않아 일부는 비어있는 채로 둡니다.")
+            except CacheUnavailable as e:
+                logger.warning("fill_extra_info: 부가정보 캐시를 읽지 못했습니다: %s", e)
+
+        return sum(1 for a in attractions if a.extra_info)
+
     async def fill_congestion_forecasts(self, attractions: list[Attraction]) -> int:
         """
         여러 관광지의 날짜별 혼잡도 예보를 캐시에서 한 번에 읽어 채웁니다.

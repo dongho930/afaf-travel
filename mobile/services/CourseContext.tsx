@@ -22,6 +22,11 @@ interface CourseContextValue {
   // 이해했어요"로 보여주기 위해 1단계 응답에서 받아 함께 넘깁니다.
   parsedQuery: ParsedQuery | null;
   setParsedQuery: (p: ParsedQuery | null) => void;
+
+  // 방문 예정일("YYYY-MM-DD"). 그날의 혼잡도 예보와 휴무일을 확인하는 데 쓰이며,
+  // 1단계에서 고른 값을 2단계(코스 생성)까지 그대로 들고 갑니다.
+  visitDate: string | null;
+  setVisitDate: (d: string | null) => void;
 }
 
 const CourseContext = createContext<CourseContextValue | undefined>(undefined);
@@ -34,6 +39,7 @@ export function CourseProvider({ children }: { children: React.ReactNode }) {
   const [recommendations, setRecommendations] = useState<PlaceCandidate[]>([]);
   const [pendingQueryText, setPendingQueryText] = useState("");
   const [parsedQuery, setParsedQuery] = useState<ParsedQuery | null>(null);
+  const [visitDate, setVisitDate] = useState<string | null>(null);
 
   const setRegion = (cd: number | null, name: string | null) => {
     setSigunguCd(cd);
@@ -56,6 +62,8 @@ export function CourseProvider({ children }: { children: React.ReactNode }) {
         setPendingQueryText,
         parsedQuery,
         setParsedQuery,
+        visitDate,
+        setVisitDate,
       }}
     >
       {children}
