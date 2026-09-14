@@ -193,6 +193,52 @@ def test_그날_쉬는_곳인지_확실할_때만_알려준다():
     assert schedule.is_closed_on(irregular, monday) is False     # 확실하지 않으면 판단하지 않습니다
 
 
+# ---- 음식점 식사 시간대 ----
+
+def test_음식점은_점심시간에_맞춰_당겨진다():
+    """09:00에 시작해 체류+이동을 더하면 10시대에 도착하는데, 음식점이면
+    점심 시간대(11:00~14:00) 시작으로 당겨져야 합니다."""
+    first = _place("가", category="관광지", lat=37.28, lng=127.01)
+    restaurant = _place("나", category="음식점", lat=37.28, lng=127.01)
+
+    result = schedule.build_schedule([first, restaurant])
+
+    assert result[1].arrival_time == "11:00"
+    assert "점심" in (result[1].time_note or "")
+
+
+def test_음식점이_이미_식사시간대면_그대로_둔다():
+    result = schedule.build_schedule([_place("가", category="음식점")])
+
+    assert result[0].arrival_time == "09:00"  # 아침 시간대(07:00~09:00) 안이라 그대로
+    assert result[0].time_note is None
+
+
+def test_음식점이_영업시간_때문에_식사시간대에_못_맞추면_포기한다():
+    """15시에 문을 닫는 음식점 도착 예정이 점심과 저녁 사이(16시)로 나오면,
+    저녁 시간대로 밀어붙일 경우 이미 문을 닫은 뒤라 그대로 둡니다."""
+    first = _place("가", category="관광지", lat=37.28, lng=127.01)
+    mid = _place("나", category="관광지", lat=38.28, lng=128.01)
+    late_lunch_only = _place("다", category="음식점", lat=39.28, lng=129.01, hours="09:00~15:00")
+
+    result = schedule.build_schedule([first, mid, late_lunch_only])
+
+    assert result[2].arrival_time == "16:00"
+    assert "저녁" not in (result[2].time_note or "")
+    assert "문을 닫아" in (result[2].time_note or "")
+
+
+def test_음식점이_개장_시각_때문에_밀리면_식사시간대_기준으로_다시_당긴다():
+    """개장(10:30)에 맞춰 밀린 시각(10:30)이 아침·점심 시간대 사이라, 점심
+    시간대 시작으로 한 번 더 당겨져야 합니다."""
+    restaurant = _place("가", category="음식점", hours="10:30~21:00")
+
+    result = schedule.build_schedule([restaurant])
+
+    assert result[0].arrival_time == "11:00"
+    assert "점심" in (result[0].time_note or "")
+
+
 def test_프롬프트용_영업조건은_값이_있을_때만_담는다():
     with_hours = schedule.hours_payload(_place("가", hours="10:00~18:00", rest="매주 월요일"))
     without = schedule.hours_payload(_place("나"))

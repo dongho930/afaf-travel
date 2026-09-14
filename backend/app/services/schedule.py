@@ -49,6 +49,19 @@ _DWELL_MINUTES: dict[str, int] = {
 }
 _DEFAULT_DWELL_MINUTES = 90
 
+_RESTAURANT_CATEGORY = "음식점"
+
+# 음식점 방문이 걸쳐야 하는 식사 시간대. AI/대체 로직에게도 같은 문구로
+# "식사 시간에 들르라"고 요청하지만, 순서만으로는 실제 도착 시각까지 맞다고
+# 보장할 수 없어 여기서 한 번 더 확인해 당겨줍니다. 시간이 이미 이 범위 안이면
+# 건드리지 않고, 범위 앞이면 시작 시각으로 당기고, 이미 지났으면 포기합니다
+# (저녁 시간을 놓쳤다고 자정까지 미루는 것은 오히려 이상한 일정이 됩니다).
+_MEAL_WINDOWS: tuple[tuple[str, int, int], ...] = (
+    ("아침", 7 * 60, 9 * 60),
+    ("점심", 11 * 60, 14 * 60),
+    ("저녁", 17 * 60, 20 * 60),
+)
+
 # 부가정보에서 영업시간/휴무일을 찾을 때 볼 라벨 (카테고리마다 이름이 다릅니다).
 _HOURS_LABELS = ("이용시간", "영업시간", "개장 시간", "이용시기")
 _REST_LABELS = ("쉬는날",)
@@ -252,6 +265,23 @@ def _parse_visit_date(visit_date: Optional[str]) -> Optional[datetime.date]:
         return None
 
 
+def _meal_time_push(current: int) -> tuple[Optional[int], Optional[str]]:
+    """
+    음식점이 식사 시간대(아침/점심/저녁) 안에 들도록 당길 시각을 구합니다.
+
+    이미 어느 한 시간대 안이면 (None, None) — 그대로 두라는 뜻입니다.
+    시간대 앞이면 그 시간대의 시작 시각과 안내 문구를 돌려줍니다.
+    모든 시간대를 이미 지났으면 (None, None) — 자정까지 미루는 것보다는
+    원래 계산된 시각 그대로 두는 편이 낫습니다.
+    """
+    for label, start, end in _MEAL_WINDOWS:
+        if start <= current <= end:
+            return None, None
+        if current < start:
+            return start, f"{label} 식사 시간에 맞춰 방문 시각을 조정했어요"
+    return None, None
+
+
 def _closed_note(hours: PlaceHours, day: Optional[datetime.date]) -> Optional[str]:
     """방문일에 쉬는 곳이면 알려줍니다. 날짜를 모르면 아무 말도 하지 않습니다."""
     if day is None:
@@ -288,6 +318,15 @@ def build_schedule(
         if hours.open_min is not None and current < hours.open_min:
             note = f"{_format(hours.open_min)} 문을 열어서 그 시간에 맞췄어요"
             current = hours.open_min
+
+        # 음식점은 개장 시각을 반영한 뒤에도 식사 시간대 밖이면 당겨줍니다.
+        # 당긴 시각이 영업 종료 이후가 되면(예: 15시에 닫는 곳을 저녁으로 당기는 경우)
+        # 포기합니다 — 실제로 갈 수 없는 시각으로 밀어붙이는 것보다야 낫습니다.
+        if attraction.category == _RESTAURANT_CATEGORY:
+            meal_time, meal_note = _meal_time_push(current)
+            if meal_time is not None and (hours.close_min is None or meal_time <= hours.close_min):
+                current = meal_time
+                note = meal_note
 
         # 그날 안에 실제로 갈 수 있는지 — 셋 중 하나라도 걸리면 다음 날로 넘기는
         # 편이 낫습니다. 휴무일도 포함하는 이유는, 다음 날이면 요일이 바뀌어
