@@ -239,6 +239,81 @@ def test_음식점이_개장_시각_때문에_밀리면_식사시간대_기준�
     assert "점심" in (result[0].time_note or "")
 
 
+# ---- 음식점 순서 배치 ----
+
+def test_음식점을_점심_시간대_자리로_옮긴다():
+    """혼잡도 순으로만 정하면 음식점이 첫 순서(09:00)에 올 수 있습니다.
+    관광지를 먼저 돌다가 점심때 들르도록 자리를 옮겨야 합니다."""
+    restaurant = _place("밥집", category="음식점")
+    spots = [_place(name) for name in ("가", "나", "다")]
+
+    order = schedule.arrange_for_meals([restaurant, *spots])
+    arranged = [[restaurant, *spots][i] for i in order]
+    times = [s.arrival_time for s in schedule.build_schedule(arranged)]
+    position = arranged.index(restaurant)
+
+    assert position != 0                       # 첫 순서에서 밀려났고
+    assert "11:00" <= times[position] <= "14:00"  # 점심 시간대에 들릅니다
+
+
+def test_저녁에만_여는_음식점은_코스_뒤로_간다():
+    restaurant = _place("저녁집", category="음식점", hours="17:00~22:00")
+    spots = [_place(name) for name in ("가", "나")]
+    attractions = [restaurant, *spots]
+
+    order = schedule.arrange_for_meals(attractions)
+    arranged = [attractions[i] for i in order]
+    times = [s.arrival_time for s in schedule.build_schedule(arranged)]
+
+    assert arranged[-1] is restaurant
+    assert times[-1] == "17:00"
+
+
+def test_아침에만_여는_음식점은_코스_앞으로_온다():
+    """10시에 문을 닫는 곳은 아침 자리 말고는 갈 수가 없습니다."""
+    restaurant = _place("해장국", category="음식점", hours="07:00~10:00")
+    spots = [_place(name) for name in ("가", "나")]
+    attractions = [*spots, restaurant]
+
+    order = schedule.arrange_for_meals(attractions)
+    arranged = [attractions[i] for i in order]
+    times = [s.arrival_time for s in schedule.build_schedule(arranged)]
+
+    assert arranged[0] is restaurant
+    assert times[0] == "09:00"
+
+
+def test_음식점이_둘이면_서로_다른_끼니에_배치한다():
+    lunch_spot = _place("점심집", category="음식점")
+    dinner_spot = _place("저녁집", category="음식점")
+    spots = [_place(name) for name in ("가", "나", "다")]
+    attractions = [lunch_spot, dinner_spot, *spots]
+
+    order = schedule.arrange_for_meals(attractions)
+    arranged = [attractions[i] for i in order]
+    times = [s.arrival_time for s in schedule.build_schedule(arranged)]
+
+    first = times[arranged.index(lunch_spot)]
+    second = times[arranged.index(dinner_spot)]
+
+    assert "11:00" <= first <= "14:00"
+    assert "17:00" <= second <= "20:00"
+
+
+def test_음식점이_없으면_순서를_건드리지_않는다():
+    attractions = [_place("가"), _place("나"), _place("다")]
+
+    assert schedule.arrange_for_meals(attractions) == [0, 1, 2]
+
+
+def test_식사_시간대에_못_여는_음식점은_원래_자리에_둔다():
+    """심야에만 여는 곳은 어느 끼니에도 맞출 수 없으니 순서를 흔들지 않습니다."""
+    late_night = _place("야식집", category="음식점", hours="21:00~23:00")
+    attractions = [_place("가"), late_night, _place("나")]
+
+    assert schedule.arrange_for_meals(attractions) == [0, 1, 2]
+
+
 def test_프롬프트용_영업조건은_값이_있을_때만_담는다():
     with_hours = schedule.hours_payload(_place("가", hours="10:00~18:00", rest="매주 월요일"))
     without = schedule.hours_payload(_place("나"))

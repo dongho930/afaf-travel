@@ -29,7 +29,7 @@ from app.models.schemas import (
     TravelPurpose,
 )
 from app.services.memory_cache import TTLCache
-from app.services.schedule import build_schedule, hours_payload, is_closed_on
+from app.services.schedule import arrange_for_meals, build_schedule, hours_payload, is_closed_on
 from app.services.sigungu_codes import resolve_sigungu_codes, signgu_name
 
 settings = get_settings()
@@ -331,7 +331,10 @@ SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동반 가
   앞쪽(이른 시간)에 배치하세요.
 - opens_at이 늦은 곳(예: 11:00)은 코스 앞쪽에 두지 마세요 — 문을 열 때까지
   기다리게 됩니다. 반대로 closes_at이 이른 곳은 뒤로 미루지 마세요.
-- 음식점은 식사 시간(아침/점심/저녁)에 들르도록 순서를 잡으세요.
+- 음식점은 식사 시간(아침/점심/저녁)에 들르도록 순서를 잡으세요. 이때 opens_at /
+  closes_at을 함께 보고, 그 식사 시간에 실제로 문을 여는 음식점만 그 자리에 두세요
+  (예: 17:00에 여는 곳은 점심이 아니라 저녁에). 음식점이 여럿이면 같은 끼니에
+  몰아넣지 말고 서로 다른 식사 시간에 하나씩 배치하세요.
 - closed_weekdays가 방문일과 겹치는 곳은 그날 갈 수 없으므로, 그 사실을 reason에
   분명히 알려주세요 (순서를 바꿔도 해결되지 않습니다).
 - 혼잡도나 영업 정보가 없는 관광지는 그것을 근거로 들지 마세요 (추측 금지).
@@ -424,7 +427,10 @@ ORDER_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동�
   앞쪽(이른 시간)에 배치하세요.
 - opens_at이 늦은 곳(예: 11:00)은 코스 앞쪽에 두지 마세요 — 문을 열 때까지
   기다리게 됩니다. 반대로 closes_at이 이른 곳은 뒤로 미루지 마세요.
-- 음식점은 식사 시간(아침/점심/저녁)에 들르도록 순서를 잡으세요.
+- 음식점은 식사 시간(아침/점심/저녁)에 들르도록 순서를 잡으세요. 이때 opens_at /
+  closes_at을 함께 보고, 그 식사 시간에 실제로 문을 여는 음식점만 그 자리에 두세요
+  (예: 17:00에 여는 곳은 점심이 아니라 저녁에). 음식점이 여럿이면 같은 끼니에
+  몰아넣지 말고 서로 다른 식사 시간에 하나씩 배치하세요.
 - closed_weekdays가 방문일과 겹치는 곳은 그날 갈 수 없으므로, 그 사실을 reason에
   분명히 알려주세요 (순서를 바꿔도 해결되지 않습니다).
 - 혼잡도나 영업 정보가 없는 관광지는 그것을 근거로 들지 마세요 (추측 금지).
@@ -655,6 +661,11 @@ def _stops_from_raw(
     방문 시각은 응답에서 받지 않고 여기서 계산합니다 — 영업시간, 장소 사이 이동
     시간, 체류 시간을 반영해야 하고(schedule.build_schedule), 순서를 바꿨을 때도
     똑같은 규칙으로 다시 매겨져야 하기 때문입니다.
+
+    음식점 위치는 여기서 한 번 더 바로잡습니다(schedule.arrange_for_meals). AI에게도
+    "식사 시간에 들르게 하라"고 요청하지만 지켜진다는 보장이 없고, 규칙 기반 대체
+    로직은 혼잡도만 보고 순서를 정하기 때문입니다. 사용자가 결과 화면에서 직접
+    순서를 바꾸는 경로는 이 함수를 거치지 않으므로 그 선택은 그대로 남습니다.
     """
     by_id = {a.content_id: a for a in candidates}
     ordered: list[tuple[int, Attraction, str]] = []
@@ -664,6 +675,9 @@ def _stops_from_raw(
             continue
         ordered.append((s.get("order", index + 1), attraction, s.get("reason", "")))
     ordered.sort(key=lambda item: item[0])
+
+    arrangement = arrange_for_meals([attraction for _, attraction, _ in ordered])
+    ordered = [ordered[i] for i in arrangement]
 
     attractions = [attraction for _, attraction, _ in ordered]
     schedules = build_schedule(attractions, visit_date)

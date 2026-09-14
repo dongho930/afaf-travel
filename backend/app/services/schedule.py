@@ -62,6 +62,11 @@ _MEAL_WINDOWS: tuple[tuple[str, int, int], ...] = (
     ("저녁", 17 * 60, 20 * 60),
 )
 
+# 음식점에 식사 시간대를 나눠줄 때의 우선순위. 하루 코스는 09:00에 시작하므로
+# 첫 끼를 아침으로 잡으면 대부분 어색합니다 — 아침은 "영업시간상 아침밖에 안 되는
+# 곳"(예: 10시에 문을 닫는 해장국집)에만 돌아가도록 맨 뒤에 둡니다.
+_MEAL_PRIORITY = ("점심", "저녁", "아침")
+
 # 부가정보에서 영업시간/휴무일을 찾을 때 볼 라벨 (카테고리마다 이름이 다릅니다).
 _HOURS_LABELS = ("이용시간", "영업시간", "개장 시간", "이용시기")
 _REST_LABELS = ("쉬는날",)
@@ -280,6 +285,133 @@ def _meal_time_push(current: int) -> tuple[Optional[int], Optional[str]]:
         if current < start:
             return start, f"{label} 식사 시간에 맞춰 방문 시각을 조정했어요"
     return None, None
+
+
+def _servable_meals(hours: PlaceHours) -> list[tuple[str, int, int]]:
+    """영업시간 안에서 실제로 식사할 수 있는 시간대만 추립니다.
+
+    영업시간 정보가 없으면 세 시간대 모두 가능한 것으로 봅니다 — 정보가 없다는
+    이유로 후보에서 빼면 대부분의 음식점이 배치 대상에서 통째로 빠집니다.
+    """
+    servable = []
+    for label, start, end in _MEAL_WINDOWS:
+        opens = max(hours.open_min or 0, start)
+        closes = min(hours.close_min if hours.close_min is not None else 24 * 60, end)
+        if opens <= closes:
+            servable.append((label, start, end))
+    return servable
+
+
+def _assign_meals(hours_by_index: dict[int, PlaceHours]) -> dict[int, tuple[str, int, int]]:
+    """
+    음식점마다 어느 식사 시간대를 맡을지 정합니다 (한 시간대에 한 곳씩).
+
+    선택지가 적은 곳부터 자리를 고릅니다 — '점심에만 여는 곳'이 아무 때나 갈 수
+    있는 곳에 자리를 뺏겨 갈 데가 없어지는 일을 막기 위해서입니다. 자리를 받지
+    못한 곳(식사 시간대보다 음식점이 많거나, 어느 시간대에도 못 여는 경우)은
+    배치 대상에서 빠지고 원래 순서를 지킵니다.
+    """
+    options = {index: _servable_meals(hours) for index, hours in hours_by_index.items()}
+    assigned: dict[int, tuple[str, int, int]] = {}
+    taken: set[str] = set()
+
+    for index in sorted(options, key=lambda i: (len(options[i]), i)):
+        for label in _MEAL_PRIORITY:
+            if label in taken:
+                continue
+            window = next((w for w in options[index] if w[0] == label), None)
+            if window is None:
+                continue
+            assigned[index] = window
+            taken.add(label)
+            break
+    return assigned
+
+
+def arrange_for_meals(attractions: list[Attraction]) -> list[int]:
+    """
+    음식점이 식사 시간대에 오도록 방문 순서를 다시 잡습니다.
+
+    돌려주는 값은 새 순서를 나타내는 '원래 목록에서의 인덱스'입니다 — 호출한 쪽이
+    추천 이유처럼 장소와 나란히 들고 있는 정보도 같이 옮길 수 있어야 하기 때문입니다.
+
+    순서를 정할 때 보는 것은 build_schedule과 같습니다(영업시간·이동·체류 시간).
+    관광지만 늘어놓고 시계를 돌리다가, 배정받은 식사 시간대에 들어섰거나 관광지를
+    하나 더 넣으면 그 시간대를 놓치게 되는 순간에 음식점을 끼워 넣습니다.
+    음식점이 아닌 장소들끼리의 순서(혼잡도 순 등)는 그대로 지킵니다.
+    """
+    hours = [place_hours(a) for a in attractions]
+    assigned = _assign_meals(
+        {i: hours[i] for i, a in enumerate(attractions) if a.category == _RESTAURANT_CATEGORY}
+    )
+    if not assigned:
+        return list(range(len(attractions)))
+
+    # 시간대가 이른 음식점부터 자리를 찾습니다. 나머지는 원래 순서 그대로 대기합니다.
+    pending = sorted(assigned, key=lambda i: assigned[i][1])
+    queue = [i for i in range(len(attractions)) if i not in assigned]
+
+    def arrival_at(previous: Optional[int], nxt: int, clock: int) -> int:
+        """앞 장소에서 출발해 nxt에 도착하는 시각 (첫 장소면 하루 시작 시각 그대로)."""
+        if previous is None:
+            return clock
+        return (
+            clock
+            + dwell_minutes(attractions[previous].category)
+            + travel_minutes(attractions[previous], attractions[nxt])
+        )
+
+    order: list[int] = []
+    clock = _DAY_START_MIN
+    previous: Optional[int] = None
+
+    while pending or queue:
+        chosen: Optional[int] = None
+        for index in pending:
+            _, start, end = assigned[index]
+            # 여는 시각을 기다린 뒤가 아니라 '그냥 갔을 때' 도착하는 시각으로 봅니다.
+            # 개장까지 기다린 시각으로 재면 17시에 여는 곳이 09시에도 "제때"로
+            # 보여서, 아무 데도 안 들르고 여덟 시간을 기다리는 코스가 됩니다.
+            at = arrival_at(previous, index, clock)
+
+            if at >= start or at > end:
+                # 식사 시간대에 들어섰거나(제때), 이미 지나버렸거나(더 미룰 이유 없음).
+                chosen = index
+                break
+            if not queue:
+                chosen = index
+                break
+            # 관광지를 하나 더 넣으면 이 식사 시간대를 놓치는지 내다봅니다.
+            nxt = queue[0]
+            back = arrival_at(previous, nxt, clock)
+            back += dwell_minutes(attractions[nxt].category) + travel_minutes(
+                attractions[nxt], attractions[index]
+            )
+            if back > end:
+                chosen = index
+                break
+
+        if chosen is None:
+            chosen = queue.pop(0)
+        else:
+            pending.remove(chosen)
+
+        # 다음 장소 도착 시각을 가늠하려면 build_schedule과 같은 기준으로 시계를
+        # 맞춰야 합니다 (최종 시각은 build_schedule이 다시 계산합니다).
+        clock = arrival_at(previous, chosen, clock)
+        if hours[chosen].open_min is not None and clock < hours[chosen].open_min:
+            clock = hours[chosen].open_min
+        if attractions[chosen].category == _RESTAURANT_CATEGORY:
+            meal_time, _ = _meal_time_push(clock)
+            if meal_time is not None and (
+                hours[chosen].close_min is None or meal_time <= hours[chosen].close_min
+            ):
+                clock = meal_time
+
+        order.append(chosen)
+        previous = chosen
+
+    return order
 
 
 def _closed_note(hours: PlaceHours, day: Optional[datetime.date]) -> Optional[str]:
