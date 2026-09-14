@@ -26,6 +26,12 @@ from app.models.schemas import Attraction
 
 # 하루 일정의 기본 시작 시각(09:00)과, 이보다 늦어지면 "하루에 다 돌기 어렵다"고
 # 알려주는 기준(22:00). 첫 장소가 더 늦게 열면 시작 시각은 그 개장 시각이 됩니다.
+#
+# 이 두 값은 화면에 보여주는 '추천 방문 시간'의 범위이기도 합니다. 계산은 22시를
+# 넘겨서도 이어지지만(그래야 '하루에 못 돈다'를 판단할 수 있습니다), 표시만큼은
+# 09:00~22:00 안에 머뭅니다 — 예전에는 일정이 길어지면 23:40이 그대로 찍히거나,
+# 자정을 넘긴 25:00이 _format의 24시간 나머지 연산 때문에 '01:00'으로 감겨서
+# 새벽에 가라는 것처럼 보였습니다.
 _DAY_START_MIN = 9 * 60
 _TOO_LATE_MIN = 22 * 60
 
@@ -435,6 +441,10 @@ def build_schedule(
     다음 장소부터는 '앞 장소 체류 시간 + 이동 시간'을 더해 나갑니다. 도착 예정
     시각이 개장 전이면 개장 시각으로 미루고, 영업 종료 이후면 그대로 두되 안내를
     붙입니다 — 시간을 조용히 바꾸면 사용자가 잘못된 계획을 세우게 됩니다.
+
+    돌려주는 시각은 언제나 09:00~22:00 안입니다. 22시를 넘기는 장소는 이미
+    fits_today=False로 표시되므로, 시각은 22:00에서 멈추고 '다음 날로 나누기'
+    안내가 대신 상황을 설명합니다.
     """
     day = _parse_visit_date(visit_date)
     schedules: list[StopSchedule] = []
@@ -477,7 +487,10 @@ def build_schedule(
 
         schedules.append(
             StopSchedule(
-                arrival_time=_format(current),
+                # 표시는 22시에서 멈춥니다. 그 뒤 장소들은 위에서 이미 '하루 안에
+                # 못 돈다'로 표시돼 다음 날로 나누자는 안내가 붙으므로, 시각까지
+                # 밤늦게/새벽으로 찍어 혼란을 더할 이유가 없습니다.
+                arrival_time=_format(min(current, _TOO_LATE_MIN)),
                 time_note=note,
                 closed_note=closed_note,
                 fits_today=fits_today,
