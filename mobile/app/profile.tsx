@@ -5,6 +5,7 @@ import { useRouter } from "expo-router";
 import { CameraIcon } from "phosphor-react-native";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Alert } from "../services/crossPlatformAlert";
 import { api } from "../services/api";
 import { useAuth } from "../services/AuthContext";
@@ -144,7 +145,7 @@ export default function ProfileScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView style={styles.container} behavior="padding">
       <View style={styles.avatarSection}>
         <TouchableOpacity onPress={handlePickAvatar} disabled={uploadingAvatar}>
           {profile?.avatar_url ? (
@@ -283,7 +284,7 @@ export default function ProfileScreen() {
           </View>
         </View>
       )}
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

@@ -20,6 +20,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Alert } from "../../services/crossPlatformAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DateRangePickerModal } from "../../components/DateRangePickerModal";
@@ -204,9 +205,11 @@ export default function PlannerScreen() {
   return (
     // edges=["top"]로 화면 상단만 안전영역 처리합니다 (홈 화면과 동일한 방식).
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
       <FlatList
         data={[1]}
         keyExtractor={() => "content"}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.container}
         renderItem={() => (
           <>
@@ -305,6 +308,7 @@ export default function PlannerScreen() {
           </>
         )}
       />
+      </KeyboardAvoidingView>
 
       {/* 방문 예정일은 하루만 고르면 되므로, 달력에서 고른 시작일만 씁니다. */}
       <DateRangePickerModal
@@ -319,7 +323,7 @@ export default function PlannerScreen() {
       />
 
       <Modal visible={regionModalVisible} animationType="slide" transparent onRequestClose={() => setRegionModalVisible(false)}>
-        <View style={styles.modalBackdrop}>
+        <KeyboardAvoidingView style={styles.modalBackdrop} behavior="padding">
           <View style={styles.modalSheet}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>지역 선택</Text>
@@ -369,7 +373,7 @@ export default function PlannerScreen() {
               />
             )}
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

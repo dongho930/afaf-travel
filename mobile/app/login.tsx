@@ -8,6 +8,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Alert } from "../services/crossPlatformAlert";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
@@ -60,7 +61,7 @@ export default function LoginScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView style={styles.container} behavior="padding">
       <Text style={styles.title}>로그인</Text>
       <Text style={styles.subtitle}>로그인하면 내가 만든 코스 이력을 다시 볼 수 있어요.</Text>
 
@@ -95,7 +96,7 @@ export default function LoginScreen() {
       <Pressable onPress={() => router.push("/signup")} style={styles.linkButton}>
         <Text style={styles.linkText}>계정이 없으신가요? 회원가입</Text>
       </Pressable>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

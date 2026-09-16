@@ -30,12 +30,14 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Alert } from "../services/crossPlatformAlert";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AccessibilityIcons } from "../components/AccessibilityIcons";
 import { FadeInView } from "../components/FadeInView";
 import { HorizontalScrollWeb } from "../components/HorizontalScrollWeb";
 import { PostCard } from "../components/PostCard";
+import { RatingSummary, ReviewRatingSummary, summarizeRatings } from "../components/ReviewRatingSummary";
 import { SaveCourseModal, SaveCourseParams } from "../components/SaveCourseModal";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
@@ -94,10 +96,10 @@ interface ReviewPhotoDraft {
  * 값인지 알 수 없습니다. 이름과 함께 한 문장으로 묶고, %는 기기마다 읽는 방식이
  * 달라서 '퍼센트'로 풀어 적습니다.
  */
-function detailHeaderLabel(attraction: Attraction): string {
+function detailHeaderLabel(attraction: Attraction, rating: RatingSummary): string {
   const parts: string[] = [attraction.name];
-  if (typeof attraction.avg_rating === "number") {
-    parts.push(`평점 ${attraction.avg_rating.toFixed(1)}${attraction.review_count ? ` 리뷰 ${attraction.review_count}개` : ""}`);
+  if (rating.count > 0) {
+    parts.push(`평점 ${rating.average.toFixed(1)} 리뷰 ${rating.count}개`);
   }
   if (typeof attraction.congestion_rate === "number") {
     parts.push(`혼잡도 ${Math.round(attraction.congestion_rate)}퍼센트`);
@@ -389,10 +391,13 @@ export default function AttractionDetailScreen() {
   }
 
   const myReview = session ? reviews.find((r) => r.user_id === session.user.id) : null;
+  // 배지와 리뷰 요약이 같은 값을 보여주도록, 둘 다 불러온 리뷰 목록에서 계산합니다.
+  // 서버의 avg_rating은 리뷰 등록 직후 화면을 다시 불러오기 전까지 이전 값이라 쓰지 않습니다.
+  const ratingSummary = summarizeRatings(reviews);
 
   return (
     <>
-    <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+    <KeyboardAwareScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false} bottomOffset={20}>
       {stage >= 1 && (
       <FadeInView duration={280}>
       {attraction.image_url ? (
@@ -411,15 +416,15 @@ export default function AttractionDetailScreen() {
       <View
         style={styles.titleRow}
         accessible
-        accessibilityLabel={detailHeaderLabel(attraction)}
+        accessibilityLabel={detailHeaderLabel(attraction, ratingSummary)}
       >
         <Text style={styles.title}>{attraction.name}</Text>
         <View style={styles.badgeGroup}>
-          {typeof attraction.avg_rating === "number" && (
+          {ratingSummary.count > 0 && (
             <View style={styles.ratingBadge}>
               <StarIcon size={12} color={colors.warningText} weight="fill" />
               <Text style={styles.ratingBadgeText}>
-                {attraction.avg_rating.toFixed(1)} ({attraction.review_count})
+                {ratingSummary.average.toFixed(1)} ({ratingSummary.count})
               </Text>
             </View>
           )}
@@ -564,6 +569,8 @@ export default function AttractionDetailScreen() {
         </Text>
       </View>
 
+      {ratingSummary.count > 0 && <ReviewRatingSummary summary={ratingSummary} colors={colors} />}
+
       <View style={styles.reviewForm}>
         <Text style={styles.reviewFormLabel}>
           {myReview ? "내 리뷰 수정하기" : "리뷰 남기기"}
@@ -695,7 +702,7 @@ export default function AttractionDetailScreen() {
       )}
       </FadeInView>
       )}
-    </ScrollView>
+    </KeyboardAwareScrollView>
 
     <Modal
       visible={directionsModalVisible}

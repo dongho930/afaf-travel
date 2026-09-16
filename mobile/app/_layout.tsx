@@ -5,6 +5,7 @@ import { StatusBar } from "expo-status-bar";
 import React from "react";
 import { Platform, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { BottomTabBar } from "../components/BottomTabBar";
 import { WebFrame } from "../components/WebFrame";
@@ -108,17 +109,19 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }} onLayout={onLayoutRootView}>
-      <SafeAreaProvider>
-        <ThemeProvider>
-          <AuthProvider>
-            <ProfileProvider>
-              <CourseProvider>
-                <ThemedApp />
-              </CourseProvider>
-            </ProfileProvider>
-          </AuthProvider>
-        </ThemeProvider>
-      </SafeAreaProvider>
+      <KeyboardProvider>
+        <SafeAreaProvider>
+          <ThemeProvider>
+            <AuthProvider>
+              <ProfileProvider>
+                <CourseProvider>
+                  <ThemedApp />
+                </CourseProvider>
+              </ProfileProvider>
+            </AuthProvider>
+          </ThemeProvider>
+        </SafeAreaProvider>
+      </KeyboardProvider>
     </GestureHandlerRootView>
   );
 }

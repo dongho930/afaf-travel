@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import { NotePencilIcon, XIcon, type Icon } from "phosphor-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Alert } from "../../services/crossPlatformAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AccessibilityIcons, accessibilityFeatureLabels } from "../../components/AccessibilityIcons";
@@ -641,7 +642,7 @@ export default function AccessibilityScreen() {
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
-            <ScrollView keyboardShouldPersistTaps="handled">
+            <KeyboardAwareScrollView keyboardShouldPersistTaps="handled" bottomOffset={20}>
               <Text style={styles.modalTitle}>접근성 제보하기</Text>
 
               <Text style={styles.fieldLabel}>어떤 여행지인가요?</Text>
@@ -745,7 +746,7 @@ export default function AccessibilityScreen() {
                   )}
                 </Pressable>
               </View>
-            </ScrollView>
+            </KeyboardAwareScrollView>
           </View>
         </View>
       </Modal>

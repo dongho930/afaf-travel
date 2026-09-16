@@ -14,6 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Alert } from "../services/crossPlatformAlert";
 import { PhotoCarousel } from "../components/PhotoCarousel";
 import { PhotoEditor } from "../components/PhotoEditor";
@@ -173,7 +174,7 @@ export default function PostCreateScreen() {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <KeyboardAwareScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" bottomOffset={20}>
       <Text style={styles.fieldLabel}>어떤 여행지인가요?</Text>
       {selectedPlace ? (
         <View style={styles.selectedPlaceChip}>
@@ -312,7 +313,7 @@ export default function PostCreateScreen() {
       {editing && (
         <PhotoEditor key={editing.key} imageUri={editing.uri} onCancel={handleEditorCancel} onConfirm={handleEditorConfirm} />
       )}
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }
 

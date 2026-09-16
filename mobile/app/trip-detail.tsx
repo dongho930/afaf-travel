@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Alert } from "../services/crossPlatformAlert";
 import { api } from "../services/api";
 import { useCourseContext } from "../services/CourseContext";
@@ -175,7 +176,7 @@ export default function TripDetailScreen() {
         transparent
         onRequestClose={() => setEditingCourse(null)}
       >
-        <View style={styles.modalBackdrop}>
+        <KeyboardAvoidingView style={styles.modalBackdrop} behavior="padding">
           <View style={styles.modalSheet}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>코스 이름 수정</Text>
@@ -202,7 +203,7 @@ export default function TripDetailScreen() {
               )}
             </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </>
   );

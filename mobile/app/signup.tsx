@@ -8,6 +8,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Alert } from "../services/crossPlatformAlert";
 import { api } from "../services/api";
 import { useAuth } from "../services/AuthContext";
@@ -93,7 +94,11 @@ export default function SignupScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAwareScrollView
+      contentContainerStyle={styles.container}
+      keyboardShouldPersistTaps="handled"
+      bottomOffset={20}
+    >
       <Text style={styles.title}>회원가입</Text>
       <Text style={styles.subtitle}>아이디를 만들고 이메일/비밀번호로 가입해요.</Text>
 
@@ -148,13 +153,13 @@ export default function SignupScreen() {
       <Pressable onPress={() => router.dismissTo("/login")} style={styles.linkButton}>
         <Text style={styles.linkText}>이미 계정이 있으신가요? 로그인</Text>
       </Pressable>
-    </View>
+    </KeyboardAwareScrollView>
   );
 }
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { flex: 1, padding: spacing.xl, justifyContent: "center", backgroundColor: colors.background },
+  container: { flexGrow: 1, padding: spacing.xl, justifyContent: "center", backgroundColor: colors.background },
   title: { fontSize: 24, fontFamily: fontFamily.bold, color: colors.text, marginBottom: spacing.xs + 2 },
   subtitle: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textTertiary, marginBottom: spacing.xl, lineHeight: 18 },
   input: {

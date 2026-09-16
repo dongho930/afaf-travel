@@ -18,6 +18,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AccessibilityIcons, accessibilityFeatureLabels } from "../../components/AccessibilityIcons";
 import { AnimatedChip } from "../../components/AnimatedChip";
@@ -613,13 +614,14 @@ export default function HomeScreen() {
     // edges=["top"]로 화면 상단만 안전영역 처리합니다 — 스크롤을 위로 당겨도
     // 콘텐츠가 상태표시줄(시계/배터리) 영역까지 밀려 올라가지 않게 막아줍니다.
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
-      <ScrollView
+      <KeyboardAwareScrollView
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
         bounces={false}
         overScrollMode="never"
         onScroll={handleScroll}
         scrollEventThrottle={16}
+        keyboardShouldPersistTaps="handled"
       >
         <View style={styles.header}>
           <View style={styles.logoRow}>
@@ -820,7 +822,7 @@ export default function HomeScreen() {
             {loadingMore && <ActivityIndicator style={{ marginTop: spacing.sm }} color={colors.primary} />}
           </>
         ))}
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

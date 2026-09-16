@@ -1,22 +1,25 @@
 import { useRouter } from "expo-router";
-import {
-  CaretDownIcon,
-  CaretUpIcon,
-  FloppyDiskIcon,
-  HandTapIcon,
-  MapTrifoldIcon,
-  WifiSlashIcon,
-} from "phosphor-react-native";
+import { ClockCounterClockwiseIcon, FloppyDiskIcon, HandTapIcon, MapTrifoldIcon, WifiSlashIcon } from "phosphor-react-native";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator,
+  LayoutAnimation,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Alert } from "../services/crossPlatformAlert";
 import DraggableFlatList, { ScaleDecorator } from "react-native-draggable-flatlist";
-import { AttractionCard } from "../components/AttractionCard";
 import { EXTRA_INFO_LABELS_BY_CATEGORY } from "../components/ExtraInfoList";
 import { FadeInView } from "../components/FadeInView";
 import { SaveCourseModal, SaveCourseParams } from "../components/SaveCourseModal";
 import { ScreenHeader } from "../components/ScreenHeader";
+import { TimelineStopItem } from "../components/TimelineStopItem";
+import { useReduceMotion } from "../services/useReduceMotion";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
@@ -48,6 +51,9 @@ export default function ResultsScreen() {
   // 때문에 카드를 먼저 보여줬다가 부가 정보만 나중에 툭 튀어나오지 않도록,
   // 부가 정보까지 다 준비된 뒤에야(홈 화면과 같은 방식) 목록을 부드럽게 보여줍니다.
   const [extraInfoReady, setExtraInfoReady] = useState(false);
+  // 버튼으로 방금 옮긴 장소. 해당 카드 테두리를 잠깐 강조하는 데 씁니다.
+  const [lastMoved, setLastMoved] = useState<{ id: string; token: number } | null>(null);
+  const reduceMotion = useReduceMotion();
 
   useEffect(() => {
     // 앱을 재시작해 컨텍스트가 비어 있는 경우, 마지막으로 캐싱된 코스를 오프라인으로 복원
@@ -142,10 +148,9 @@ export default function ResultsScreen() {
     setOrderChanged(true);
   };
 
-  // 웹에서는 길게 눌러 끄는 드래그 순서변경이 동작하지 않아(사용 중인 드래그
-  // 라이브러리가 데스크톱 브라우저에서 제스처를 안정적으로 못 잡음), 대신
-  // 카드마다 위/아래 버튼으로 순서를 바꿀 수 있게 합니다. 결과는 드래그와
-  // 동일하게 로컬 반영 + '순서 저장' 버튼 노출입니다.
+  // 위/아래 버튼 순서 변경은 모든 플랫폼에서 제공합니다(웹은 드래그 제스처가
+  // 불안정해서 버튼이 유일한 수단입니다). 결과는 드래그와 동일하게 로컬 반영 +
+  // '순서 저장' 버튼 노출입니다.
   const handleMoveStop = (index: number, direction: -1 | 1) => {
     if (!course) return;
     const targetIndex = index + direction;
@@ -153,8 +158,12 @@ export default function ResultsScreen() {
     const stops = [...course.stops];
     [stops[index], stops[targetIndex]] = [stops[targetIndex], stops[index]];
     const reordered = stops.map((stop, i) => ({ ...stop, order: i + 1 }));
+    if (!reduceMotion) {
+      LayoutAnimation.configureNext(LayoutAnimation.create(220, "easeInEaseOut", "opacity"));
+    }
     setCourse({ ...course, stops: reordered });
     setOrderChanged(true);
+    setLastMoved((prev) => ({ id: stops[targetIndex].attraction.content_id, token: (prev?.token ?? 0) + 1 }));
   };
 
   const handleSaveOrder = async () => {
@@ -261,8 +270,8 @@ export default function ResultsScreen() {
           <HandTapIcon size={13} color={colors.textTertiary} weight="bold" />
           <Text style={styles.orderHint}>
             {Platform.OS === "web"
-              ? "카드의 화살표 버튼으로 순서를 바꿀 수 있어요"
-              : "카드를 길게 눌러서 순서를 바꿀 수 있어요"}
+              ? "오른쪽 화살표로 순서를 바꿀 수 있어요"
+              : "오른쪽 화살표나 카드를 길게 눌러 순서를 바꿀 수 있어요"}
           </Text>
         </View>
         {orderChanged && (
@@ -279,6 +288,12 @@ export default function ResultsScreen() {
           </TouchableOpacity>
         )}
       </View>
+      {orderChanged && (
+        <View style={styles.staleNotice}>
+          <ClockCounterClockwiseIcon size={13} color={colors.textSecondary} weight="bold" />
+          <Text style={styles.staleNoticeText}>순서를 저장하면 방문 시간이 다시 계산돼요</Text>
+        </View>
+      )}
     </>
   );
 
@@ -291,12 +306,14 @@ export default function ResultsScreen() {
       <Text style={styles.nextDayHint}>
         저장하면 1일차와 같은 여행에 함께 담겨요. 순서 조정은 저장 후 여행 상세에서 할 수 있어요.
       </Text>
-      {nextDayCourse.stops.map((stop) => (
-        <AttractionCard
+      {nextDayCourse.stops.map((stop, i) => (
+        <TimelineStopItem
           key={stop.attraction.content_id}
           stop={stop}
           userType={nextDayCourse.generated_for}
           extraInfo={extraInfoMap[stop.attraction.content_id]}
+          isFirst={i === 0}
+          isLast={i === nextDayCourse.stops.length - 1}
         />
       ))}
     </View>
@@ -316,51 +333,27 @@ export default function ResultsScreen() {
             ListFooterComponent={nextDaySection}
             contentContainerStyle={styles.listContent}
             onDragEnd={handleDragEnd}
-            renderItem={({ item, drag, isActive, getIndex }) => (
-              <ScaleDecorator>
-                <Pressable
-                  onLongPress={Platform.OS === "web" ? undefined : drag}
-                  disabled={isActive}
-                  style={isActive ? styles.dragging : undefined}
-                >
-                  <AttractionCard
+            renderItem={({ item, drag, isActive, getIndex }) => {
+              const index = getIndex() ?? 0;
+              const id = item.attraction.content_id;
+              return (
+                <ScaleDecorator>
+                  <TimelineStopItem
                     stop={item}
                     userType={course.generated_for}
-                    extraInfo={extraInfoMap[item.attraction.content_id]}
-                    actions={
-                      Platform.OS === "web" ? (
-                        <View style={styles.moveButtonGroup}>
-                          <Pressable
-                            style={styles.moveButton}
-                            disabled={getIndex() === 0}
-                            onPress={() => handleMoveStop(getIndex() ?? 0, -1)}
-                            accessibilityLabel="위로 순서 이동"
-                          >
-                            <CaretUpIcon
-                              size={14}
-                              color={getIndex() === 0 ? colors.textTertiary : colors.primary}
-                              weight="bold"
-                            />
-                          </Pressable>
-                          <Pressable
-                            style={styles.moveButton}
-                            disabled={getIndex() === course.stops.length - 1}
-                            onPress={() => handleMoveStop(getIndex() ?? 0, 1)}
-                            accessibilityLabel="아래로 순서 이동"
-                          >
-                            <CaretDownIcon
-                              size={14}
-                              color={getIndex() === course.stops.length - 1 ? colors.textTertiary : colors.primary}
-                              weight="bold"
-                            />
-                          </Pressable>
-                        </View>
-                      ) : undefined
-                    }
+                    extraInfo={extraInfoMap[id]}
+                    isFirst={index === 0}
+                    isLast={index === course.stops.length - 1}
+                    timeStale={orderChanged}
+                    onMoveUp={() => handleMoveStop(index, -1)}
+                    onMoveDown={() => handleMoveStop(index, 1)}
+                    onLongPress={Platform.OS === "web" ? undefined : drag}
+                    isDragging={isActive}
+                    highlightToken={lastMoved?.id === id ? lastMoved.token : 0}
                   />
-                </Pressable>
-              </ScaleDecorator>
-            )}
+                </ScaleDecorator>
+              );
+            }}
           />
         </FadeInView>
       ) : (
@@ -424,19 +417,17 @@ function makeStyles(colors: ThemeColors) {
   },
   saveOrderButtonDisabled: { opacity: 0.6 },
   saveOrderButtonText: { color: colors.onPrimary, fontFamily: fontFamily.bold, fontSize: 12 },
-  dragging: { opacity: 0.7 },
-  moveButtonGroup: {
+  staleNotice: {
     flexDirection: "row",
-    gap: spacing.xs,
-  },
-  moveButton: {
-    width: 26,
-    height: 26,
-    borderRadius: radius.sm,
-    backgroundColor: colors.primaryLight,
     alignItems: "center",
-    justifyContent: "center",
+    gap: spacing.xs,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.sm,
+    paddingVertical: spacing.xs + 2,
+    paddingHorizontal: spacing.sm,
+    marginBottom: spacing.md,
   },
+  staleNoticeText: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textSecondary, flexShrink: 1 },
   offlineBanner: {
     flexDirection: "row",
     alignItems: "center",
