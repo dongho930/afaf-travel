@@ -154,9 +154,14 @@ async def _get_transit_route(start_lat: float, start_lng: float, end_lat: float,
     data = resp.json()
     if "error" in data:
         # ODsay는 에러도 200으로 응답하며 error 필드에 메시지를 담습니다.
+        # 코드도 함께 넘깁니다 — 500(ApiKeyAuthFailed)은 키가 아예 안 먹는
+        # 경우이고, 출발지와 도착지가 너무 가까울 때처럼 정상적인 거절도 있어서
+        # 코드가 없으면 어느 쪽인지 구분되지 않습니다.
         err = data["error"]
-        message = err[0].get("message") if isinstance(err, list) and err else str(err)
-        raise HTTPException(status_code=502, detail=f"ODsay 응답 오류: {message}")
+        first = err[0] if isinstance(err, list) and err else {}
+        message = first.get("message") if isinstance(first, dict) else str(err)
+        code = first.get("code") if isinstance(first, dict) else None
+        raise HTTPException(status_code=502, detail=f"ODsay 응답 오류({code}): {message}")
 
     result = data.get("result", {})
     paths = result.get("path", [])
