@@ -86,9 +86,10 @@ export default function SelectPlacesScreen() {
     });
   };
 
-  // 고른 장소가 없으면 만들 코스도 없습니다. 버튼 글자가 이미 안내하므로
-  // 누를 수 없게 두고 흐리게 보여줍니다.
-  const canSubmit = selectedIds.size > 0 && !isSubmitting && !isRefreshing;
+  // 무언가 진행 중일 때만 버튼을 잠급니다. 고른 장소가 없어도 버튼은 초록색
+  // 그대로 두고(흐리게 하지 않고) 글자로 안내합니다 — 누르면 무엇을 해야 하는지
+  // 알려주는 편이, 눌리지 않는 흐린 버튼보다 낫습니다.
+  const isBusy = isSubmitting || isRefreshing;
 
   // 마음에 드는 곳이 없을 때 같은 질의로 후보를 다시 받아옵니다. 서버가 매번
   // 다른 표본을 뽑아주므로 누를 때마다 새로운 장소가 나옵니다.
@@ -231,11 +232,11 @@ export default function SelectPlacesScreen() {
         <Pressable
           style={({ pressed }) => [
             styles.refreshButton,
-            pressed && !isRefreshing && styles.buttonPressed,
-            isRefreshing && styles.buttonDisabled,
+            pressed && !isBusy && styles.buttonPressed,
+            isBusy && styles.buttonDisabled,
           ]}
           onPress={handleRefresh}
-          disabled={isRefreshing}
+          disabled={isBusy}
           accessibilityRole="button"
           accessibilityLabel="장소 새로고침"
           accessibilityHint="같은 조건으로 다른 장소를 다시 추천받습니다"
@@ -243,18 +244,21 @@ export default function SelectPlacesScreen() {
           {isRefreshing ? (
             <ActivityIndicator size="small" color={colors.primary} />
           ) : (
-            <ArrowsClockwiseIcon size={19} color={colors.primary} weight="bold" />
+            <>
+              <ArrowsClockwiseIcon size={17} color={colors.primary} weight="bold" />
+              <Text style={styles.refreshText}>새로고침</Text>
+            </>
           )}
         </Pressable>
 
         <Pressable
           style={({ pressed }) => [
             styles.submitButton,
-            pressed && canSubmit && styles.buttonPressed,
-            !canSubmit && styles.buttonDisabled,
+            pressed && !isBusy && styles.buttonPressed,
+            isBusy && styles.buttonDisabled,
           ]}
           onPress={handleCreateCourse}
-          disabled={!canSubmit}
+          disabled={isBusy}
           accessibilityRole="button"
           accessibilityLabel={
             selectedIds.size > 0
@@ -268,7 +272,7 @@ export default function SelectPlacesScreen() {
             <>
               <SparkleIcon size={17} color={colors.primary} weight="bold" />
               <Text style={styles.submitText}>
-                {selectedIds.size > 0 ? `${selectedIds.size}곳으로 코스 만들기` : "장소를 선택해주세요"}
+                {selectedIds.size > 0 ? `${selectedIds.size}곳 코스 만들기` : "장소를 선택해주세요"}
               </Text>
             </>
           )}
@@ -429,15 +433,18 @@ function makeStyles(colors: ThemeColors) {
     gap: spacing.sm,
   },
   refreshButton: {
-    width: 52,
     height: 52,
+    flexDirection: "row",
+    paddingHorizontal: spacing.md,
     backgroundColor: colors.background,
     borderWidth: 1,
     borderColor: colors.primary,
     borderRadius: radius.lg - 2,
     alignItems: "center",
     justifyContent: "center",
+    gap: spacing.xs + 1,
   },
+  refreshText: { color: colors.primary, fontSize: 14, fontFamily: fontFamily.bold },
   // 추천 코스 화면의 '지도로 전체 보기' 버튼과 같은 모양 — 테두리만 있는
   // 52px 높이에 아이콘 + 글자.
   submitButton: {
@@ -454,7 +461,9 @@ function makeStyles(colors: ThemeColors) {
   },
   buttonPressed: { backgroundColor: colors.surfaceAlt },
   buttonDisabled: { opacity: 0.45 },
-  submitText: { color: colors.primary, fontSize: 16, fontFamily: fontFamily.bold },
+  // 새로고침 버튼이 옆자리를 차지해서, 좁은 폰(320px)에서도 글자가 눌리지 않도록
+  // 한 단계 줄였습니다.
+  submitText: { color: colors.primary, fontSize: 15, fontFamily: fontFamily.bold },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, backgroundColor: colors.background },
   emptyText: { fontSize: 15, fontFamily: fontFamily.regular, color: colors.textTertiary, marginBottom: spacing.lg, textAlign: "center", lineHeight: 20 },
   emptyButton: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.xl - 4, paddingVertical: spacing.md },

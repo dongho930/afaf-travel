@@ -76,6 +76,28 @@ const WALKABLE_METERS: Record<UserType, number> = {
 // 안쪽이면 대중교통을 먼저 권합니다.
 const TRANSIT_TOLERANCE = 1.5;
 
+// 이 직선거리를 넘으면 도보 경로를 조회하지 않습니다. 걸어갈 만한 최대 거리가
+// 1km(WALKABLE_METERS의 최댓값)인데 실제 도보 거리는 직선거리보다 항상 기니까,
+// 직선으로 2km가 넘으면 어떤 사용자 유형에게도 도보가 추천될 수 없습니다.
+// (넉넉히 두 배로 잡아서, 도보 경로가 유일한 대안으로 쓰이는 경우도 남겨둡니다.)
+const WALK_SKIP_METERS = 2000;
+
+// '조회했지만 경로가 없음'을 뜻하는 값. 조회 실패(null)와 구분해야 카드에
+// '도보 정보 없음'이라고 잘못 표시되지 않습니다.
+const NO_ROUTE: RouteFetchResult = { distance_m: null, duration_sec: null, path: [] };
+
+/** 두 지점 사이의 직선(대권) 거리(m). 도보 조회를 건너뛸지 판단하는 데만 씁니다. */
+function straightDistanceM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const R = 6371000;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
 interface LegSummary {
   from: { name: string; latitude: number; longitude: number };
   to: { name: string; latitude: number; longitude: number };
@@ -219,9 +241,15 @@ export default function MapScreen() {
           const start = markers[i];
           const end = markers[i + 1];
 
+          // 직선거리가 이미 걸어갈 만한 거리를 넘으면 실제 도보 거리는 반드시 그보다
+          // 더 멉니다 — 물어볼 것도 없이 도보는 후보에서 빠지므로 조회를 건너뜁니다.
+          // TMAP 보행자 경로는 건당 11원으로 대중교통(0.88원)의 12배라, 이 화면
+          // 요금의 대부분을 차지합니다. 먼 구간을 걸러내면 그 대부분이 사라집니다.
+          const farApart = straightDistanceM(start, end) > WALK_SKIP_METERS;
+
           const [car, walk, transit] = await Promise.all([
             fetchRoute("car", start, end),
-            fetchRoute("walk", start, end),
+            farApart ? Promise.resolve(NO_ROUTE) : fetchRoute("walk", start, end),
             fetchRoute("transit", start, end),
           ]);
 
