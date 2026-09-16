@@ -4,14 +4,12 @@
 지원 모드:
 - car     : 카카오모빌리티 길찾기 API (자동차)
 - walk    : Tmap 보행자 경로 API (도보)
-- transit : ODsay 길찾기 API (대중교통)
+- transit : Tmap 대중교통 경로 API (대중교통)
 
 프론트엔드(모바일 앱 또는 /map-view)는 이 엔드포인트를 먼저 호출해서
 실제 도로를 따라가는 좌표 배열(path)을 받은 뒤, 그 좌표로 지도에
 Polyline을 그리면 됩니다. (직선 연결이 아니라 실제 길을 따라가는 경로)
 """
-from urllib.parse import unquote
-
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 
@@ -128,78 +126,86 @@ async def _get_walk_route(start_lat: float, start_lng: float, end_lat: float, en
     }
 
 
-async def _get_transit_route(start_lat: float, start_lng: float, end_lat: float, end_lng: float) -> dict:
-    """ODsay 길찾기 API (대중교통)"""
-    if not settings.odsay_api_key:
-        raise HTTPException(status_code=500, detail="ODSAY_API_KEY가 설정되지 않았습니다.")
+def _linestring_to_path(linestring: str) -> list[list[float]]:
+    """'경도,위도 경도,위도 ...' 문자열을 [[위도, 경도], ...]로 바꿉니다."""
+    points: list[list[float]] = []
+    for pair in linestring.split(" "):
+        lng, _, lat = pair.partition(",")
+        try:
+            points.append([float(lat), float(lng)])
+        except ValueError:
+            continue
+    return points
 
-    url = "https://api.odsay.com/v1/api/searchPubTransPathT"
-    # ODsay 콘솔은 키를 'Encoding'과 'Decoding' 두 벌로 보여줍니다. 인코딩된 쪽을
-    # 환경변수에 넣으면 httpx가 %를 한 번 더 인코딩해서(%2B -> %252B) 서버가
-    # ApiKeyAuthFailed를 돌려줍니다. 어느 쪽을 넣었든 동작하도록 한 번 풀어줍니다.
-    params = {
-        "SX": start_lng,
-        "SY": start_lat,
-        "EX": end_lng,
-        "EY": end_lat,
-        "apiKey": unquote(settings.odsay_api_key),
+
+async def _get_transit_route(start_lat: float, start_lng: float, end_lat: float, end_lng: float) -> dict:
+    """
+    TMAP 대중교통 경로 API.
+
+    예전에는 ODsay를 썼는데, ODsay의 Server 키는 '요청이 들어온 서버 IP'로
+    사용자를 식별합니다. 그런데 Render의 공용 아웃바운드 IP는 리전 전체가
+    공유하는 범위 안에서 그때그때 달라져서, 오늘 등록한 IP가 내일이면 달라지고
+    인증이 계속 깨졌습니다. TMAP은 헤더의 appKey로만 인증해서 어디서 호출하든
+    상관이 없고, 도보 경로에서 이미 같은 키를 쓰고 있습니다.
+    """
+    if not settings.tmap_app_key:
+        raise HTTPException(status_code=500, detail="TMAP_APP_KEY가 설정되지 않았습니다.")
+
+    url = "https://apis.openapi.sk.com/transit/routes"
+    headers = {
+        "Accept": "application/json",
+        "appKey": settings.tmap_app_key,
+        "Content-Type": "application/json",
+    }
+    # startX/endX가 경도, startY/endY가 위도입니다(도보 API와 같은 순서).
+    body = {
+        "startX": str(start_lng),
+        "startY": str(start_lat),
+        "endX": str(end_lng),
+        "endY": str(end_lat),
+        "count": 1,
+        "lang": 0,
+        "format": "json",
     }
 
     async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(url, params=params)
+        resp = await client.post(url, headers=headers, json=body)
 
     if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"ODsay API 오류: {resp.status_code} {resp.text[:200]}")
+        raise HTTPException(
+            status_code=502, detail=f"TMAP 대중교통 API 오류: {resp.status_code} {resp.text[:200]}"
+        )
 
     data = resp.json()
-    if "error" in data:
-        # ODsay는 에러도 200으로 응답하며 error 필드에 메시지를 담습니다.
-        # 코드도 함께 넘깁니다 — 500(ApiKeyAuthFailed)은 키가 아예 안 먹는
-        # 경우이고, 출발지와 도착지가 너무 가까울 때처럼 정상적인 거절도 있어서
-        # 코드가 없으면 어느 쪽인지 구분되지 않습니다.
-        err = data["error"]
-        first = err[0] if isinstance(err, list) and err else {}
-        message = first.get("message") if isinstance(first, dict) else str(err)
-        code = first.get("code") if isinstance(first, dict) else None
-        raise HTTPException(status_code=502, detail=f"ODsay 응답 오류({code}): {message}")
-
-    result = data.get("result", {})
-    paths = result.get("path", [])
-    if not paths:
+    # 출발지와 도착지가 너무 가깝거나 대중교통이 닿지 않는 구간은 에러가 아니라
+    # result.status로 옵니다. '경로 없음'으로 돌려줘야 앱이 도보나 자동차를
+    # 대신 추천할 수 있습니다(예외로 던지면 그 구간이 통째로 비어버립니다).
+    itineraries = ((data.get("metaData") or {}).get("plan") or {}).get("itineraries") or []
+    if not itineraries:
         return _empty_result("transit")
 
-    # 가장 첫 번째(기본 추천) 경로를 사용
-    best_path = paths[0]
-    info = best_path.get("info", {})
+    best = itineraries[0]
 
-    path: list[list[float]] = [[start_lat, start_lng]]
-    for sub in best_path.get("subPath", []):
-        pass_stops = sub.get("passStopList", {}).get("stations", [])
-        if pass_stops:
-            for st in pass_stops:
-                try:
-                    lat = float(st.get("y"))
-                    lng = float(st.get("x"))
-                    path.append([lat, lng])
-                except (TypeError, ValueError):
-                    continue
-        else:
-            # 도보 구간 등 상세 좌표가 없는 경우, 구간 시작/끝 좌표만 사용
-            sx, sy = sub.get("startX"), sub.get("startY")
-            ex, ey = sub.get("endX"), sub.get("endY")
-            try:
-                if sx is not None and sy is not None:
-                    path.append([float(sy), float(sx)])
-                if ex is not None and ey is not None:
-                    path.append([float(ey), float(ex)])
-            except (TypeError, ValueError):
-                continue
-    path.append([end_lat, end_lng])
+    path: list[list[float]] = []
+    for leg in best.get("legs") or []:
+        # 대중교통 구간의 좌표는 passShape에, 도보 구간의 좌표는 steps에 들어 있습니다.
+        shape = (leg.get("passShape") or {}).get("linestring")
+        if shape:
+            path.extend(_linestring_to_path(shape))
+            continue
+        for step in leg.get("steps") or []:
+            if step.get("linestring"):
+                path.extend(_linestring_to_path(step["linestring"]))
+
+    # 좌표가 하나도 없는 응답(환승 대기만 있는 짧은 구간 등)이면 최소한 두 끝점은
+    # 이어 줍니다 — 지도에 선이 아예 안 그려지는 것보다는 낫습니다.
+    if len(path) < 2:
+        path = [[start_lat, start_lng], [end_lat, end_lng]]
 
     return {
         "mode": "transit",
-        "distance_m": info.get("totalDistance"),
-        "duration_sec": (info.get("totalTime") or 0) * 60 if info.get("totalTime") is not None else None,
+        "distance_m": best.get("totalDistance"),
+        "duration_sec": best.get("totalTime"),
         "path": path,
     }
 
