@@ -1,6 +1,6 @@
 import { useRouter } from "expo-router";
-import { CheckIcon } from "phosphor-react-native";
-import React, { useEffect, useState } from "react";
+import { ArrowsClockwiseIcon, CheckIcon, SparkleIcon } from "phosphor-react-native";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -37,10 +37,22 @@ export default function SelectPlacesScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const styles = makeStyles(colors);
-  const { userType, sigunguCd, recommendations, pendingQueryText, parsedQuery, visitDate, setCourse } =
-    useCourseContext();
+  const {
+    userType,
+    sigunguCd,
+    recommendations,
+    setRecommendations,
+    pendingQueryText,
+    parsedQuery,
+    setParsedQuery,
+    visitDate,
+    setCourse,
+  } = useCourseContext();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  // 새로 추천받으면 목록이 통째로 바뀌므로 맨 위부터 다시 보여줍니다.
+  const listRef = useRef<FlatList<PlaceCandidate>>(null);
   // 홈 화면 카드와 같은 부가 정보(이용시간/요금 등). 추천 후보 응답에는 안
   // 실려 있어서(별도 API 절약), 여기서 후보 개수만큼만 따로 조회합니다.
   const [extraInfoMap, setExtraInfoMap] = useState<Record<string, Attraction["extra_info"]>>({});
@@ -72,6 +84,41 @@ export default function SelectPlacesScreen() {
       else next.add(contentId);
       return next;
     });
+  };
+
+  // 고른 장소가 없으면 만들 코스도 없습니다. 버튼 글자가 이미 안내하므로
+  // 누를 수 없게 두고 흐리게 보여줍니다.
+  const canSubmit = selectedIds.size > 0 && !isSubmitting && !isRefreshing;
+
+  // 마음에 드는 곳이 없을 때 같은 질의로 후보를 다시 받아옵니다. 서버가 매번
+  // 다른 표본을 뽑아주므로 누를 때마다 새로운 장소가 나옵니다.
+  const handleRefresh = async () => {
+    if (!pendingQueryText.trim()) {
+      Alert.alert("다시 추천할 수 없어요", "어떤 여행을 원하는지 먼저 입력해주세요.");
+      return;
+    }
+    setIsRefreshing(true);
+    try {
+      const { candidates, parsed } = await api.recommendPlaces({
+        queryText: pendingQueryText,
+        userType,
+        sigunguCd,
+        visitDate,
+      });
+      if (candidates.length === 0) {
+        Alert.alert("추천 결과 없음", "조건에 맞는 장소를 더 찾지 못했어요. 다른 표현으로 다시 시도해주세요.");
+        return;
+      }
+      setRecommendations(candidates);
+      setParsedQuery(parsed ?? null);
+      // 목록이 바뀌었으니 이전 선택은 더 이상 유효하지 않습니다.
+      setSelectedIds(new Set());
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    } catch (err) {
+      Alert.alert("새로 추천받지 못했어요", "잠시 후 다시 시도해주세요.\n" + String(err));
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   const handleCreateCourse = async () => {
@@ -154,6 +201,7 @@ export default function SelectPlacesScreen() {
       {extraInfoReady ? (
         <FadeInView duration={250} style={{ flex: 1 }}>
           <FlatList
+            ref={listRef}
             data={recommendations}
             keyExtractor={(item) => item.attraction.content_id}
             ListHeaderComponent={listHeader}
@@ -178,19 +226,51 @@ export default function SelectPlacesScreen() {
         </View>
       )}
 
-      <View style={styles.footer}>
-        <Text style={styles.selectionCount}>{selectedIds.size}곳 선택됨</Text>
+      {/* 추천 코스 화면과 같은 방식 — 띠 배경 없이 버튼만 목록 위에 떠 있습니다. */}
+      <View style={styles.bottomBar}>
         <Pressable
-          style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
-          onPress={handleCreateCourse}
-          disabled={isSubmitting}
+          style={({ pressed }) => [
+            styles.refreshButton,
+            pressed && !isRefreshing && styles.buttonPressed,
+            isRefreshing && styles.buttonDisabled,
+          ]}
+          onPress={handleRefresh}
+          disabled={isRefreshing}
           accessibilityRole="button"
-          accessibilityLabel="선택한 장소로 코스 만들기"
+          accessibilityLabel="장소 새로고침"
+          accessibilityHint="같은 조건으로 다른 장소를 다시 추천받습니다"
+        >
+          {isRefreshing ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : (
+            <ArrowsClockwiseIcon size={19} color={colors.primary} weight="bold" />
+          )}
+        </Pressable>
+
+        <Pressable
+          style={({ pressed }) => [
+            styles.submitButton,
+            pressed && canSubmit && styles.buttonPressed,
+            !canSubmit && styles.buttonDisabled,
+          ]}
+          onPress={handleCreateCourse}
+          disabled={!canSubmit}
+          accessibilityRole="button"
+          accessibilityLabel={
+            selectedIds.size > 0
+              ? `선택한 ${selectedIds.size}곳으로 코스 만들기`
+              : "장소를 선택해주세요"
+          }
         >
           {isSubmitting ? (
-            <ActivityIndicator color={colors.onPrimary} />
+            <ActivityIndicator color={colors.primary} />
           ) : (
-            <Text style={styles.submitText}>선택한 장소로 코스 만들기</Text>
+            <>
+              <SparkleIcon size={17} color={colors.primary} weight="bold" />
+              <Text style={styles.submitText}>
+                {selectedIds.size > 0 ? `${selectedIds.size}곳으로 코스 만들기` : "장소를 선택해주세요"}
+              </Text>
+            </>
           )}
         </Pressable>
       </View>
@@ -276,7 +356,8 @@ function makeStyles(colors: ThemeColors) {
   // 위쪽 여백만 목록 안(listContent)으로 옮겨서, 스크롤한 콘텐츠가 화면 맨 위까지
   // 올라갔다가 사라지게 합니다. 좌우/아래 여백은 그대로 둬야 하단 버튼 위치가 유지됩니다.
   container: { flex: 1, paddingHorizontal: spacing.xl - 4, paddingBottom: spacing.xl - 4, backgroundColor: colors.background },
-  listContent: { paddingTop: spacing.md, paddingBottom: 110 },
+  // 하단 바(52) + 아래 여백(20) + 목록과의 간격만큼 비워둬야 마지막 카드가 가리지 않습니다.
+  listContent: { paddingTop: spacing.md, paddingBottom: 92 },
   listHeaderBar: { marginBottom: spacing.md },
   standaloneHeader: { paddingHorizontal: spacing.xl - 4, paddingTop: spacing.md },
   title: { fontSize: 21, fontFamily: fontFamily.bold, color: colors.text, marginBottom: spacing.xs },
@@ -336,25 +417,44 @@ function makeStyles(colors: ThemeColors) {
   accessibilityDivider: { marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border },
   detailButton: { alignSelf: "flex-start", marginTop: spacing.sm + 2 },
   detailButtonText: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.primary },
-  footer: {
+  // 띠 배경 없이 버튼만 목록 위에 띄웁니다(추천 코스 화면과 같은 구조).
+  // 버튼 배경은 화면 배경과 같은 색으로 채워야 뒤로 지나가는 카드가 비치지 않습니다.
+  bottomBar: {
     position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: colors.surfaceAlt,
-    padding: spacing.xl - 4,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  selectionCount: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginBottom: spacing.sm, textAlign: "center" },
-  submitButton: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.lg - 2,
-    paddingVertical: spacing.lg,
+    bottom: spacing.xl - 4,
+    left: spacing.xl - 4,
+    right: spacing.xl - 4,
+    flexDirection: "row",
     alignItems: "center",
+    gap: spacing.sm,
   },
-  submitButtonDisabled: { opacity: 0.6 },
-  submitText: { color: colors.onPrimary, fontSize: 16, fontFamily: fontFamily.bold },
+  refreshButton: {
+    width: 52,
+    height: 52,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: radius.lg - 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  // 추천 코스 화면의 '지도로 전체 보기' 버튼과 같은 모양 — 테두리만 있는
+  // 52px 높이에 아이콘 + 글자.
+  submitButton: {
+    flex: 1,
+    height: 52,
+    flexDirection: "row",
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: radius.lg - 2,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs + 2,
+  },
+  buttonPressed: { backgroundColor: colors.surfaceAlt },
+  buttonDisabled: { opacity: 0.45 },
+  submitText: { color: colors.primary, fontSize: 16, fontFamily: fontFamily.bold },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, backgroundColor: colors.background },
   emptyText: { fontSize: 15, fontFamily: fontFamily.regular, color: colors.textTertiary, marginBottom: spacing.lg, textAlign: "center", lineHeight: 20 },
   emptyButton: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.xl - 4, paddingVertical: spacing.md },
