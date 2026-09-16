@@ -1,6 +1,5 @@
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import * as Location from "expo-location";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import {
   AirplaneIcon,
@@ -53,17 +52,21 @@ import {
 } from "../constants/travelModeIcons";
 import { api } from "../services/api";
 import { useAuth } from "../services/AuthContext";
+import {
+  directionsFailureMessage,
+  KakaoTravelMode,
+  openKakaoDirections,
+} from "../services/kakaoDirections";
 import { useTheme } from "../services/ThemeContext";
 import { Attraction, NearbyAttraction, PostItem, Review } from "../types";
 
-// 카카오맵 길찾기 URL Scheme이 요구하는 이동수단 값 (공식 문서 기준: 소문자).
-type TravelMode = "car" | "publictransit" | "foot" | "bicycle";
-
-const TRAVEL_MODES: { mode: TravelMode; icon: string; label: string }[] = [
-  { mode: "car", icon: CAR_ICON_BASE64, label: "자동차" },
-  { mode: "publictransit", icon: PUBLIC_TRANSIT_ICON_BASE64, label: "대중교통" },
-  { mode: "foot", icon: FOOT_ICON_BASE64, label: "도보" },
-  { mode: "bicycle", icon: BICYCLE_ICON_BASE64, label: "자전거" },
+// 카카오맵으로 실제로 여는 일은 services/kakaoDirections가 맡습니다 — 지도
+// 화면과 규칙(출발지 처리, 미설치 시 폴백, 수단 표기)을 한 곳에 모아뒀습니다.
+const TRAVEL_MODES: { mode: KakaoTravelMode; icon: string; label: string }[] = [
+  { mode: "CAR", icon: CAR_ICON_BASE64, label: "자동차" },
+  { mode: "PUBLICTRANSIT", icon: PUBLIC_TRANSIT_ICON_BASE64, label: "대중교통" },
+  { mode: "FOOT", icon: FOOT_ICON_BASE64, label: "도보" },
+  { mode: "BICYCLE", icon: BICYCLE_ICON_BASE64, label: "자전거" },
 ];
 
 // 교통편 예약 — 각 서비스가 출발지/도착지를 URL로 자동 입력받는 공식 방법을
@@ -135,7 +138,7 @@ export default function AttractionDetailScreen() {
   const [pickingPhoto, setPickingPhoto] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [directionsModalVisible, setDirectionsModalVisible] = useState(false);
-  const [findingRoute, setFindingRoute] = useState<TravelMode | null>(null);
+  const [findingRoute, setFindingRoute] = useState<KakaoTravelMode | null>(null);
   const [transitModalVisible, setTransitModalVisible] = useState(false);
   const [saveModalVisible, setSaveModalVisible] = useState(false);
   const [saveMode, setSaveMode] = useState<"pick" | "create">("pick");
@@ -313,45 +316,22 @@ export default function AttractionDetailScreen() {
     await api.saveCourse(course.course_id, params);
   };
 
-  const handleSelectTravelMode = async (mode: TravelMode) => {
+  const handleSelectTravelMode = async (mode: KakaoTravelMode) => {
     if (!attraction) return;
     setFindingRoute(mode);
     try {
       setDirectionsModalVisible(false);
-
-      if (Platform.OS === "web") {
-        // 웹(PC)에서는 브라우저 위치 정확도가 낮아서(GPS 없이 Wi-Fi/IP 기반
-        // 추정이라 실제 위치와 꽤 차이날 수 있음) 자동으로 내 위치를 출발지로
-        // 잡지 않습니다. 대신 도착지만 채운 카카오맵 페이지를 열어서,
-        // 출발지와 이동수단은 사용자가 그 페이지에서 직접 입력하게 합니다.
-        const to = `${encodeURIComponent(attraction.name)},${attraction.latitude},${attraction.longitude}`;
-        const webUrl = `https://map.kakao.com/link/to/${to}`;
-        await Linking.openURL(webUrl);
-        return;
-      }
-
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("위치 권한이 필요해요", "내 위치에서 길을 찾으려면 위치 권한을 허용해주세요.");
-        return;
-      }
-      const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.BestForNavigation,
+      // 출발지를 주지 않으면 헬퍼가 알아서 처리합니다 — 앱에서는 위치 권한을
+      // 받아 현재 위치를, 웹에서는 (브라우저 위치가 부정확하므로) 도착지만
+      // 채운 카카오맵 페이지를 엽니다.
+      const result = await openKakaoDirections({
+        to: { name: attraction.name, latitude: attraction.latitude, longitude: attraction.longitude },
+        mode,
       });
-      const sp = `${position.coords.latitude},${position.coords.longitude}`;
-      const ep = `${attraction.latitude},${attraction.longitude}`;
-
-      // 카카오맵 앱이 설치돼 있으면 그쪽으로, 없으면 모바일 웹 스킴(카카오맵
-      // 설치 유도 페이지로도 연결됨)으로 대신 엽니다.
-      const appUrl = `kakaomap://route?sp=${sp}&ep=${ep}&by=${mode}`;
-      const canOpenApp = await Linking.canOpenURL(appUrl);
-      const url = canOpenApp
-        ? appUrl
-        : `https://m.map.kakao.com/scheme/route?sp=${sp}&ep=${ep}&by=${mode}`;
-
-      await Linking.openURL(url);
-    } catch (err) {
-      Alert.alert("길찾기 실패", "현재 위치를 가져오지 못했어요. 잠시 후 다시 시도해주세요.\n" + String(err));
+      if (!result.ok) {
+        const { title, body } = directionsFailureMessage(result.reason);
+        Alert.alert(title, body);
+      }
     } finally {
       setFindingRoute(null);
     }
@@ -363,8 +343,9 @@ export default function AttractionDetailScreen() {
       // 웹에서는 이동수단 선택 팝업을 거치지 않고, 바로 도착지만 채운
       // 카카오맵 페이지를 엽니다 (이동수단을 골라도 결과가 다 같아서 팝업이
       // 불필요합니다. 출발지/이동수단은 그 페이지에서 직접 고르면 됩니다).
-      const to = `${encodeURIComponent(attraction.name)},${attraction.latitude},${attraction.longitude}`;
-      await Linking.openURL(`https://map.kakao.com/link/to/${to}`);
+      await openKakaoDirections({
+        to: { name: attraction.name, latitude: attraction.latitude, longitude: attraction.longitude },
+      });
       return;
     }
     setDirectionsModalVisible(true);

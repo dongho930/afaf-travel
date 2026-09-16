@@ -10,6 +10,8 @@
 실제 도로를 따라가는 좌표 배열(path)을 받은 뒤, 그 좌표로 지도에
 Polyline을 그리면 됩니다. (직선 연결이 아니라 실제 길을 따라가는 경로)
 """
+from urllib.parse import unquote
+
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 
@@ -132,12 +134,15 @@ async def _get_transit_route(start_lat: float, start_lng: float, end_lat: float,
         raise HTTPException(status_code=500, detail="ODSAY_API_KEY가 설정되지 않았습니다.")
 
     url = "https://api.odsay.com/v1/api/searchPubTransPathT"
+    # ODsay 콘솔은 키를 'Encoding'과 'Decoding' 두 벌로 보여줍니다. 인코딩된 쪽을
+    # 환경변수에 넣으면 httpx가 %를 한 번 더 인코딩해서(%2B -> %252B) 서버가
+    # ApiKeyAuthFailed를 돌려줍니다. 어느 쪽을 넣었든 동작하도록 한 번 풀어줍니다.
     params = {
         "SX": start_lng,
         "SY": start_lat,
         "EX": end_lng,
         "EY": end_lat,
-        "apiKey": settings.odsay_api_key,
+        "apiKey": unquote(settings.odsay_api_key),
     }
 
     async with httpx.AsyncClient(timeout=10) as client:

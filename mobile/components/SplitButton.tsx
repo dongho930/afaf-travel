@@ -27,7 +27,6 @@ export function SplitButton({
   accessibilityHint,
   menuAccessibilityLabel,
   loading = false,
-  size = "md",
 }: {
   label: string;
   onPress: () => void;
@@ -36,12 +35,9 @@ export function SplitButton({
   menuAccessibilityLabel: string;
   // 주 동작이 진행 중일 때 글자 대신 로딩 표시를 보여주고 누르지 못하게 합니다.
   loading?: boolean;
-  // lg는 하단 바에서 옆에 놓이는 큰 버튼과 높이를 맞추기 위한 크기입니다.
-  size?: "md" | "lg";
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
-  const large = size === "lg";
   const anchorRef = useRef<View>(null);
   const [menu, setMenu] = useState<{ top: number; left: number } | null>(null);
 
@@ -53,7 +49,7 @@ export function SplitButton({
 
   return (
     <>
-      <View ref={anchorRef} style={[styles.container, large && styles.containerLg]} collapsable={false}>
+      <View ref={anchorRef} style={styles.container} collapsable={false}>
         <Pressable
           style={({ pressed }) => [styles.main, pressed && styles.pressed]}
           onPress={onPress}
@@ -66,7 +62,7 @@ export function SplitButton({
           {loading ? (
             <ActivityIndicator size="small" color={colors.onPrimary} />
           ) : (
-            <Text style={[styles.label, large && styles.labelLg]}>{label}</Text>
+            <Text style={styles.label}>{label}</Text>
           )}
         </Pressable>
         <View style={styles.divider} />
@@ -122,13 +118,11 @@ function makeStyles(colors: ThemeColors) {
       backgroundColor: colors.primary,
       overflow: "hidden",
     },
-    containerLg: { height: 52, borderRadius: radius.lg - 2 },
     main: { minWidth: 56, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.md + 2 },
     toggle: { width: 36, alignItems: "center", justifyContent: "center" },
     pressed: { opacity: 0.75 },
     divider: { width: 1, backgroundColor: `${colors.onPrimary}59` },
     label: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.onPrimary },
-    labelLg: { fontSize: 16 },
     menu: {
       position: "absolute",
       width: MENU_WIDTH,

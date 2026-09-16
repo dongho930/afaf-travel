@@ -1,10 +1,9 @@
 import Constants from "expo-constants";
-import { BusIcon, CarIcon, type Icon, PersonSimpleWalkIcon } from "phosphor-react-native";
+import { BusIcon, CarIcon, type Icon, NavigationArrowIcon, PersonSimpleWalkIcon } from "phosphor-react-native";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   Modal,
   Platform,
   Pressable,
@@ -21,8 +20,13 @@ import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
 import { useCourseContext } from "../services/CourseContext";
+import {
+  directionsFailureMessage,
+  KakaoTravelMode,
+  openKakaoDirections,
+} from "../services/kakaoDirections";
 import { useTheme } from "../services/ThemeContext";
-import { CourseStop } from "../types";
+import { CourseStop, UserType } from "../types";
 
 const API_BASE_URL: string =
   (Constants.expoConfig?.extra?.apiBaseUrl as string | undefined) ?? "http://localhost:8000";
@@ -40,13 +44,47 @@ const MODE_ICON: Record<RouteMode, Icon> = {
   transit: BusIcon,
   car: CarIcon,
 };
+// 우리 쪽 이동수단 이름 → 카카오맵 스킴이 받는 값
+const MODE_TO_KAKAO: Record<RouteMode, KakaoTravelMode> = {
+  walk: "FOOT",
+  transit: "PUBLICTRANSIT",
+  car: "CAR",
+};
+
+/**
+ * 사용자 유형별 '걸어갈 만한' 최대 거리(m).
+ *
+ * 예전에는 누구에게나 1km를 기준으로 도보를 먼저 권했습니다. 하지만 이 앱은
+ * 휠체어 이용자·고령자·임산부·유모차 동반 가족을 위한 코스를 만드는 앱이라,
+ * 경사와 턱이 섞인 1km(빠른 걸음으로도 15분 이상)를 일괄로 권하는 건 과합니다.
+ * 코스를 만든 대상(course.generated_for)에 맞춰 기준을 낮춥니다.
+ */
+const WALKABLE_METERS: Record<UserType, number> = {
+  wheelchair: 400,
+  senior: 500,
+  pregnant: 500,
+  stroller: 600,
+  visual: 700,
+  hearing: 1000,
+  general: 1000,
+};
+
+// 대중교통을 자동차와 같은 잣대로 비교하면 거의 항상 자동차가 이깁니다 —
+// 카카오 자동차 시간은 순수 주행시간인데, ODsay 대중교통 시간에는 환승과 도보가
+// 들어 있기 때문입니다. 여행자는 자차가 없는 경우가 많아서, 자동차보다 이 배수
+// 안쪽이면 대중교통을 먼저 권합니다.
+const TRANSIT_TOLERANCE = 1.5;
 
 interface LegSummary {
-  fromName: string;
-  toName: string;
+  from: { name: string; latitude: number; longitude: number };
+  to: { name: string; latitude: number; longitude: number };
   mode: RouteMode | null;
   durationSec: number | null;
   distanceM: number | null;
+  // 추천한 것 말고 다른 수단으로 갔을 때의 소요 시간(카드 아래에 같이 보여줍니다).
+  alternatives: { mode: RouteMode; durationSec: number }[];
+  // 조회 자체가 실패한 수단. 조용히 빼지 않고 '정보 없음'으로 밝힙니다.
+  failedModes: RouteMode[];
 }
 
 interface RouteFetchResult {
@@ -116,7 +154,9 @@ export default function MapScreen() {
   const { course } = useCourseContext();
   const { colors } = useTheme();
   const styles = makeStyles(colors);
-  const [routePath, setRoutePath] = useState<LatLng[]>([]);
+  // null = 아직 조회 전. 조회가 끝나면(전부 실패했더라도) 배열이 들어오고,
+  // 그때 지도 페이지로 넘겨서 로딩 오버레이를 걷습니다.
+  const [routeLegs, setRouteLegs] = useState<{ mode: RouteMode | null; path: LatLng[] }[] | null>(null);
   const [legSummaries, setLegSummaries] = useState<LegSummary[]>([]);
   const [loadingRoute, setLoadingRoute] = useState(false);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -125,13 +165,17 @@ export default function MapScreen() {
   const webViewRef = useRef<WebView>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
+  // order와 category는 지도 페이지가 마커를 그릴 때 씁니다 — 번호 배지와
+  // 카테고리별 아이콘/색(관광지·음식점·숙박 …)이 여기서 결정됩니다.
   const markers = useMemo(() => {
     if (!course) return [];
     return course.stops.map((s) => ({
       id: s.attraction.content_id,
       lat: s.attraction.latitude,
       lng: s.attraction.longitude,
-      name: `${s.order}. ${s.attraction.name}`,
+      name: s.attraction.name,
+      order: s.order,
+      category: s.attraction.category,
     }));
   }, [course]);
 
@@ -153,13 +197,16 @@ export default function MapScreen() {
 
     async function buildRoutes() {
       if (!course || markers.length < 2) {
-        setRoutePath([]);
+        // 지점이 하나뿐이면 그릴 구간이 없습니다. 그래도 빈 배열을 넣어야
+        // 지도 페이지가 10초 폴백을 기다리지 않고 바로 화면을 보여줍니다.
+        setRouteLegs([]);
         setLegSummaries([]);
         return;
       }
       setLoadingRoute(true);
+      const walkLimit = WALKABLE_METERS[course.generated_for] ?? WALKABLE_METERS.general;
       try {
-        const legPaths: LatLng[][] = [];
+        const legs: { mode: RouteMode | null; path: LatLng[] }[] = [];
         const summaries: LegSummary[] = [];
 
         for (let i = 0; i < markers.length - 1; i++) {
@@ -172,25 +219,26 @@ export default function MapScreen() {
             fetchRoute("transit", start, end),
           ]);
 
-          const candidates = (
-            [
-              { mode: "walk" as RouteMode, info: walk },
-              { mode: "transit" as RouteMode, info: transit },
-              { mode: "car" as RouteMode, info: car },
-            ].filter((c) => c.info && c.info.duration_sec != null) as {
-              mode: RouteMode;
-              info: RouteFetchResult;
-            }[]
-          );
+          const found = { walk, transit, car };
+          const usable = (mode: RouteMode) => {
+            const info = found[mode];
+            return info && info.duration_sec != null ? { mode, info } : null;
+          };
+          const walkOption = usable("walk");
+          const transitOption = usable("transit");
+          const carOption = usable("car");
 
+          // 1) 걸어갈 만한 거리면 도보. 2) 아니면 대중교통을 먼저 보되,
+          // 자동차보다 지나치게 오래 걸리면 자동차. 3) 둘 중 하나만 되면 그것.
           let chosen: { mode: RouteMode; info: RouteFetchResult } | null = null;
-          const walkCandidate = candidates.find((c) => c.mode === "walk");
-          if (walkCandidate && walkCandidate.info.distance_m != null && walkCandidate.info.distance_m <= 1000) {
-            chosen = walkCandidate;
-          } else if (candidates.length > 0) {
-            chosen = candidates.reduce((min, c) =>
-              (c.info.duration_sec as number) < (min.info.duration_sec as number) ? c : min
-            );
+          if (walkOption && walkOption.info.distance_m != null && walkOption.info.distance_m <= walkLimit) {
+            chosen = walkOption;
+          } else if (transitOption && carOption) {
+            const transitSec = transitOption.info.duration_sec as number;
+            const carSec = carOption.info.duration_sec as number;
+            chosen = transitSec <= carSec * TRANSIT_TOLERANCE ? transitOption : carOption;
+          } else {
+            chosen = transitOption ?? carOption ?? walkOption;
           }
 
           const fallbackPath: LatLng[] =
@@ -198,24 +246,33 @@ export default function MapScreen() {
               ? walk.path
               : [[start.lat, start.lng], [end.lat, end.lng]];
 
-          legPaths.push(chosen ? chosen.info.path : fallbackPath);
+          legs.push({
+            mode: chosen?.mode ?? null,
+            path: chosen && chosen.info.path.length > 1 ? chosen.info.path : fallbackPath,
+          });
           summaries.push({
-            fromName: start.name,
-            toName: end.name,
+            from: { name: `${start.order}. ${start.name}`, latitude: start.lat, longitude: start.lng },
+            to: { name: `${end.order}. ${end.name}`, latitude: end.lat, longitude: end.lng },
             mode: chosen?.mode ?? null,
             durationSec: chosen?.info.duration_sec ?? null,
             distanceM: chosen?.info.distance_m ?? null,
+            alternatives: ([walkOption, transitOption, carOption].filter(
+              (o): o is { mode: RouteMode; info: RouteFetchResult } => !!o && o.mode !== chosen?.mode
+            )).map((o) => ({ mode: o.mode, durationSec: o.info.duration_sec as number })),
+            // 키가 없거나 API가 실패한 수단은 후보에서 조용히 빠지는 대신
+            // 카드에 그대로 밝혀서, '왜 항상 자동차만 나오지'를 알 수 있게 합니다.
+            failedModes: (["walk", "transit", "car"] as RouteMode[]).filter((m) => found[m] === null),
           });
         }
 
         if (!cancelled) {
-          setRoutePath(legPaths.flat());
+          setRouteLegs(legs);
           setLegSummaries(summaries);
         }
       } catch (e) {
         console.warn("경로 조회 중 오류, 직선으로 대체합니다:", e);
         if (!cancelled) {
-          setRoutePath([]);
+          setRouteLegs([]);
           setLegSummaries([]);
         }
       } finally {
@@ -229,10 +286,12 @@ export default function MapScreen() {
     };
   }, [course, markers]);
 
-  // 지도 로드 완료 + 경로 데이터 준비 완료되면 postMessage로 전달
+  // 지도 로드 완료 + 경로 조회가 끝나면 postMessage로 전달. 전부 실패해서 빈
+  // 배열이어도 보냅니다 — 그래야 지도 페이지가 10초 폴백 타이머를 기다리지 않고
+  // 곧바로 직선이라도 그려서 로딩 화면이 걷힙니다.
   useEffect(() => {
-    if (!mapLoaded || routePath.length < 2) return;
-    const payload = JSON.stringify({ path: routePath });
+    if (!mapLoaded || routeLegs === null) return;
+    const payload = JSON.stringify({ legs: routeLegs });
 
     if (Platform.OS === "web") {
       iframeRef.current?.contentWindow?.postMessage(payload, "*");
@@ -241,7 +300,7 @@ export default function MapScreen() {
         `window.postMessage(${JSON.stringify(payload)}, '*'); true;`
       );
     }
-  }, [mapLoaded, routePath]);
+  }, [mapLoaded, routeLegs]);
 
   function handleHostMessage(raw: string) {
     try {
@@ -271,6 +330,25 @@ export default function MapScreen() {
 
   function handleWebViewMessage(event: WebViewMessageEvent) {
     handleHostMessage(event.nativeEvent.data);
+  }
+
+  // 화면에서 추천한 수단 그대로 카카오맵을 엽니다 — 카드에는 '도보 추천'이라고
+  // 해놓고 자동차 길찾기를 열던 문제를 없앱니다. 추천을 못 정한 구간만 자동차로
+  // 갑니다(카카오맵 기본값과 같습니다).
+  async function openDirections(
+    to: { name: string; latitude: number; longitude: number },
+    from: { name: string; latitude: number; longitude: number } | null,
+    mode: RouteMode | null
+  ) {
+    const result = await openKakaoDirections({
+      to,
+      from,
+      mode: mode ? MODE_TO_KAKAO[mode] : "CAR",
+    });
+    if (!result.ok) {
+      const { title, body } = directionsFailureMessage(result.reason);
+      Alert.alert(title, body);
+    }
   }
 
   if (!course) {
@@ -313,68 +391,82 @@ export default function MapScreen() {
         </View>
       )}
 
-      {legSummaries.length > 0 && routeDrawn && (
+      {routeDrawn && (
         <View style={styles.bottomArea}>
-          <HorizontalScrollWeb contentContainerStyle={styles.legScroll}>
-            {legSummaries.map((leg, idx) => (
-              <View key={idx} style={styles.legCard}>
-                <Text style={styles.legRoute} numberOfLines={1}>
-                  {leg.fromName} → {leg.toName}
-                </Text>
-                {leg.mode ? (
-                  <>
-                    <View style={styles.legModeRow}>
-                      {(() => {
-                        const ModeIcon = MODE_ICON[leg.mode];
-                        return <ModeIcon size={13} color={colors.text} weight="bold" />;
-                      })()}
-                      <Text style={styles.legMode}>{MODE_LABEL[leg.mode]} 추천</Text>
-                    </View>
-                    <Text style={styles.legDetail}>
-                      {formatDuration(leg.durationSec)}
-                      {leg.distanceM != null ? ` · ${formatDistance(leg.distanceM)}` : ""}
-                    </Text>
-                  </>
-                ) : (
-                  <Text style={styles.legDetail}>경로 정보를 가져오지 못했습니다</Text>
-                )}
-              </View>
-            ))}
-          </HorizontalScrollWeb>
+          {legSummaries.length > 0 && (
+            <HorizontalScrollWeb contentContainerStyle={styles.legScroll}>
+              {legSummaries.map((leg, idx) => (
+                <View key={idx} style={styles.legCard}>
+                  <Text style={styles.legRoute} numberOfLines={1}>
+                    {leg.from.name} → {leg.to.name}
+                  </Text>
+                  {leg.mode ? (
+                    <>
+                      <View style={styles.legModeRow}>
+                        {(() => {
+                          const ModeIcon = MODE_ICON[leg.mode];
+                          return <ModeIcon size={13} color={colors.text} weight="bold" />;
+                        })()}
+                        <Text style={styles.legMode}>{MODE_LABEL[leg.mode]} 추천</Text>
+                      </View>
+                      <Text style={styles.legDetail}>
+                        {formatDuration(leg.durationSec)}
+                        {leg.distanceM != null ? ` · ${formatDistance(leg.distanceM)}` : ""}
+                      </Text>
+                    </>
+                  ) : (
+                    <Text style={styles.legDetail}>경로 정보를 가져오지 못했습니다</Text>
+                  )}
 
+                  {/* 다른 수단으로 가면 얼마나 걸리는지, 아예 못 불러온 수단은
+                      무엇인지 같이 적어둡니다. 추천 하나만 보여주면 왜 그게
+                      골라졌는지 알 수 없고, 실패한 수단도 눈에 띄지 않습니다. */}
+                  {leg.alternatives.length > 0 && (
+                    <Text style={styles.legAlt} numberOfLines={2}>
+                      {leg.alternatives
+                        .map((alt) => `${MODE_LABEL[alt.mode]} ${formatDuration(alt.durationSec)}`)
+                        .join(" · ")}
+                    </Text>
+                  )}
+                  {leg.failedModes.length > 0 && (
+                    <Text style={styles.legFailed} numberOfLines={1}>
+                      {leg.failedModes.map((m) => MODE_LABEL[m]).join("·")} 정보 없음
+                    </Text>
+                  )}
+
+                  <Pressable
+                    style={({ pressed }) => [styles.legNavButton, pressed && styles.pressedFeedback]}
+                    onPress={() => openDirections(leg.to, leg.from, leg.mode)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${leg.from.name}에서 ${leg.to.name}까지 카카오맵으로 길찾기`}
+                  >
+                    <NavigationArrowIcon size={12} color={colors.primary} weight="bold" />
+                    <Text style={styles.legNavButtonText}>이 구간 길찾기</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </HorizontalScrollWeb>
+          )}
+
+          {/* 카카오맵 스킴은 경유지를 못 받아서 코스 전체를 한 번에 안내할 수
+              없습니다. 그래서 이 버튼은 '내 위치 → 첫 장소'만 맡고, 나머지 구간은
+              위 카드의 '이 구간 길찾기'가 각자 맡습니다. */}
           <Pressable
             style={({ pressed }) => [styles.navButton, pressed && styles.pressedFeedback]}
             onPress={() => {
               const first = course.stops[0]?.attraction;
               if (!first) return;
-              const to = `${encodeURIComponent(first.name)},${first.latitude},${first.longitude}`;
-
-              // 웹에는 카카오맵 앱 스킴(kakaomap://)을 열 방법이 없습니다. 그런데
-              // react-native-web의 canOpenURL은 무엇을 물어도 true를 돌려주기 때문에,
-              // 브라우저에서도 항상 스킴 쪽으로 갔습니다. 브라우저가 모르는 스킴이라
-              // 빈 탭만 열렸다 닫히면서 아무 일도 일어나지 않았고, 아래 웹 주소는
-              // 실행될 일이 없었습니다. 그래서 웹에서는 처음부터 도착지만 채운
-              // 카카오맵 페이지를 엽니다 (관광지 상세 화면의 길찾기와 같은 방식).
-              if (Platform.OS === "web") {
-                Linking.openURL(`https://map.kakao.com/link/to/${to}`);
-                return;
-              }
-
-              // 앱에서는 카카오맵을 바로 열어보고, 받아줄 앱이 없을 때만 웹으로
-              // 넘깁니다. canOpenURL로 미리 확인하지 않는 이유는, 안드로이드 11부터
-              // AndroidManifest에 <queries> 선언이 없으면 카카오맵이 깔려 있어도
-              // 무조건 false를 돌려주기 때문입니다. 앱을 실행하는 것 자체는 그 제한을
-              // 받지 않아서, 열어보고 실패하면 그때 넘기는 쪽이 실제 설치 여부와 맞습니다.
-              // by는 웹에서 열릴 때(카카오 기본값 car)와 같게 맞췄습니다.
-              const appUrl = `kakaomap://route?ep=${first.latitude},${first.longitude}&by=CAR`;
-              Linking.openURL(appUrl).catch(() =>
-                Linking.openURL(`https://map.kakao.com/link/to/${to}`).catch(() =>
-                  Alert.alert("길찾기 실패", "카카오맵을 열지 못했어요. 잠시 후 다시 시도해주세요.")
-                )
+              openDirections(
+                { name: first.name, latitude: first.latitude, longitude: first.longitude },
+                null,
+                legSummaries[0]?.mode ?? null
               );
             }}
+            accessibilityRole="button"
+            accessibilityLabel="내 위치에서 첫 장소까지 카카오맵으로 길찾기"
           >
-            <Text style={styles.navButtonText}>카카오맵 앱으로 길찾기</Text>
+            <NavigationArrowIcon size={15} color={colors.onPrimary} weight="bold" />
+            <Text style={styles.navButtonText}>내 위치에서 첫 장소까지 길찾기</Text>
           </Pressable>
         </View>
       )}
@@ -423,12 +515,28 @@ function makeStyles(colors: ThemeColors) {
     borderColor: colors.border,
     paddingVertical: spacing.sm + 2,
     paddingHorizontal: spacing.md + 2,
-    minWidth: 160,
+    // 구간 길찾기 버튼과 '다른 수단' 줄이 들어가면서 조금 넓혔습니다.
+    minWidth: 176,
+    maxWidth: 232,
   },
   legRoute: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary, marginBottom: spacing.xs },
   legModeRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   legMode: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.text },
   legDetail: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: 2 },
+  legAlt: { fontSize: 11, fontFamily: fontFamily.regular, color: colors.textTertiary, marginTop: 2 },
+  legFailed: { fontSize: 11, fontFamily: fontFamily.regular, color: colors.warningText, marginTop: 2 },
+  legNavButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  legNavButtonText: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.primary },
   navButton: {
     flexDirection: "row",
     backgroundColor: colors.primary,
