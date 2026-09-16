@@ -48,6 +48,9 @@ export default function ResultsScreen() {
   const [saveModalVisible, setSaveModalVisible] = useState(false);
   const [orderChanged, setOrderChanged] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
+  // 2일차 코스도 같은 방식으로 '바꿨지만 아직 저장 안 함' 상태를 따로 들고 있습니다.
+  const [nextDayOrderChanged, setNextDayOrderChanged] = useState(false);
+  const [savingNextDayOrder, setSavingNextDayOrder] = useState(false);
   // 하루에 다 못 도는 코스를 나눴을 때 생기는 '다음 날' 코스.
   const [nextDayCourse, setNextDayCourse] = useState<CourseResponse | null>(null);
   const [nextVisitDate, setNextVisitDate] = useState<string | null>(null);
@@ -106,6 +109,10 @@ export default function ResultsScreen() {
 
   const handleConfirmSave = async (params: SaveCourseParams) => {
     if (!course) return;
+    // 순서를 바꿔놓고 '순서 저장'을 누르지 않은 채 여행에 저장하면 예전 순서가
+    // 담겼습니다. 여행에 넣기 전에 바뀐 순서부터 서버에 반영합니다.
+    if (orderChanged) await handleSaveOrder();
+    if (nextDayCourse && nextDayOrderChanged) await handleSaveNextDayOrder();
     const { trip_id } = await api.saveCourse(course.course_id, params);
     // 나눠 놓은 다음 날 코스도 같은 여행에 함께 넣어야 1일차·2일차가 한 여행에 모입니다.
     if (nextDayCourse) {
@@ -174,6 +181,38 @@ export default function ResultsScreen() {
     setLastMoved((prev) => ({ id: stops[targetIndex].attraction.content_id, token: (prev?.token ?? 0) + 1 }));
   };
 
+  // 2일차는 1일차 목록의 발치(footer)에 그려져서 드래그 목록을 겹쳐 쓸 수 없습니다.
+  // 대신 위/아래 화살표로만 순서를 바꾸고, 1일차와 마찬가지로 로컬에 먼저 반영합니다.
+  const handleMoveNextDayStop = (index: number, direction: -1 | 1) => {
+    if (!nextDayCourse) return;
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= nextDayCourse.stops.length) return;
+    const stops = [...nextDayCourse.stops];
+    [stops[index], stops[targetIndex]] = [stops[targetIndex], stops[index]];
+    const reordered = stops.map((stop, i) => ({ ...stop, order: i + 1 }));
+    if (!reduceMotion) {
+      LayoutAnimation.configureNext(LayoutAnimation.create(220, "easeInEaseOut", "opacity"));
+    }
+    setNextDayCourse({ ...nextDayCourse, stops: reordered });
+    setNextDayOrderChanged(true);
+    setLastMoved((prev) => ({ id: stops[targetIndex].attraction.content_id, token: (prev?.token ?? 0) + 1 }));
+  };
+
+  const handleSaveNextDayOrder = async () => {
+    if (!nextDayCourse) return;
+    setSavingNextDayOrder(true);
+    try {
+      const stopOrder = nextDayCourse.stops.map((s) => s.attraction.content_id);
+      const updated = await api.updateCourse(nextDayCourse.course_id, { stopOrder });
+      setNextDayCourse(updated);
+      setNextDayOrderChanged(false);
+    } catch (err) {
+      Alert.alert("순서 저장 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+    } finally {
+      setSavingNextDayOrder(false);
+    }
+  };
+
   const handleSaveOrder = async () => {
     if (!course) return;
     if (!session) {
@@ -226,29 +265,10 @@ export default function ResultsScreen() {
         </View>
       )}
 
+      {/* 저장 버튼은 화면 아래 '지도로 전체 보기'와 같은 줄로 내려갔습니다. */}
       <View style={styles.titleRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.title}>{course.title}</Text>
-          <Text style={styles.summary}>{course.summary}</Text>
-        </View>
-        {/* 순서를 바꾼 뒤에는 '순서 저장'이 가장 급한 동작이라 주 버튼으로 올립니다. */}
-        <SplitButton
-          label={orderChanged ? "순서 저장" : "저장"}
-          onPress={orderChanged ? handleSaveOrder : openSaveModal}
-          loading={savingOrder}
-          accessibilityHint={orderChanged ? "바꾼 방문 순서를 저장합니다" : "이 코스를 내 여행에 저장합니다"}
-          menuAccessibilityLabel="저장 방법 고르기"
-          menuItems={[
-            { key: "trip", label: "여행에 저장", icon: FloppyDiskIcon, onPress: openSaveModal },
-            {
-              key: "order",
-              label: "순서 저장",
-              icon: ListNumbersIcon,
-              onPress: handleSaveOrder,
-              disabled: !orderChanged || savingOrder,
-            },
-          ]}
-        />
+        <Text style={styles.title}>{course.title}</Text>
+        <Text style={styles.summary}>{course.summary}</Text>
       </View>
 
       {/* 문 닫은 뒤 도착하거나 그날 쉬는 장소가 있으면 다음 날로 나누자고 제안합니다. */}
@@ -300,32 +320,58 @@ export default function ResultsScreen() {
       {orderChanged && (
         <View style={styles.staleNotice}>
           <ClockCounterClockwiseIcon size={13} color={colors.textSecondary} weight="bold" />
-          <Text style={styles.staleNoticeText}>위의 '순서 저장'을 누르면 방문 시간이 다시 계산돼요</Text>
+          <Text style={styles.staleNoticeText}>아래 '순서 저장'을 누르면 방문 시간이 다시 계산돼요</Text>
         </View>
       )}
     </>
   );
 
-  // 나눈 뒤의 '2일차' 구간. 1일차 목록 아래에 이어서 보여줍니다. 순서 바꾸기는
-  // 1일차에만 두고, 2일차는 저장 후 여행 상세에서 열어 조정하도록 했습니다
-  // (한 화면에서 두 코스를 서로 끌어 옮기게 하면 저장 규칙이 복잡해집니다).
+  // 나눈 뒤의 '2일차' 구간. 1일차 목록 아래에 이어서 보여줍니다. 순서는 위/아래
+  // 화살표로 바꿉니다 — 1일차 드래그 목록의 발치라 카드를 끌어 옮기게 하면 두 코스
+  // 사이로 항목이 넘어가 버립니다. 저장도 2일차 코스만 따로 반영합니다.
   const nextDaySection = nextDayCourse ? (
     <View style={styles.nextDaySection}>
-      <Text style={styles.daySectionTitle}>2일차{nextVisitDate ? ` · ${nextVisitDate}` : ""}</Text>
+      <View style={styles.daySectionHeader}>
+        <Text style={styles.daySectionTitle}>2일차{nextVisitDate ? ` · ${nextVisitDate}` : ""}</Text>
+        {nextDayOrderChanged && (
+          <TouchableOpacity
+            style={[styles.inlineSaveButton, savingNextDayOrder && styles.inlineSaveButtonDisabled]}
+            onPress={handleSaveNextDayOrder}
+            disabled={savingNextDayOrder}
+            accessibilityRole="button"
+            accessibilityLabel="2일차 순서 저장"
+            accessibilityHint="바꾼 2일차 방문 순서를 저장합니다"
+            accessibilityState={{ busy: savingNextDayOrder, disabled: savingNextDayOrder }}
+          >
+            {savingNextDayOrder ? (
+              <ActivityIndicator size="small" color={colors.onPrimary} />
+            ) : (
+              <Text style={styles.inlineSaveButtonText}>순서 저장</Text>
+            )}
+          </TouchableOpacity>
+        )}
+      </View>
       <Text style={styles.nextDayHint}>
-        저장하면 1일차와 같은 여행에 함께 담겨요. 순서 조정은 저장 후 여행 상세에서 할 수 있어요.
+        저장하면 1일차와 같은 여행에 함께 담겨요. 오른쪽 화살표로 순서를 바꿀 수 있어요.
       </Text>
-      {nextDayCourse.stops.map((stop, i) => (
-        <TimelineStopItem
-          key={stop.attraction.content_id}
-          stop={stop}
-          userType={nextDayCourse.generated_for}
-          extraInfo={extraInfoMap[stop.attraction.content_id]}
-          isFirst={i === 0}
-          isLast={i === nextDayCourse.stops.length - 1}
-          nextUnfit={nextDayCourse.stops[i + 1]?.fits_today === false}
-        />
-      ))}
+      {nextDayCourse.stops.map((stop, i) => {
+        const id = stop.attraction.content_id;
+        return (
+          <TimelineStopItem
+            key={id}
+            stop={stop}
+            userType={nextDayCourse.generated_for}
+            extraInfo={extraInfoMap[id]}
+            isFirst={i === 0}
+            isLast={i === nextDayCourse.stops.length - 1}
+            nextUnfit={nextDayCourse.stops[i + 1]?.fits_today === false}
+            timeStale={nextDayOrderChanged}
+            onMoveUp={() => handleMoveNextDayStop(i, -1)}
+            onMoveDown={() => handleMoveNextDayStop(i, 1)}
+            highlightToken={lastMoved?.id === id ? lastMoved.token : 0}
+          />
+        );
+      })}
     </View>
   ) : null;
 
@@ -342,6 +388,7 @@ export default function ResultsScreen() {
             ListHeaderComponent={listHeader}
             ListFooterComponent={nextDaySection}
             contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
             onDragEnd={handleDragEnd}
             renderItem={({ item, drag, isActive, getIndex }) => {
               const index = getIndex() ?? 0;
@@ -375,14 +422,38 @@ export default function ResultsScreen() {
         </View>
       )}
 
-      <Pressable
-        style={styles.mapButton}
-        onPress={() => router.push("/map")}
-        accessibilityLabel="지도로 전체 동선 보기"
-      >
-        <MapTrifoldIcon size={16} color={colors.onPrimary} weight="bold" />
-        <Text style={styles.mapButtonText}>지도로 전체 동선 보기</Text>
-      </Pressable>
+      {/* 화면을 끝낼 때 누르는 두 동작을 한 줄에 둡니다. 저장이 최종 동작이라
+          채운 버튼으로 강조하고, 지도 보기는 테두리만 있는 보조 버튼입니다. */}
+      <View style={styles.bottomBar}>
+        <Pressable
+          style={({ pressed }) => [styles.mapButton, pressed && styles.mapButtonPressed]}
+          onPress={() => router.push("/map")}
+          accessibilityRole="button"
+          accessibilityLabel="지도로 전체 동선 보기"
+        >
+          <MapTrifoldIcon size={16} color={colors.primary} weight="bold" />
+          <Text style={styles.mapButtonText}>지도로 전체 보기</Text>
+        </Pressable>
+        {/* 순서를 바꾼 뒤에는 '순서 저장'이 가장 급한 동작이라 주 버튼으로 올립니다. */}
+        <SplitButton
+          size="lg"
+          label={orderChanged ? "순서 저장" : "저장"}
+          onPress={orderChanged ? handleSaveOrder : openSaveModal}
+          loading={savingOrder}
+          accessibilityHint={orderChanged ? "바꾼 방문 순서를 저장합니다" : "이 코스를 내 여행에 저장합니다"}
+          menuAccessibilityLabel="저장 방법 고르기"
+          menuItems={[
+            { key: "trip", label: "여행에 저장", icon: FloppyDiskIcon, onPress: openSaveModal },
+            {
+              key: "order",
+              label: "순서 저장",
+              icon: ListNumbersIcon,
+              onPress: handleSaveOrder,
+              disabled: !orderChanged || savingOrder,
+            },
+          ]}
+        />
+      </View>
 
       <SaveCourseModal
         visible={saveModalVisible}
@@ -400,10 +471,11 @@ function makeStyles(colors: ThemeColors) {
   // 위쪽 여백만 목록 안(listContent)으로 옮겨서, 스크롤한 콘텐츠가 화면 맨 위까지
   // 올라갔다가 사라지게 합니다. 좌우/아래 여백은 그대로 둬야 하단 버튼 위치가 유지됩니다.
   container: { flex: 1, paddingHorizontal: spacing.xl - 4, paddingBottom: spacing.xl - 4, backgroundColor: colors.background },
-  listContent: { paddingTop: spacing.md, paddingBottom: 90 },
+  // 하단 바(52) + 아래 여백(20) + 목록과의 간격만큼 비워둬야 마지막 카드가 가리지 않습니다.
+  listContent: { paddingTop: spacing.md, paddingBottom: 92 },
   listHeaderBar: { marginBottom: spacing.md },
   standaloneHeader: { paddingHorizontal: spacing.xl - 4, paddingTop: spacing.md },
-  titleRow: { flexDirection: "row", alignItems: "flex-start", marginBottom: spacing.lg, gap: spacing.sm + 2 },
+  titleRow: { marginBottom: spacing.lg },
   title: { fontSize: 21, fontFamily: fontFamily.bold, color: colors.text, marginBottom: spacing.xs },
   summary: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary },
   orderHintRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm + 2 },
@@ -456,7 +528,19 @@ function makeStyles(colors: ThemeColors) {
     fontFamily: fontFamily.bold,
     color: colors.text,
     marginBottom: spacing.xs,
+    flexShrink: 1,
   },
+  daySectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+  // 2일차 구간 안에서만 쓰는 작은 '순서 저장' 버튼.
+  inlineSaveButton: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    marginBottom: spacing.xs,
+  },
+  inlineSaveButtonDisabled: { opacity: 0.6 },
+  inlineSaveButtonText: { color: colors.onPrimary, fontSize: 12, fontFamily: fontFamily.bold },
   nextDaySection: { marginTop: spacing.lg, paddingTop: spacing.lg, borderTopWidth: 1, borderTopColor: colors.border },
   nextDayHint: {
     fontSize: 12,
@@ -465,20 +549,29 @@ function makeStyles(colors: ThemeColors) {
     marginBottom: spacing.md,
     lineHeight: 17,
   },
-  mapButton: {
+  bottomBar: {
     position: "absolute",
     bottom: spacing.xl - 4,
     left: spacing.xl - 4,
     right: spacing.xl - 4,
     flexDirection: "row",
-    backgroundColor: colors.primary,
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  mapButton: {
+    flex: 1,
+    height: 52,
+    flexDirection: "row",
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.primary,
     borderRadius: radius.lg - 2,
-    paddingVertical: spacing.lg,
     alignItems: "center",
     justifyContent: "center",
     gap: spacing.xs + 2,
   },
-  mapButtonText: { color: colors.onPrimary, fontSize: 16, fontFamily: fontFamily.bold },
+  mapButtonPressed: { backgroundColor: colors.surfaceAlt },
+  mapButtonText: { color: colors.primary, fontSize: 16, fontFamily: fontFamily.bold },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, backgroundColor: colors.background },
   emptyText: { fontSize: 15, fontFamily: fontFamily.regular, color: colors.textTertiary, marginBottom: spacing.lg },
   emptyButton: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.xl - 4, paddingVertical: spacing.md },
