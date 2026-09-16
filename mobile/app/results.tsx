@@ -645,8 +645,15 @@ function makeStyles(colors: ThemeColors) {
   saveButtonPressed: { opacity: 0.75 },
   saveButtonText: { color: colors.onPrimary, fontSize: 14, fontFamily: fontFamily.bold },
   // 지도로 볼 날을 고르는 시트(일차가 둘 이상일 때만).
-  pickerBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
+  pickerBackdrop: {
+    flex: 1,
+    backgroundColor: colors.overlay,
+    justifyContent: "flex-end",
+    alignItems: "center",
+  },
   pickerSheet: {
+    width: "100%",
+    maxWidth: 640, // 웹에서 넓은 화면일 때 앱 폭(WebFrame)에 맞춰 시트도 가운데 정렬되게
     backgroundColor: colors.surface,
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,

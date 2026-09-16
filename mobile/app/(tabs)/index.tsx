@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
-import { MapPinIcon, SparkleIcon, WheelchairIcon, type Icon } from "phosphor-react-native";
+import { MagnifyingGlassIcon, MapPinIcon, SparkleIcon, WheelchairIcon, type Icon } from "phosphor-react-native";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -630,7 +630,20 @@ export default function HomeScreen() {
             </View>
             <Text style={styles.logoSub}>당신만을 위한 여행 가이드</Text>
           </View>
-          <ProfileButton />
+          <View style={styles.headerActions}>
+            {/* 아래 히어로의 검색창은 문장을 AI 플래너로 넘기는 입구입니다.
+                장소 이름을 이미 아는 사람을 위해, 바로 찾아 들어가는 길을 따로 둡니다. */}
+            <TouchableOpacity
+              style={styles.headerIconButton}
+              onPress={() => router.push("/search")}
+              accessibilityRole="button"
+              accessibilityLabel="여행지 검색"
+              accessibilityHint="이름으로 여행지를 찾아 상세 정보를 봅니다"
+            >
+              <MagnifyingGlassIcon size={19} color={colors.text} weight="bold" />
+            </TouchableOpacity>
+            <ProfileButton />
+          </View>
         </View>
 
         <Animated.View style={[styles.hero, { opacity: heroContentOpacity }]}>
@@ -890,6 +903,16 @@ function makeStyles(colors: ThemeColors) {
   container: { padding: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.xxl + spacing.lg },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.xl - 2 },
   logoRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  // 프로필 아바타(34)와 같은 크기로 맞춰 두 버튼이 한 줄에서 나란히 보입니다.
+  headerIconButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.surfaceAlt,
+  },
   logoSub: { fontSize: 12, fontFamily: fontFamily.medium, color: colors.textTertiary },
 
   hero: {

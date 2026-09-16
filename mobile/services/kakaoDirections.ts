@@ -46,9 +46,15 @@ export async function openKakaoDirections({
   // 웹(PC 브라우저)에는 앱 스킴을 열 방법이 없고, 브라우저 위치는 GPS가 아니라
   // Wi-Fi/IP 기반 추정이라 실제 위치와 꽤 차이납니다. 그래서 내 위치를 자동으로
   // 출발지로 잡지 않고, 아는 만큼만 채운 카카오맵 페이지를 엽니다.
+  //
+  // 출발지까지 아는 경우(코스의 구간 길찾기)에는 모바일 웹 스킴 주소를 씁니다.
+  // 카카오가 위경도를 자기 내부 좌표계로 변환해서 PC 지도로 넘겨주기 때문에,
+  // 출발·도착이 모두 채워진 채로 열립니다. (예전에 쓰던 sName/eName은 더 이상
+  // 입력칸을 채워주지 않아 두 칸이 모두 비어 있었고, rt 파라미터에 위경도를 그냥
+  // 넣으면 좌표계가 달라 엉뚱한 곳으로 갑니다.)
   if (Platform.OS === "web") {
     const url = from
-      ? `https://map.kakao.com/?sName=${encodeURIComponent(from.name)}&eName=${encodeURIComponent(to.name)}`
+      ? `https://m.map.kakao.com/scheme/route?sp=${coord(from)}&ep=${coord(to)}&by=${mode}`
       : `https://map.kakao.com/link/to/${linkTarget(to)}`;
     try {
       await Linking.openURL(url);

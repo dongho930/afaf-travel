@@ -294,6 +294,28 @@ async def attraction_extra_info(
     return await tour_api_client.get_extra_info_for_ids(list(zip(ids, cats)))
 
 
+@router.get("/attractions/search", response_model=list[Attraction])
+async def search_attractions(
+    q: str = Query(..., min_length=1, description="여행지 이름 또는 주소 검색어"),
+    category: str | None = Query(
+        default=None, description="카테고리로 좁히기 (관광지/음식점/숙박/문화시설/레포츠 등)"
+    ),
+    limit: int = Query(default=30, ge=1, le=100),
+):
+    """
+    여행지 직접 검색. 이름을 먼저, 그다음 주소를 부분일치로 찾습니다.
+
+    경로가 /attractions/{content_id}보다 위에 있어야 합니다 — 아래에 두면 'search'가
+    content_id로 잡혀서 상세 조회로 흘러갑니다.
+
+    목록 캐시(경기도 전체)에서 찾기 때문에 공공데이터 API를 호출하지 않습니다.
+    사진·주소·카테고리는 캐시에 있는 값을 그대로 쓰고, 평점만 DB에서 한 번에
+    모아 채웁니다. 혼잡도와 무장애 정보는 이 캐시에 없어서 비어 있습니다 —
+    상세 화면에서 채워집니다.
+    """
+    return await tour_api_client.search_attractions(q, limit, category)
+
+
 @router.get("/attractions/{content_id}/related", response_model=list[Attraction])
 async def related_attractions(content_id: str):
     results = await tour_api_client.get_related_attractions(content_id)

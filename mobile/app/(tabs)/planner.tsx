@@ -279,7 +279,13 @@ export default function PlannerScreen() {
             />
 
             {VoiceInputButton ? (
-              <VoiceInputButton isListening={isListening} onListeningChange={setIsListening} onResult={setQueryText} />
+              <VoiceInputButton
+                isListening={isListening}
+                onListeningChange={setIsListening}
+                onResult={setQueryText}
+                // 말한 내용이 입력창을 새로 채우므로, 듣기 시작과 함께 비웁니다.
+                onStart={() => setQueryText("")}
+              />
             ) : (
               <View style={styles.voiceNoticeRow}>
                 <MicrophoneIcon size={14} color={colors.textTertiary} weight="bold" />

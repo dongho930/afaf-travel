@@ -65,6 +65,7 @@ function ThemedApp() {
                   title은 웹 브라우저 탭 제목으로 계속 쓰이므로 그대로 둡니다. */}
               <Stack.Screen name="select" options={{ title: "장소 선택하기", headerShown: false }} />
               <Stack.Screen name="results" options={{ title: "추천 코스", headerShown: false }} />
+              <Stack.Screen name="search" options={{ title: "여행지 검색", headerShown: false }} />
               <Stack.Screen name="map" options={{ title: "지도로 보기" }} />
               <Stack.Screen name="login" options={{ title: "로그인" }} />
               <Stack.Screen name="signup" options={{ title: "회원가입" }} />

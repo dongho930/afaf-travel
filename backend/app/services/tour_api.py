@@ -1970,9 +1970,11 @@ class TourApiClient:
         _REGION_ATTRACTIONS_CACHE.set(ldong_regn_cd, merged)
         return merged
 
-    async def search_attractions_by_keyword(self, keyword: str, limit: int = 8) -> list[dict]:
+    async def search_attractions(
+        self, keyword: str, limit: int = 30, category: str | None = None
+    ) -> list[Attraction]:
         """
-        접근성 제보 작성 시 '여행지 이름 검색(자동완성)'에 씁니다.
+        이름/주소로 여행지를 찾습니다 (검색 화면과 제보 자동완성이 함께 씁니다).
 
         예전에는 searchKeyword2를 사용자 요청 중에 불렀습니다. 자동완성이라
         타자 한 번에 한 번씩 나가는 구조라 일일 트래픽 한도를 가장 빨리 태우는
@@ -1987,16 +1989,10 @@ class TourApiClient:
         if not query:
             return []
 
-        if self.use_mock:
-            return [
-                {"content_id": a.content_id, "name": a.name,
-                 "address": a.address, "category": a.category}
-                for a in _MOCK_ATTRACTIONS
-                if query in a.name
-            ][:limit]
-
         needle = query.replace(" ", "").lower()
-        candidates = await self._region_attractions()
+        candidates = _MOCK_ATTRACTIONS if self.use_mock else await self._region_attractions()
+        if category:
+            candidates = [a for a in candidates if a.category == category]
 
         by_name: list[Attraction] = []
         by_address: list[Attraction] = []
@@ -2009,6 +2005,28 @@ class TourApiClient:
         # 이름이 짧을수록 질의에 더 가깝게 맞은 것으로 봅니다
         # ('수원'을 쳤을 때 '수원화성'이 '수원화성박물관특별전'보다 먼저).
         by_name.sort(key=lambda a: len(a.name or ""))
+
+        # 캐시에 들어있는 객체를 그대로 돌려주고 아래에서 평점을 채우면, 그 값이
+        # 캐시에 눌러앉아 다음 요청까지 오염됩니다. 복사본에만 채웁니다.
+        results = [a.model_copy(deep=True) for a in (by_name + by_address)[:limit]]
+
+        # 평점은 목록 캐시에 없어서 한 번에 모아 옵니다(DB 한 번). 느리거나
+        # 실패하면 평점 없이 보여주는 편이 낫습니다 — 검색 자체는 살아야 합니다.
+        try:
+            rating_rows = await asyncio.wait_for(
+                get_average_ratings([a.content_id for a in results if a.content_id]), timeout=3.0
+            )
+        except Exception:
+            logger.warning("search_attractions: 평점 조회를 건너뜁니다.")
+            rating_rows = {}
+        for a in results:
+            row = rating_rows.get(a.content_id)
+            a.avg_rating = row["avg_rating"] if row else None
+            a.review_count = row["review_count"] if row else 0
+        return results
+
+    async def search_attractions_by_keyword(self, keyword: str, limit: int = 8) -> list[dict]:
+        """접근성 제보 작성 화면의 자동완성 — 위 검색에서 필요한 네 항목만 추립니다."""
         return [
             {
                 "content_id": a.content_id,
@@ -2016,7 +2034,7 @@ class TourApiClient:
                 "address": a.address,
                 "category": a.category,
             }
-            for a in (by_name + by_address)[:limit]
+            for a in await self.search_attractions(keyword, limit)
         ]
 
     async def get_attraction_detail(self, content_id: str) -> Attraction | None:

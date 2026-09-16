@@ -1,6 +1,6 @@
 import { MicrophoneIcon, StopCircleIcon } from "phosphor-react-native";
 import React from "react";
-import { Pressable, StyleSheet, Text } from "react-native";
+import { Keyboard, Pressable, StyleSheet, Text } from "react-native";
 import { Alert } from "../services/crossPlatformAlert";
 import {
   ExpoSpeechRecognitionModule,
@@ -17,14 +17,21 @@ import { useTheme } from "../services/ThemeContext";
  * 사용 가능할 때만 마운트되므로, 이 안에서는 안전하게 훅을 호출할 수 있습니다.
  * (Expo Go에서 사용하려면 expo prebuild + dev client 빌드가 필요합니다.)
  */
+// 말을 안 했거나 사용자가 스스로 멈춘 경우까지 '오류'라고 띄우면, 정상적으로
+// 취소한 것뿐인데 실패한 것처럼 보입니다. 이 둘은 조용히 듣기만 끝냅니다.
+const SILENT_ERRORS = ["no-speech", "aborted", "client"];
+
 export function VoiceInputButton({
   isListening,
   onListeningChange,
   onResult,
+  onStart,
 }: {
   isListening: boolean;
   onListeningChange: (listening: boolean) => void;
   onResult: (text: string) => void;
+  // 듣기를 시작하기 직전에 불립니다(입력창을 비우는 용도).
+  onStart?: () => void;
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
@@ -36,10 +43,15 @@ export function VoiceInputButton({
   });
   useSpeechRecognitionEvent("error", (event) => {
     onListeningChange(false);
+    if (SILENT_ERRORS.includes(event.error)) return;
     Alert.alert("음성 인식 오류", `${event.error}: ${event.message}`);
   });
 
   const startListening = async () => {
+    // 글자를 치던 중이면 입력창에 커서가 남아 있고, 그 상태로 인식을 시작하면
+    // 키보드가 잡고 있는 마이크와 부딪혀 실패할 수 있습니다. 키보드부터 내립니다.
+    Keyboard.dismiss();
+
     const result = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
     if (!result.granted) {
       Alert.alert(
@@ -48,11 +60,21 @@ export function VoiceInputButton({
       );
       return;
     }
-    ExpoSpeechRecognitionModule.start({
-      lang: "ko-KR",
-      interimResults: true,
-      continuous: false,
-    });
+
+    // 이미 쓰여 있던 글자는 비웁니다 — 말한 내용이 입력창을 새로 채우는 게 이
+    // 버튼의 동작이라, 남겨두면 무엇이 반영될지 헷갈립니다.
+    onStart?.();
+
+    try {
+      ExpoSpeechRecognitionModule.start({
+        lang: "ko-KR",
+        interimResults: true,
+        continuous: false,
+      });
+    } catch (err) {
+      onListeningChange(false);
+      Alert.alert("음성 입력을 시작하지 못했어요", "잠시 후 다시 시도해주세요.\n" + String(err));
+    }
   };
 
   const stopListening = () => {

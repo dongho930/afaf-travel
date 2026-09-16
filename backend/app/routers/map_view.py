@@ -90,14 +90,15 @@ _MARKER_STYLES: dict[str, dict[str, str]] = {
     },
 }
 
-# 구간 이동수단별 선 모양. 도보는 점선으로 끊어 그려서, 차를 타는 구간과 걷는
-# 구간이 지도에서 바로 구분됩니다.
+# 구간 이동수단별 선 모양. 도보는 회색 점선으로 끊어 그려서, 차·대중교통으로
+# 이동하는 구간과 걷는 구간이 지도에서 바로 구분됩니다.
 _LEG_STYLES: dict[str, dict[str, object]] = {
-    "walk": {"color": "#2F9E44", "style": "shortdash", "weight": 5},
+    "walk": {"color": "#868E96", "style": "shortdash", "weight": 5},
     "transit": {"color": "#1C7ED6", "style": "solid", "weight": 5},
-    "car": {"color": "#495057", "style": "solid", "weight": 5},
-    # 추천 수단을 못 정한 구간(경로 조회 실패)은 흐린 회색 점선.
-    "unknown": {"color": "#ADB5BD", "style": "dash", "weight": 4},
+    "car": {"color": "#2E7D5B", "style": "solid", "weight": 5},
+    # 추천 수단을 못 정한 구간(경로 조회 실패). 도보의 회색 점선과 헷갈리지
+    # 않도록 더 옅은 색에 점(dot)으로, 선도 얇게 그립니다.
+    "unknown": {"color": "#CED4DA", "style": "dot", "weight": 4},
 }
 
 _TEMPLATE = """<!DOCTYPE html>
