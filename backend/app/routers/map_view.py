@@ -124,10 +124,6 @@ _TEMPLATE = """<!DOCTYPE html>
     .mk-tip { position: absolute; top: 33px; left: 50%; margin-left: -5px; width: 0; height: 0;
       border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 10px solid #495057; }
 
-    .iw { padding: 7px 10px; font-size: 12px; line-height: 1.45;
-      font-family: -apple-system, BlinkMacSystemFont, 'Malgun Gothic', sans-serif; color: #212529; }
-    .iw b { display: block; font-size: 13px; }
-    .iw span { color: #868E96; }
   </style>
 </head>
 <body>
@@ -166,18 +162,11 @@ _TEMPLATE = """<!DOCTYPE html>
     var markerStyles = __MARKER_STYLES_JSON__;
     var legStyles = __LEG_STYLES_JSON__;
     var polylines = [];          // 구간마다 하나씩, 이동수단에 따라 색/점선이 다릅니다
-    var openInfoWindow = null;
     var routeDrawn = false;      // 경로(직선이든 실제든)를 이미 한 번이라도 그렸는지
     var fallbackTimer = null;
 
     function styleForCategory(category) {
       return markerStyles[category] || markerStyles['기타'];
-    }
-
-    function escapeHtml(text) {
-      return String(text == null ? '' : text).replace(/[&<>"']/g, function (c) {
-        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-      });
     }
 
     // 마커 한 개의 DOM. 기본 Marker 대신 CustomOverlay를 쓰는 이유는, Marker는
@@ -193,6 +182,16 @@ _TEMPLATE = """<!DOCTYPE html>
         '<div class="mk-tip" style="border-top-color:' + s.color + '"></div>' +
         '<div class="mk-no" style="background:' + s.color + '">' + (m.order || '') + '</div>';
       return el;
+    }
+
+    // 코스의 모든 지점이 한눈에 들어오도록 화면을 맞춥니다. 예전에는 첫 지점을
+    // 중심으로 고정 배율(level 8)이라 멀리 떨어진 지점이 화면 밖에 있었습니다.
+    // 지점이 하나뿐이면 너무 확대되므로 그대로 둡니다.
+    function fitToMarkers() {
+      if (!map || markers.length < 2) return;
+      var bounds = new kakao.maps.LatLngBounds();
+      markers.forEach(function (m) { bounds.extend(new kakao.maps.LatLng(m.lat, m.lng)); });
+      map.setBounds(bounds, 60, 40, 40, 40);
     }
 
     function clearPolylines() {
@@ -274,11 +273,8 @@ _TEMPLATE = """<!DOCTYPE html>
               level: 8
             });
 
-            var bounds = new kakao.maps.LatLngBounds();
-
             markers.forEach(function (m) {
               var pos = new kakao.maps.LatLng(m.lat, m.lng);
-              bounds.extend(pos);
 
               var el = buildMarkerElement(m);
               new kakao.maps.CustomOverlay({
@@ -286,26 +282,26 @@ _TEMPLATE = """<!DOCTYPE html>
                 xAnchor: 0.5, yAnchor: 1, clickable: true, zIndex: 3
               });
 
-              var infowindow = new kakao.maps.InfoWindow({
-                position: pos, zIndex: 5,
-                content: '<div class="iw"><b>' + escapeHtml((m.order ? m.order + '. ' : '') + m.name) + '</b>' +
-                  (m.category ? '<span>' + escapeHtml(m.category) + '</span>' : '') + '</div>'
-              });
-
               // CustomOverlay에는 Marker 같은 kakao click 이벤트가 없어서 DOM
               // 이벤트로 직접 받습니다 (clickable: true라야 클릭이 전달됩니다).
+              //
+              // 여기서 말풍선(InfoWindow)은 띄우지 않습니다. 예전에는 상세 모달과
+              // 함께 말풍선이 마커 위에 떠서 아이콘을 가렸고, 그게 아이콘이 바뀐
+              // 것처럼 보였습니다. 장소 이름과 카테고리는 앱의 상세 모달에 이미
+              // 다 있으므로 클릭은 앱에 알리기만 합니다.
               el.addEventListener('click', function () {
-                if (openInfoWindow) openInfoWindow.close();
-                infowindow.open(map);
-                openInfoWindow = infowindow;
                 postToHost({ type: 'marker_click', id: m.id });
               });
             });
 
-            // 코스의 모든 지점이 한눈에 들어오도록 화면을 맞춥니다. 예전에는 첫
-            // 지점을 중심으로 고정 배율(level 8)이라 멀리 떨어진 지점이 화면 밖에
-            // 있었습니다. 지점이 하나뿐이면 너무 확대되므로 그대로 둡니다.
-            if (markers.length > 1) map.setBounds(bounds, 60, 40, 40, 40);
+            // 지도를 만들자마자 setBounds를 부르면, 생성자에 넘긴 초기 배율이
+            // 뒤늦게 적용되면서 우리가 맞춘 화면을 덮어씁니다. 그래서 타일이 처음
+            // 깔린 뒤에 한 번만 맞춥니다(맞추면 타일이 다시 깔리므로 리스너는 먼저 해제).
+            var fitOnce = function () {
+              kakao.maps.event.removeListener(map, 'tilesloaded', fitOnce);
+              fitToMarkers();
+            };
+            kakao.maps.event.addListener(map, 'tilesloaded', fitOnce);
 
             // 여기서 바로 직선을 그리지 않습니다. 실제 경로(postMessage)가 도착하면
             // drawRoute가 그때 처음으로 경로를 그립니다. 다만 /route 조회 자체가

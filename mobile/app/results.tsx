@@ -9,6 +9,7 @@ import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   LayoutAnimation,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -33,25 +34,24 @@ import { useAuth } from "../services/AuthContext";
 import { useCourseContext } from "../services/CourseContext";
 import { useTheme } from "../services/ThemeContext";
 import { storage } from "../services/storage";
-import { Attraction, CourseResponse, CourseStop } from "../types";
+import { Attraction, CourseStop } from "../types";
 
 export default function ResultsScreen() {
   const router = useRouter();
-  const { course, setCourse, visitDate } = useCourseContext();
+  const { course, setCourse, dayCourses, setDayCourses, visitDate } = useCourseContext();
   const { session } = useAuth();
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const [offlineNotice, setOfflineNotice] = useState(false);
   const [saveModalVisible, setSaveModalVisible] = useState(false);
-  const [orderChanged, setOrderChanged] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
-  // 2일차 코스도 같은 방식으로 '바꿨지만 아직 저장 안 함' 상태를 따로 들고 있습니다.
-  // 저장은 하단 '순서 저장' 버튼 하나가 두 코스를 함께 맡습니다.
-  const [nextDayOrderChanged, setNextDayOrderChanged] = useState(false);
-  // 하루에 다 못 도는 코스를 나눴을 때 생기는 '다음 날' 코스.
-  const [nextDayCourse, setNextDayCourse] = useState<CourseResponse | null>(null);
-  const [nextVisitDate, setNextVisitDate] = useState<string | null>(null);
-  const [splitting, setSplitting] = useState(false);
+  // '순서를 바꿨지만 아직 저장 안 한' 일차들(키 = 일차 번호). 하단 '순서 저장'
+  // 버튼 하나가 이 일차들만 골라 서버에 반영합니다.
+  const [changedDays, setChangedDays] = useState<Record<number, boolean>>({});
+  // 나누는 중인 일차(그 일차의 버튼만 로딩 표시).
+  const [splittingDay, setSplittingDay] = useState<number | null>(null);
+  // 일차가 둘 이상일 때, 지도로 볼 날을 고르는 시트.
+  const [dayPickerVisible, setDayPickerVisible] = useState(false);
   // 홈 화면 카드와 같은 부가 정보(이용시간/요금 등). 코스 생성 응답에는 안
   // 실려 있어서(별도 API 절약), 여기서 스톱 개수만큼만 따로 조회합니다.
   const [extraInfoMap, setExtraInfoMap] = useState<Record<string, Attraction["extra_info"]>>({});
@@ -75,10 +75,19 @@ export default function ResultsScreen() {
     }
   }, [course]);
 
+  // 모든 일차의 장소를 한 번에 조회합니다. 코스를 나누면 장소가 일차 사이로
+  // 옮겨질 뿐 집합은 그대로라, 장소 목록(아래 키)이 같으면 다시 부르지 않습니다 —
+  // 나눌 때마다 목록이 사라졌다 다시 나타나지 않게 하기 위함입니다.
+  const allStops = dayCourses.flatMap((d) => d.course.stops);
+  const extraInfoKey = allStops
+    .map((s) => s.attraction.content_id)
+    .sort()
+    .join(",");
+
   useEffect(() => {
-    if (!course) return;
+    if (!extraInfoKey) return;
     setExtraInfoReady(false);
-    const targets = course.stops
+    const targets = allStops
       .map((s) => s.attraction)
       .filter((a) => (a.extra_info?.length ?? 0) === 0 && EXTRA_INFO_LABELS_BY_CATEGORY[a.category]);
     if (targets.length === 0) {
@@ -91,7 +100,7 @@ export default function ResultsScreen() {
       .catch(() => {})
       .finally(() => setExtraInfoReady(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [course?.course_id]);
+  }, [extraInfoKey]);
 
   const openSaveModal = () => {
     if (!session) {
@@ -105,26 +114,23 @@ export default function ResultsScreen() {
   };
 
   const handleConfirmSave = async (params: SaveCourseParams) => {
-    if (!course) return;
+    if (dayCourses.length === 0) return;
     // 순서를 바꿔놓고 '순서 저장'을 누르지 않은 채 여행에 저장하면 예전 순서가
     // 담겼습니다. 여행에 넣기 전에 바뀐 순서부터 서버에 반영합니다.
-    if (anyOrderChanged) await handleSaveOrder();
-    const { trip_id } = await api.saveCourse(course.course_id, params);
-    // 나눠 놓은 다음 날 코스도 같은 여행에 함께 넣어야 1일차·2일차가 한 여행에 모입니다.
-    if (nextDayCourse) {
-      await api.saveCourse(nextDayCourse.course_id, { tripId: trip_id });
+    const days = anyOrderChanged ? await persistOrders() : dayCourses;
+    const { trip_id } = await api.saveCourse(days[0].course.course_id, params);
+    // 나눠 놓은 나머지 일차도 같은 여행에 함께 넣어야 한 여행에 모입니다.
+    for (const day of days.slice(1)) {
+      await api.saveCourse(day.course.course_id, { tripId: trip_id });
     }
   };
 
-  // 시간이 뒤로 계속 밀리는 구조라, '오늘 못 가는' 첫 지점부터 뒤는 전부 다음 날로
-  // 넘기는 게 맞습니다. 그 지점을 찾습니다(없으면 -1).
-  const overflowIndex = course?.stops.findIndex((s) => s.fits_today === false) ?? -1;
-  const overflowStop = overflowIndex >= 0 ? course?.stops[overflowIndex] : undefined;
-  // 첫 장소부터 안 맞거나 장소가 하나뿐이면 나눌 수가 없습니다(남는 코스가 없음).
-  const canSplit = overflowIndex >= 1 && !nextDayCourse;
+  // 시간이 뒤로 계속 밀리는 구조라, 그 일차에 '못 가는' 첫 지점부터 뒤는 전부
+  // 다음 날로 넘기는 게 맞습니다. 그 지점을 찾습니다(없으면 -1).
+  const overflowIndexOf = (dayIndex: number) =>
+    dayCourses[dayIndex]?.course.stops.findIndex((s) => s.fits_today === false) ?? -1;
 
-  const handleSplit = async () => {
-    if (!course || overflowIndex < 1) return;
+  const handleSplit = async (dayIndex: number) => {
     if (!session) {
       Alert.alert("로그인이 필요해요", "코스를 나누려면 먼저 로그인해주세요.", [
         { text: "취소", style: "cancel" },
@@ -132,75 +138,88 @@ export default function ResultsScreen() {
       ]);
       return;
     }
-    setSplitting(true);
+    setSplittingDay(dayIndex);
     try {
-      const result = await api.splitCourse(course.course_id, {
+      // 나누기는 서버에 저장된 순서를 기준으로 합니다. 화면에서만 바꿔둔 순서가
+      // 있으면 그게 사라지므로, 먼저 저장하고 그 결과로 다시 판단합니다.
+      const days = anyOrderChanged ? await persistOrders() : dayCourses;
+      const day = days[dayIndex];
+      if (!day) return;
+      const overflowIndex = day.course.stops.findIndex((s) => s.fits_today === false);
+      if (overflowIndex < 1) return;
+
+      const result = await api.splitCourse(day.course.course_id, {
         fromOrder: overflowIndex + 1,
-        visitDate,
+        visitDate: day.visitDate,
       });
-      setCourse(result.today);
-      setNextDayCourse(result.next_day);
-      setNextVisitDate(result.next_visit_date);
-      await storage.saveCourse(result.today);
+      // 나눈 일차는 앞쪽만 남기고, 넘어간 장소들이 바로 다음 일차가 됩니다.
+      const next = [...days];
+      next[dayIndex] = { course: result.today, visitDate: day.visitDate };
+      next.splice(dayIndex + 1, 0, { course: result.next_day, visitDate: result.next_visit_date });
+      setDayCourses(next);
+      if (dayIndex === 0) await storage.saveCourse(result.today);
     } catch (err) {
       Alert.alert("코스를 나누지 못했어요", "잠시 후 다시 시도해주세요.\n" + String(err));
     } finally {
-      setSplitting(false);
+      setSplittingDay(null);
     }
   };
 
-  // 드래그가 끝나면 화면에는 바로 새 순서를 반영하고(로컬), '순서 저장'
-  // 버튼을 눌러야 서버에 실제로 저장됩니다 — 실수로 살짝 끌었을 때마다
-  // 바로바로 API를 호출하지 않기 위함입니다.
+  // 한 일차의 순서를 화면에만 먼저 반영합니다. '순서 저장' 버튼을 눌러야 서버에
+  // 들어갑니다 — 실수로 살짝 끌었을 때마다 바로바로 API를 호출하지 않기 위함입니다.
+  const applyReorder = (dayIndex: number, stops: CourseStop[]) => {
+    const reordered = stops.map((stop, i) => ({ ...stop, order: i + 1 }));
+    setDayCourses(
+      dayCourses.map((d, i) => (i === dayIndex ? { ...d, course: { ...d.course, stops: reordered } } : d))
+    );
+    setChangedDays((prev) => ({ ...prev, [dayIndex]: true }));
+  };
+
+  // 드래그는 1일차에서만 씁니다(2일차부터는 화살표). 목록을 중첩하면 두 일차
+  // 사이로 카드가 끌려가 버려서, 아래 일차들은 1일차 목록의 발치에 그립니다.
   const handleDragEnd = ({ data }: { data: CourseStop[] }) => {
-    if (!course) return;
-    const reordered = data.map((stop, i) => ({ ...stop, order: i + 1 }));
-    setCourse({ ...course, stops: reordered });
-    setOrderChanged(true);
+    applyReorder(0, data);
   };
 
-  // 위/아래 버튼 순서 변경은 모든 플랫폼에서 제공합니다(웹은 드래그 제스처가
-  // 불안정해서 버튼이 유일한 수단입니다). 결과는 드래그와 동일하게 로컬 반영 +
-  // '순서 저장' 버튼 노출입니다.
-  const handleMoveStop = (index: number, direction: -1 | 1) => {
-    if (!course) return;
+  // 위/아래 버튼 순서 변경은 모든 일차·모든 플랫폼에서 제공합니다(웹은 드래그
+  // 제스처가 불안정해서 버튼이 유일한 수단입니다).
+  const handleMoveStop = (dayIndex: number, index: number, direction: -1 | 1) => {
+    const day = dayCourses[dayIndex];
+    if (!day) return;
     const targetIndex = index + direction;
-    if (targetIndex < 0 || targetIndex >= course.stops.length) return;
-    const stops = [...course.stops];
+    if (targetIndex < 0 || targetIndex >= day.course.stops.length) return;
+    const stops = [...day.course.stops];
     [stops[index], stops[targetIndex]] = [stops[targetIndex], stops[index]];
-    const reordered = stops.map((stop, i) => ({ ...stop, order: i + 1 }));
     if (!reduceMotion) {
       LayoutAnimation.configureNext(LayoutAnimation.create(220, "easeInEaseOut", "opacity"));
     }
-    setCourse({ ...course, stops: reordered });
-    setOrderChanged(true);
+    applyReorder(dayIndex, stops);
     setLastMoved((prev) => ({ id: stops[targetIndex].attraction.content_id, token: (prev?.token ?? 0) + 1 }));
   };
 
-  // 2일차는 1일차 목록의 발치(footer)에 그려져서 드래그 목록을 겹쳐 쓸 수 없습니다.
-  // 대신 위/아래 화살표로만 순서를 바꾸고, 1일차와 마찬가지로 로컬에 먼저 반영합니다.
-  const handleMoveNextDayStop = (index: number, direction: -1 | 1) => {
-    if (!nextDayCourse) return;
-    const targetIndex = index + direction;
-    if (targetIndex < 0 || targetIndex >= nextDayCourse.stops.length) return;
-    const stops = [...nextDayCourse.stops];
-    [stops[index], stops[targetIndex]] = [stops[targetIndex], stops[index]];
-    const reordered = stops.map((stop, i) => ({ ...stop, order: i + 1 }));
-    if (!reduceMotion) {
-      LayoutAnimation.configureNext(LayoutAnimation.create(220, "easeInEaseOut", "opacity"));
+  // 어느 일차든 바꾼 게 있으면 하단 '순서 저장' 버튼이 켜집니다.
+  const anyOrderChanged = Object.values(changedDays).some(Boolean);
+
+  // 순서를 바꾼 일차만 서버에 보내고, 서버가 다시 계산해준 코스로 교체한 목록을
+  // 돌려줍니다(여행 저장·나누기가 이어서 최신 목록을 쓰기 위해).
+  const persistOrders = async (): Promise<typeof dayCourses> => {
+    const next = [...dayCourses];
+    for (let i = 0; i < next.length; i++) {
+      if (!changedDays[i]) continue;
+      const stopOrder = next[i].course.stops.map((s) => s.attraction.content_id);
+      // 서버가 새 순서 기준으로 방문 시각을 다시 계산해서 돌려줍니다 —
+      // 그 결과로 화면을 갱신해야 시각이 순서와 어긋나지 않습니다.
+      const updated = await api.updateCourse(next[i].course.course_id, { stopOrder });
+      next[i] = { ...next[i], course: updated };
+      if (i === 0) await storage.saveCourse(updated);
     }
-    setNextDayCourse({ ...nextDayCourse, stops: reordered });
-    setNextDayOrderChanged(true);
-    setLastMoved((prev) => ({ id: stops[targetIndex].attraction.content_id, token: (prev?.token ?? 0) + 1 }));
+    setDayCourses(next);
+    setChangedDays({});
+    return next;
   };
 
-  // 1일차든 2일차든 바꾼 게 있으면 하단 '순서 저장' 버튼이 켜집니다.
-  const anyOrderChanged = orderChanged || nextDayOrderChanged;
-
-  // '순서 저장' 하나가 두 코스를 모두 맡습니다 — 순서를 바꾼 코스만 서버에
-  // 보내고, 손대지 않은 쪽은 건드리지 않습니다.
   const handleSaveOrder = async () => {
-    if (!course || !anyOrderChanged) return;
+    if (!anyOrderChanged) return;
     if (!session) {
       Alert.alert("로그인이 필요해요", "순서를 저장하려면 먼저 로그인해주세요.", [
         { text: "취소", style: "cancel" },
@@ -210,26 +229,17 @@ export default function ResultsScreen() {
     }
     setSavingOrder(true);
     try {
-      if (orderChanged) {
-        const stopOrder = course.stops.map((s) => s.attraction.content_id);
-        // 서버가 새 순서 기준으로 방문 시각을 다시 계산해서 돌려줍니다 —
-        // 그 결과로 화면을 갱신해야 시각이 순서와 어긋나지 않습니다.
-        const updated = await api.updateCourse(course.course_id, { stopOrder });
-        setCourse(updated);
-        await storage.saveCourse(updated);
-        setOrderChanged(false);
-      }
-      if (nextDayCourse && nextDayOrderChanged) {
-        const stopOrder = nextDayCourse.stops.map((s) => s.attraction.content_id);
-        const updated = await api.updateCourse(nextDayCourse.course_id, { stopOrder });
-        setNextDayCourse(updated);
-        setNextDayOrderChanged(false);
-      }
+      await persistOrders();
     } catch (err) {
       Alert.alert("순서 저장 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
     } finally {
       setSavingOrder(false);
     }
+  };
+
+  const openDayMap = (dayIndex: number) => {
+    setDayPickerVisible(false);
+    router.push(`/map?day=${dayIndex}`);
   };
 
   if (!course) {
@@ -245,6 +255,53 @@ export default function ResultsScreen() {
       </SafeAreaView>
     );
   }
+
+  // 문 닫은 뒤 도착하거나 그날 쉬는 장소가 있으면 다음 날로 나누자고 제안합니다.
+  // 나누기는 마지막 일차에서만 제안합니다 — 중간 일차를 나누면 그 뒤 일차들의
+  // 날짜가 하루씩 밀려서 방문 시각과 휴무일을 전부 다시 계산해야 하기 때문입니다.
+  const splitBannerFor = (dayIndex: number) => {
+    const day = dayCourses[dayIndex];
+    if (!day) return null;
+    const overflowIndex = overflowIndexOf(dayIndex);
+    if (overflowIndex < 0) return null;
+    const stop = day.course.stops[overflowIndex];
+    const isLastDay = dayIndex === dayCourses.length - 1;
+    const canSplit = overflowIndex >= 1 && isLastDay;
+    const splitting = splittingDay === dayIndex;
+
+    return (
+      <View style={styles.splitBanner}>
+        <View style={styles.splitBannerTextGroup}>
+          <Text style={styles.splitBannerTitle}>{stop.attraction.name}은(는) 이날 방문이 어려워요</Text>
+          <Text style={styles.splitBannerBody}>
+            {stop.closed_note ?? stop.time_note ?? "도착 예정 시간에 이용이 어렵습니다."}
+          </Text>
+          {!canSplit && (
+            <Text style={styles.splitBannerBody}>
+              {overflowIndex === 0
+                ? "첫 장소부터라서 나눌 수 없어요. 순서를 바꾸거나 장소를 줄여보세요."
+                : "마지막 날만 다음 날로 나눌 수 있어요. 순서를 바꾸거나 장소를 줄여보세요."}
+            </Text>
+          )}
+        </View>
+        {canSplit && (
+          <TouchableOpacity
+            style={[styles.splitButton, splitting && styles.splitButtonDisabled]}
+            onPress={() => handleSplit(dayIndex)}
+            disabled={splitting}
+            accessibilityRole="button"
+            accessibilityLabel={`${stop.attraction.name}부터 ${dayIndex + 2}일차로 나누기`}
+          >
+            {splitting ? (
+              <ActivityIndicator size="small" color={colors.onPrimary} />
+            ) : (
+              <Text style={styles.splitButtonText}>이 장소부터 {dayIndex + 2}일차로 나누기</Text>
+            )}
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
 
   // 상단 바와 코스 제목·안내문은 목록의 맨 위 콘텐츠로 넣습니다 — 그래야 홈
   // 화면처럼 스크롤을 내릴 때 목록과 함께 위로 밀려 사라집니다.
@@ -265,41 +322,13 @@ export default function ResultsScreen() {
         <Text style={styles.summary}>{course.summary}</Text>
       </View>
 
-      {/* 문 닫은 뒤 도착하거나 그날 쉬는 장소가 있으면 다음 날로 나누자고 제안합니다. */}
-      {overflowStop && !nextDayCourse && (
-        <View style={styles.splitBanner}>
-          <View style={styles.splitBannerTextGroup}>
-            <Text style={styles.splitBannerTitle}>
-              {overflowStop.attraction.name}은(는) 이날 방문이 어려워요
-            </Text>
-            <Text style={styles.splitBannerBody}>
-              {overflowStop.closed_note ?? overflowStop.time_note ?? "도착 예정 시간에 이용이 어렵습니다."}
-            </Text>
-            {!canSplit && (
-              <Text style={styles.splitBannerBody}>
-                첫 장소부터라서 나눌 수 없어요. 순서를 바꾸거나 장소를 줄여보세요.
-              </Text>
-            )}
-          </View>
-          {canSplit && (
-            <TouchableOpacity
-              style={[styles.splitButton, splitting && styles.splitButtonDisabled]}
-              onPress={handleSplit}
-              disabled={splitting}
-              accessibilityRole="button"
-              accessibilityLabel={`${overflowStop.attraction.name}부터 다음 날 코스로 나누기`}
-            >
-              {splitting ? (
-                <ActivityIndicator size="small" color={colors.onPrimary} />
-              ) : (
-                <Text style={styles.splitButtonText}>이 장소부터 다음 날로 나누기</Text>
-              )}
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
+      {splitBannerFor(0)}
 
-      {nextDayCourse && <Text style={styles.daySectionTitle}>1일차{visitDate ? ` · ${visitDate}` : ""}</Text>}
+      {dayCourses.length > 1 && (
+        <Text style={styles.daySectionTitle}>
+          1일차{dayCourses[0]?.visitDate ?? visitDate ? ` · ${dayCourses[0]?.visitDate ?? visitDate}` : ""}
+        </Text>
+      )}
 
       <View style={styles.orderHintRow}>
         <View style={styles.orderHintTextRow}>
@@ -320,35 +349,45 @@ export default function ResultsScreen() {
     </>
   );
 
-  // 나눈 뒤의 '2일차' 구간. 1일차 목록 아래에 이어서 보여줍니다. 순서는 위/아래
-  // 화살표로 바꿉니다 — 1일차 드래그 목록의 발치라 카드를 끌어 옮기게 하면 두 코스
-  // 사이로 항목이 넘어가 버립니다. 저장은 하단 '순서 저장' 버튼이 함께 맡습니다.
-  const nextDaySection = nextDayCourse ? (
-    <View style={styles.nextDaySection}>
-      <Text style={styles.daySectionTitle}>2일차{nextVisitDate ? ` · ${nextVisitDate}` : ""}</Text>
-      <Text style={styles.nextDayHint}>
-        저장하면 1일차와 같은 여행에 함께 담겨요. 오른쪽 화살표로 순서를 바꾼 뒤 아래 '순서 저장'을 누르면 돼요.
-      </Text>
-      {nextDayCourse.stops.map((stop, i) => {
-        const id = stop.attraction.content_id;
+  // 2일차부터는 1일차 목록의 발치에 이어서 그립니다. 순서는 위/아래 화살표로
+  // 바꿉니다 — 드래그 목록을 겹쳐 쓰면 두 일차 사이로 카드가 끌려가 버립니다.
+  // 저장은 하단 '순서 저장' 버튼이 모든 일차를 함께 맡습니다.
+  const laterDaySections = dayCourses.length > 1 && (
+    <>
+      {dayCourses.slice(1).map((day, offset) => {
+        const dayIndex = offset + 1;
         return (
-          <TimelineStopItem
-            key={id}
-            stop={stop}
-            userType={nextDayCourse.generated_for}
-            extraInfo={extraInfoMap[id]}
-            isFirst={i === 0}
-            isLast={i === nextDayCourse.stops.length - 1}
-            nextUnfit={nextDayCourse.stops[i + 1]?.fits_today === false}
-            timeStale={nextDayOrderChanged}
-            onMoveUp={() => handleMoveNextDayStop(i, -1)}
-            onMoveDown={() => handleMoveNextDayStop(i, 1)}
-            highlightToken={lastMoved?.id === id ? lastMoved.token : 0}
-          />
+          <View key={day.course.course_id} style={styles.nextDaySection}>
+            <Text style={styles.daySectionTitle}>
+              {dayIndex + 1}일차{day.visitDate ? ` · ${day.visitDate}` : ""}
+            </Text>
+            <Text style={styles.nextDayHint}>
+              저장하면 1일차와 같은 여행에 함께 담겨요. 오른쪽 화살표로 순서를 바꾼 뒤 아래 '순서 저장'을 누르면 돼요.
+            </Text>
+            {splitBannerFor(dayIndex)}
+            {day.course.stops.map((stop, i) => {
+              const id = stop.attraction.content_id;
+              return (
+                <TimelineStopItem
+                  key={id}
+                  stop={stop}
+                  userType={day.course.generated_for}
+                  extraInfo={extraInfoMap[id]}
+                  isFirst={i === 0}
+                  isLast={i === day.course.stops.length - 1}
+                  nextUnfit={day.course.stops[i + 1]?.fits_today === false}
+                  timeStale={!!changedDays[dayIndex]}
+                  onMoveUp={() => handleMoveStop(dayIndex, i, -1)}
+                  onMoveDown={() => handleMoveStop(dayIndex, i, 1)}
+                  highlightToken={lastMoved?.id === id ? lastMoved.token : 0}
+                />
+              );
+            })}
+          </View>
         );
       })}
-    </View>
-  ) : null;
+    </>
+  );
 
   return (
     // edges=["top"]로 상태표시줄(시계/배터리) 영역만 피해서 그립니다 — 홈 화면과 같습니다.
@@ -361,7 +400,7 @@ export default function ResultsScreen() {
             data={course.stops}
             keyExtractor={(item) => item.attraction.content_id}
             ListHeaderComponent={listHeader}
-            ListFooterComponent={nextDaySection}
+            ListFooterComponent={laterDaySections || null}
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
             onDragEnd={handleDragEnd}
@@ -377,9 +416,9 @@ export default function ResultsScreen() {
                     isFirst={index === 0}
                     isLast={index === course.stops.length - 1}
                     nextUnfit={course.stops[index + 1]?.fits_today === false}
-                    timeStale={orderChanged}
-                    onMoveUp={() => handleMoveStop(index, -1)}
-                    onMoveDown={() => handleMoveStop(index, 1)}
+                    timeStale={!!changedDays[0]}
+                    onMoveUp={() => handleMoveStop(0, index, -1)}
+                    onMoveDown={() => handleMoveStop(0, index, 1)}
                     onLongPress={Platform.OS === "web" ? undefined : drag}
                     isDragging={isActive}
                     highlightToken={lastMoved?.id === id ? lastMoved.token : 0}
@@ -400,14 +439,17 @@ export default function ResultsScreen() {
       {/* 화면을 끝낼 때 누르는 두 동작을 한 줄에 둡니다. 저장이 최종 동작이라
           채운 버튼으로 강조하고, 지도 보기는 테두리만 있는 보조 버튼입니다. */}
       <View style={styles.bottomBar}>
+        {/* 일차가 여럿이면 어느 날을 볼지 먼저 고릅니다. 하나뿐이면 바로 엽니다. */}
         <Pressable
           style={({ pressed }) => [styles.mapButton, pressed && styles.outlineButtonPressed]}
-          onPress={() => router.push("/map")}
+          onPress={() => (dayCourses.length > 1 ? setDayPickerVisible(true) : openDayMap(0))}
           accessibilityRole="button"
-          accessibilityLabel="지도로 전체 동선 보기"
+          accessibilityLabel={
+            dayCourses.length > 1 ? "지도로 볼 날짜 고르기" : "지도로 전체 동선 보기"
+          }
         >
-          <MapTrifoldIcon size={16} color={colors.primary} weight="bold" />
-          <Text style={styles.mapButtonText}>지도</Text>
+          <MapTrifoldIcon size={17} color={colors.primary} weight="bold" />
+          <Text style={styles.mapButtonText}>지도로 전체 보기</Text>
         </Pressable>
         {/* 순서를 바꾸기 전에는 누를 게 없으니 흐리게 두고, 바꾸면 켜집니다. */}
         <Pressable
@@ -439,6 +481,39 @@ export default function ResultsScreen() {
           <Text style={styles.saveButtonText}>저장</Text>
         </Pressable>
       </View>
+
+      {/* 일차가 여럿일 때 지도로 볼 날을 고르는 시트. */}
+      <Modal
+        visible={dayPickerVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setDayPickerVisible(false)}
+      >
+        <Pressable
+          style={styles.pickerBackdrop}
+          onPress={() => setDayPickerVisible(false)}
+          accessibilityLabel="닫기"
+        >
+          <Pressable style={styles.pickerSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.pickerTitle}>어느 날을 지도로 볼까요?</Text>
+            {dayCourses.map((day, i) => (
+              <TouchableOpacity
+                key={day.course.course_id}
+                style={styles.pickerRow}
+                onPress={() => openDayMap(i)}
+                accessibilityRole="button"
+                accessibilityLabel={`${i + 1}일차 지도로 보기, 장소 ${day.course.stops.length}곳`}
+              >
+                <MapTrifoldIcon size={16} color={colors.primary} weight="bold" />
+                <Text style={styles.pickerRowText}>
+                  {i + 1}일차{day.visitDate ? ` · ${day.visitDate}` : ""}
+                </Text>
+                <Text style={styles.pickerRowCount}>{day.course.stops.length}곳</Text>
+              </TouchableOpacity>
+            ))}
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <SaveCourseModal
         visible={saveModalVisible}
@@ -532,24 +607,25 @@ function makeStyles(colors: ThemeColors) {
     alignItems: "center",
     gap: spacing.sm,
   },
-  // 하단 바의 세 버튼은 높이를 52로 맞춥니다. 지도는 글자가 짧아 내용만큼만
-  // 차지하고, '순서 저장'과 '저장'이 남는 폭을 반씩 나눠 갖습니다.
+  // 하단 바의 세 버튼은 높이를 52로 맞춥니다. 저장 버튼 둘은 글자 폭만큼만
+  // 차지하고, 남는 폭은 전부 '지도로 전체 보기'가 가져갑니다 — 이 화면에서 가장
+  // 자주 누르는 버튼이라 가장 크게 둡니다.
   mapButton: {
+    flex: 1,
     height: 52,
     flexDirection: "row",
     backgroundColor: colors.background,
     borderWidth: 1,
     borderColor: colors.primary,
     borderRadius: radius.lg - 2,
-    paddingHorizontal: spacing.md + 2,
     alignItems: "center",
     justifyContent: "center",
     gap: spacing.xs + 2,
   },
   mapButtonText: { color: colors.primary, fontSize: 16, fontFamily: fontFamily.bold },
   orderSaveButton: {
-    flex: 1,
     height: 52,
+    paddingHorizontal: spacing.sm + 2,
     backgroundColor: colors.background,
     borderWidth: 1,
     borderColor: colors.primary,
@@ -557,17 +633,45 @@ function makeStyles(colors: ThemeColors) {
     alignItems: "center",
     justifyContent: "center",
   },
-  orderSaveButtonText: { color: colors.primary, fontSize: 16, fontFamily: fontFamily.bold },
+  orderSaveButtonText: { color: colors.primary, fontSize: 14, fontFamily: fontFamily.bold },
   saveButton: {
-    flex: 1,
     height: 52,
+    paddingHorizontal: spacing.md,
     backgroundColor: colors.primary,
     borderRadius: radius.lg - 2,
     alignItems: "center",
     justifyContent: "center",
   },
   saveButtonPressed: { opacity: 0.75 },
-  saveButtonText: { color: colors.onPrimary, fontSize: 16, fontFamily: fontFamily.bold },
+  saveButtonText: { color: colors.onPrimary, fontSize: 14, fontFamily: fontFamily.bold },
+  // 지도로 볼 날을 고르는 시트(일차가 둘 이상일 때만).
+  pickerBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
+  pickerSheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xl,
+    paddingHorizontal: spacing.lg,
+    gap: spacing.xs,
+  },
+  pickerTitle: {
+    fontSize: 16,
+    fontFamily: fontFamily.bold,
+    color: colors.text,
+    marginBottom: spacing.sm,
+  },
+  pickerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceAlt,
+  },
+  pickerRowText: { flex: 1, fontSize: 15, fontFamily: fontFamily.semiBold, color: colors.text },
+  pickerRowCount: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textTertiary },
   outlineButtonPressed: { backgroundColor: colors.surfaceAlt },
   buttonDisabled: { opacity: 0.45 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, backgroundColor: colors.background },

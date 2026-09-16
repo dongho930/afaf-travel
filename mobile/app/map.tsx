@@ -1,4 +1,5 @@
 import Constants from "expo-constants";
+import { Stack, useLocalSearchParams } from "expo-router";
 import { BusIcon, CarIcon, type Icon, NavigationArrowIcon, PersonSimpleWalkIcon } from "phosphor-react-native";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -151,7 +152,12 @@ function formatDistance(m: number | null): string {
  * (기존 AttractionCard 컴포넌트를 재사용해) 모달로 보여줍니다.
  */
 export default function MapScreen() {
-  const { course } = useCourseContext();
+  // 코스를 여러 날로 나눴으면 어느 일차의 지도인지 ?day=N으로 받습니다.
+  // (없거나 범위를 벗어나면 1일차 = 지금까지와 같은 동작)
+  const { day } = useLocalSearchParams<{ day?: string }>();
+  const { course: firstDayCourse, dayCourses } = useCourseContext();
+  const dayIndex = Math.max(0, Math.trunc(Number(day)) || 0);
+  const course = dayCourses[dayIndex]?.course ?? firstDayCourse;
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   // null = 아직 조회 전. 조회가 끝나면(전부 실패했더라도) 배열이 들어오고,
@@ -361,6 +367,9 @@ export default function MapScreen() {
 
   return (
     <View style={{ flex: 1 }}>
+      {/* 일차가 여럿이면 어느 날 지도인지 상단 제목에 밝혀줍니다. */}
+      {dayCourses.length > 1 && <Stack.Screen options={{ title: `${dayIndex + 1}일차 지도` }} />}
+
       {Platform.OS === "web" ? (
         // react-native-webview는 웹을 지원하지 않으므로, 웹에서는 iframe으로 같은 페이지를 띄웁니다.
         <iframe

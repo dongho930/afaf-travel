@@ -1,11 +1,23 @@
 import React, { createContext, useContext, useState } from "react";
 import { CourseResponse, ParsedQuery, PlaceCandidate, UserType } from "../types";
 
+/** 코스를 날짜별로 나눴을 때의 하루치. 0번이 1일차입니다. */
+export interface DayCourse {
+  course: CourseResponse;
+  visitDate: string | null;
+}
+
 interface CourseContextValue {
   userType: UserType;
   setUserType: (t: UserType) => void;
   course: CourseResponse | null;
+  // "이 코스로 새로 시작" — 일차 목록을 1일차 하나로 되돌립니다.
   setCourse: (c: CourseResponse | null) => void;
+
+  // 하루에 다 못 도는 코스를 나누면 2일차, 3일차… 로 계속 늘어납니다.
+  // course는 항상 dayCourses[0]과 같게 유지됩니다(지도·다른 화면 호환).
+  dayCourses: DayCourse[];
+  setDayCourses: (days: DayCourse[]) => void;
 
   // 지역(경기도 내 시/군/구) 선택 — null이면 경기도 전체를 대상으로 추천합니다.
   sigunguCd: number | null;
@@ -33,7 +45,8 @@ const CourseContext = createContext<CourseContextValue | undefined>(undefined);
 
 export function CourseProvider({ children }: { children: React.ReactNode }) {
   const [userType, setUserType] = useState<UserType>("general");
-  const [course, setCourse] = useState<CourseResponse | null>(null);
+  const [course, setCourseState] = useState<CourseResponse | null>(null);
+  const [dayCourses, setDayCoursesState] = useState<DayCourse[]>([]);
   const [sigunguCd, setSigunguCd] = useState<number | null>(null);
   const [sigunguName, setSigunguName] = useState<string | null>(null);
   const [recommendations, setRecommendations] = useState<PlaceCandidate[]>([]);
@@ -46,6 +59,18 @@ export function CourseProvider({ children }: { children: React.ReactNode }) {
     setSigunguName(name);
   };
 
+  // 두 값이 어긋나면 지도와 목록이 서로 다른 코스를 보게 되므로, 일차 목록을
+  // 바꿀 때 1일차를 course에도 그대로 반영합니다.
+  const setDayCourses = (days: DayCourse[]) => {
+    setDayCoursesState(days);
+    setCourseState(days[0]?.course ?? null);
+  };
+
+  const setCourse = (c: CourseResponse | null) => {
+    setCourseState(c);
+    setDayCoursesState(c ? [{ course: c, visitDate }] : []);
+  };
+
   return (
     <CourseContext.Provider
       value={{
@@ -53,6 +78,8 @@ export function CourseProvider({ children }: { children: React.ReactNode }) {
         setUserType,
         course,
         setCourse,
+        dayCourses,
+        setDayCourses,
         sigunguCd,
         sigunguName,
         setRegion,
