@@ -22,7 +22,7 @@ import { getCongestionDisplay } from "../constants/congestion";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
-import { api } from "../services/api";
+import { api, errorMessage } from "../services/api";
 import { useCourseContext } from "../services/CourseContext";
 import { storage } from "../services/storage";
 import { useTheme } from "../services/ThemeContext";
@@ -73,7 +73,7 @@ export default function SelectPlacesScreen() {
     api
       .getExtraInfo(targets.map((a) => ({ contentId: a.content_id, category: a.category })))
       .then(setExtraInfoMap)
-      .catch(() => {})
+      .catch((err) => console.warn("[부가 정보] 불러오지 못했습니다:", err))
       .finally(() => setExtraInfoReady(true));
   }, [recommendations]);
 
@@ -116,7 +116,7 @@ export default function SelectPlacesScreen() {
       setSelectedIds(new Set());
       listRef.current?.scrollToOffset({ offset: 0, animated: true });
     } catch (err) {
-      Alert.alert("새로 추천받지 못했어요", "잠시 후 다시 시도해주세요.\n" + String(err));
+      Alert.alert("새로 추천받지 못했어요", errorMessage(err));
     } finally {
       setIsRefreshing(false);
     }
@@ -140,7 +140,7 @@ export default function SelectPlacesScreen() {
       await storage.saveCourse(course);
       router.push("/results");
     } catch (err) {
-      Alert.alert("코스 생성 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+      Alert.alert("코스 생성 실패", errorMessage(err));
     } finally {
       setIsSubmitting(false);
     }

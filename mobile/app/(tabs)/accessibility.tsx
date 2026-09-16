@@ -15,7 +15,7 @@ import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
 import { radius, spacing } from "../../constants/tokens";
 import { userTypeIcon } from "../../constants/userTypeIcons";
-import { api } from "../../services/api";
+import { api, errorMessage } from "../../services/api";
 import { useAuth } from "../../services/AuthContext";
 import { useTheme } from "../../services/ThemeContext";
 import {
@@ -399,7 +399,7 @@ export default function AccessibilityScreen() {
         loadReports(selectedCategory);
       }
     } catch (err) {
-      Alert.alert("등록 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+      Alert.alert("등록 실패", errorMessage(err));
     } finally {
       setSubmittingReport(false);
     }

@@ -100,7 +100,7 @@ export default function PostsScreen() {
         setPosts((prev) => [...prev, ...rows]);
         setHasMore(rows.length === PAGE_SIZE);
       })
-      .catch(() => {})
+      .catch((err) => console.warn("[게시물 더보기] 불러오지 못했습니다:", err))
       .finally(() => setLoadingMore(false));
   };
 

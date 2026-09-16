@@ -14,7 +14,7 @@ import {
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Alert } from "../services/crossPlatformAlert";
 import { EditDeleteButtons } from "../components/EditDeleteButtons";
-import { api } from "../services/api";
+import { api, errorMessage } from "../services/api";
 import { useCourseContext } from "../services/CourseContext";
 import { useTheme } from "../services/ThemeContext";
 import { fontFamily } from "../constants/fonts";
@@ -62,7 +62,7 @@ export default function TripDetailScreen() {
       setCourse(detail.course);
       router.push("/results");
     } catch (err) {
-      Alert.alert("불러오기 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+      Alert.alert("불러오기 실패", errorMessage(err));
     } finally {
       setOpeningId(null);
     }
@@ -79,7 +79,7 @@ export default function TripDetailScreen() {
             await api.deleteCourse(courseId);
             setCourses((prev) => prev.filter((c) => c.course_id !== courseId));
           } catch (err) {
-            Alert.alert("삭제 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+            Alert.alert("삭제 실패", errorMessage(err));
           }
         },
       },
@@ -105,7 +105,7 @@ export default function TripDetailScreen() {
       );
       setEditingCourse(null);
     } catch (err) {
-      Alert.alert("수정 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+      Alert.alert("수정 실패", errorMessage(err));
     } finally {
       setIsSavingTitle(false);
     }

@@ -16,7 +16,7 @@ import {
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
-import { api } from "../services/api";
+import { api, errorMessage } from "../services/api";
 import { useAuth } from "../services/AuthContext";
 import { Alert } from "../services/crossPlatformAlert";
 import { useTheme } from "../services/ThemeContext";
@@ -141,7 +141,7 @@ export function PostCard({
       setCommentInput("");
       setReplyingTo(null);
     } catch (err) {
-      Alert.alert("등록 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+      Alert.alert("등록 실패", errorMessage(err));
     } finally {
       setSubmittingComment(false);
     }

@@ -36,7 +36,7 @@ import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
 import { radius, spacing } from "../../constants/tokens";
 import { userTypeIcon } from "../../constants/userTypeIcons";
-import { api } from "../../services/api";
+import { api, errorMessage } from "../../services/api";
 import { useAuth } from "../../services/AuthContext";
 import { getDataVersion } from "../../services/dataVersion";
 import { useTheme } from "../../services/ThemeContext";
@@ -277,7 +277,7 @@ export default function TripsScreen() {
             await api.deleteTrip(tripId);
             setTrips((prev) => prev.filter((t) => t.trip_id !== tripId));
           } catch (err) {
-            Alert.alert("삭제 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+            Alert.alert("삭제 실패", errorMessage(err));
           }
         },
       },
@@ -308,7 +308,7 @@ export default function TripsScreen() {
                   return next;
                 });
               } catch (err) {
-                Alert.alert("처리 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+                Alert.alert("처리 실패", errorMessage(err));
               } finally {
                 setVisitingTripId(null);
               }
@@ -342,7 +342,7 @@ export default function TripsScreen() {
                 return next;
               });
             } catch (err) {
-              Alert.alert("처리 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+              Alert.alert("처리 실패", errorMessage(err));
             } finally {
               setVisitingTripId(null);
             }
@@ -364,7 +364,7 @@ export default function TripsScreen() {
             setVisitedPlaces((prev) => prev.filter((v) => v.id !== visitedId));
             setVisitedCount((prev) => Math.max(0, prev - 1));
           } catch (err) {
-            Alert.alert("삭제 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+            Alert.alert("삭제 실패", errorMessage(err));
           }
         },
       },
@@ -386,7 +386,7 @@ export default function TripsScreen() {
       const updated = await api.updateVisitedDate(editingVisitedId, newDate);
       setVisitedPlaces((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
     } catch (err) {
-      Alert.alert("수정 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+      Alert.alert("수정 실패", errorMessage(err));
     } finally {
       setVisitedDateModalVisible(false);
       setEditingVisitedId(null);
@@ -432,7 +432,7 @@ export default function TripsScreen() {
       setTrips((prev) => prev.map((t) => (t.trip_id === updated.trip_id ? { ...t, ...updated } : t)));
       setEditingTrip(null);
     } catch (err) {
-      Alert.alert("수정 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+      Alert.alert("수정 실패", errorMessage(err));
     } finally {
       setIsSavingEdit(false);
     }
@@ -520,7 +520,10 @@ export default function TripsScreen() {
   let keyExtractor = (item: any) => item.trip_id;
   let emptyText = "아직 저장한 여행이 없어요.";
   let emptyHint: string | null = 'AI 플래너에서 코스를 만들고 "저장"을 눌러보세요.';
-  let renderItem = ({ item }: { item: TripSummary }) => {
+  // 섹션(여행/리뷰/제보/방문)마다 다른 항목 타입을 그리므로, 위 listData처럼
+  // 느슨하게 선언합니다 — 첫 대입의 타입(TripSummary)으로 고정되면 나머지
+  // 섹션을 대입할 때 타입이 맞지 않습니다.
+  let renderItem: (info: { item: any }) => React.JSX.Element = ({ item }: { item: TripSummary }) => {
     const dateLabel = formatDateRange(item.start_date, item.end_date);
     const CatIcon = CATEGORY_ICON[item.category] ?? MapPinIcon;
     return (

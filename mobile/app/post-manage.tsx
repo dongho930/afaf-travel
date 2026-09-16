@@ -8,7 +8,7 @@ import { Alert } from "../services/crossPlatformAlert";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
-import { api } from "../services/api";
+import { api, errorMessage } from "../services/api";
 import { useTheme } from "../services/ThemeContext";
 import { PostItem } from "../types";
 
@@ -32,7 +32,7 @@ export default function PostManageScreen() {
     api
       .getMyPosts()
       .then(setPosts)
-      .catch((err) => Alert.alert("불러오기 실패", "내 게시물을 불러오지 못했어요.\n" + String(err)))
+      .catch((err) => Alert.alert("불러오기 실패", errorMessage(err)))
       .finally(() => setLoading(false));
   }, []);
 
@@ -55,7 +55,7 @@ export default function PostManageScreen() {
             setPosts((prev) => prev.filter((p) => p.id !== postId));
             onDeleted?.();
           } catch (err) {
-            Alert.alert("삭제 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+            Alert.alert("삭제 실패", errorMessage(err));
           } finally {
             setDeletingId(null);
           }

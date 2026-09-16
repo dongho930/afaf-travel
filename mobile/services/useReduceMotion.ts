@@ -9,7 +9,7 @@ export function useReduceMotion(): boolean {
     let mounted = true;
     AccessibilityInfo.isReduceMotionEnabled()
       .then((enabled) => mounted && setReduceMotion(enabled))
-      .catch(() => {});
+      .catch((err) => console.warn("[모션 설정] 불러오지 못했습니다:", err));
     const sub = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
     return () => {
       mounted = false;

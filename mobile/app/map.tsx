@@ -342,6 +342,10 @@ export default function MapScreen() {
       if (data?.type === "marker_click" && data.id) {
         const stop = course?.stops.find((s) => s.attraction.content_id === data.id);
         if (stop) setSelectedStop(stop);
+      } else if (data?.type === "map_error") {
+        // 지도 페이지는 사용자에게 "지도를 불러오지 못했어요"만 보여주고, 원인은
+        // 이쪽으로 넘겨줍니다(도메인 미등록·키 오류 등). 팝업으로 막지는 않습니다.
+        console.warn("[map-view]", data.message);
       } else if (data?.type === "route_drawn") {
         // map_view.py가 경로(직선이든 실제든)를 한 번 그렸다는 신호 → 이제 지도를 보여줘도 됨
         setRouteDrawn(true);

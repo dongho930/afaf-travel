@@ -12,7 +12,7 @@ import {
   View,
 } from "react-native";
 import { Alert } from "../services/crossPlatformAlert";
-import { api } from "../services/api";
+import { api, errorMessage } from "../services/api";
 import { useTheme } from "../services/ThemeContext";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
@@ -112,7 +112,7 @@ export function SaveCourseModal({ visible, onClose, defaultNewTripName, onConfir
       onClose();
       Alert.alert("저장 완료", "'내 여행' 탭 '저장한 경로'에서 다시 확인할 수 있어요.");
     } catch (err) {
-      Alert.alert("저장 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+      Alert.alert("저장 실패", errorMessage(err));
     } finally {
       setIsSaving(false);
     }

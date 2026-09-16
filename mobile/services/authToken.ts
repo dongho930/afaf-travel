@@ -36,6 +36,28 @@ function isUsable(session: Session | null): boolean {
 }
 
 /**
+ * 백엔드가 401을 돌려줬을 때, 토큰을 강제로 새로 받아옵니다.
+ *
+ * getAccessToken은 만료가 임박했을 때만 다시 확인하므로, "아직 안 만료됐다고
+ * 생각하는데 서버는 거부하는" 상황(기기 시계가 어긋났거나, 다른 기기에서
+ * 로그아웃했거나)에서는 메모리 값을 계속 씁니다. 그 경우를 푸는 탈출구입니다.
+ *
+ * 새 토큰을 받으면 그 값을, 갱신이 안 되면(세션 자체가 끝남) undefined를 돌려줍니다.
+ */
+export async function refreshAccessToken(): Promise<string | undefined> {
+  try {
+    const { data } = await supabase.auth.refreshSession();
+    cachedSession = data.session;
+    sessionKnown = true;
+    return cachedSession?.access_token;
+  } catch {
+    cachedSession = null;
+    sessionKnown = true;
+    return undefined;
+  }
+}
+
+/**
  * 지금 쓸 수 있는 access token. 로그인하지 않았으면 undefined를 돌려줍니다.
  */
 export async function getAccessToken(): Promise<string | undefined> {

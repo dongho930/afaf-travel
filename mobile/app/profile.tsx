@@ -8,7 +8,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, TouchableOpa
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Alert } from "../services/crossPlatformAlert";
 import { ActionButton } from "../components/ActionButton";
-import { api } from "../services/api";
+import { api, errorMessage } from "../services/api";
 import { useAuth } from "../services/AuthContext";
 import { useProfile } from "../services/ProfileContext";
 import { useTheme } from "../services/ThemeContext";
@@ -87,7 +87,7 @@ export default function ProfileScreen() {
       const { avatar_url: avatarUrl } = await api.uploadAvatar(base64, fileExt);
       applyLocalChange({ avatar_url: avatarUrl });
     } catch (err) {
-      Alert.alert("업로드 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+      Alert.alert("업로드 실패", errorMessage(err));
     } finally {
       setUploadingAvatar(false);
     }
@@ -104,7 +104,7 @@ export default function ProfileScreen() {
       applyLocalChange({ username: usernameDraft.trim() });
       setUsernameEditing(false);
     } catch (err) {
-      Alert.alert("변경 실패", "이미 사용 중인 아이디이거나 오류가 발생했어요.\n" + String(err));
+      Alert.alert("변경 실패", errorMessage(err));
     } finally {
       setIsSavingUsername(false);
     }

@@ -241,7 +241,7 @@ export default function HomeScreen() {
         if (rows.length === 0) return;
         setRegionChips(["전체", ...rows.map((r) => r.city_name)]);
       })
-      .catch(() => {});
+      .catch((err) => console.warn("[지역 칩] 불러오지 못했습니다:", err));
   }, []);
 
   // 지난번에 저장해둔 홈 화면 내용을 먼저 그려줍니다. 서버 응답을 기다리는
@@ -272,7 +272,7 @@ export default function HomeScreen() {
           cached.places.map((p) => p.image_url).filter((url): url is string => !!url)
         );
       })
-      .catch(() => {}); // 캐시를 못 읽어도 평소대로 서버에서 받아오면 됩니다.
+      .catch((err) => console.warn("[홈 캐시 읽기] 불러오지 못했습니다:", err)); // 캐시를 못 읽어도 평소대로 서버에서 받아오면 됩니다.
     return () => {
       cancelled = true;
     };
@@ -298,7 +298,7 @@ export default function HomeScreen() {
       totalAccessibleCount,
       supportedRegionCount,
     };
-    AsyncStorage.setItem(HOME_CACHE_KEY, JSON.stringify(snapshot)).catch(() => {});
+    AsyncStorage.setItem(HOME_CACHE_KEY, JSON.stringify(snapshot)).catch((err) => console.warn("[홈 캐시 저장] 불러오지 못했습니다:", err));
   }, [
     popularPlaces,
     statsSettled,
@@ -589,7 +589,7 @@ export default function HomeScreen() {
             prev.map((p) => (overviews[p.content_id] ? { ...p, overview: overviews[p.content_id] } : p))
           );
         })
-        .catch(() => {});
+        .catch((err) => console.warn("[소개문] 불러오지 못했습니다:", err));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCategory]);

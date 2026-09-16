@@ -107,8 +107,14 @@ _TEMPLATE = """<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <style>
     html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; }
-    #debug { display: none; position: fixed; top: 0; left: 0; right: 0; background: #fff3cd; color: #664d03;
-      font-family: monospace; font-size: 12px; padding: 8px; z-index: 999; white-space: pre-wrap; }
+    #debug { display: none; position: fixed; top: 0; left: 0; right: 0; padding: 10px 12px; z-index: 999;
+      white-space: pre-wrap; }
+    /* 사용자에게 보이는 안내 — 경고처럼 보이지 않게 담백한 회색 띠로. */
+    #debug.notice { background: #F1F3F5; color: #343A40; border-bottom: 1px solid #DEE2E6;
+      font-family: -apple-system, BlinkMacSystemFont, 'Malgun Gothic', sans-serif; font-size: 13px;
+      text-align: center; }
+    /* ?debug=1로 열었을 때만 쓰는 개발자용 원문. */
+    #debug.raw { background: #fff3cd; color: #664d03; font-family: monospace; font-size: 12px; }
 
     /* 코스 마커: 흰 원 안에 카테고리 아이콘, 왼쪽 위에 방문 순서 배지, 아래에 꼬리. */
     .mk { position: relative; width: 36px; height: 43px; cursor: pointer; }
@@ -131,10 +137,23 @@ _TEMPLATE = """<!DOCTYPE html>
   <div id="debug"></div>
   <div id="map"></div>
   <script>
-    // 지도가 안 뜨는 이유를 알려줘야 할 때만 상단에 노란 띠로 보여줍니다.
+    // 주소에 ?debug=1을 붙였을 때만 개발자용 원문을 화면에 띄웁니다.
+    var SHOW_RAW_ERRORS = /[?&]debug=1/.test(location.search);
+
+    /**
+     * 지도를 못 띄웠을 때의 안내.
+     *
+     * 예전에는 원인을 그대로 노란 띠에 찍었습니다 — "도메인 미등록 또는 잘못된
+     * 키일 가능성이 높습니다 (key 앞 6자: ...)" 같은 문구가 사용자에게 보였고,
+     * 도메인 등록이 어긋나면 모든 사용자가 그 화면을 봤습니다. 이제 사용자에게는
+     * 무엇을 할 수 있는지만 알리고, 원인은 콘솔과 앱(postToHost)으로만 보냅니다.
+     */
     function showDebug(msg) {
+      console.error('[map-view]', msg);
+      postToHost({ type: 'map_error', message: msg });
       var el = document.getElementById('debug');
-      el.textContent = msg;
+      el.textContent = SHOW_RAW_ERRORS ? msg : '지도를 불러오지 못했어요. 잠시 후 다시 시도해주세요.';
+      el.className = SHOW_RAW_ERRORS ? 'raw' : 'notice';
       el.style.display = 'block';
     }
     window.onerror = function (message, source, lineno) {

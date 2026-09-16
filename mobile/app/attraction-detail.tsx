@@ -50,7 +50,7 @@ import {
   FOOT_ICON_BASE64,
   PUBLIC_TRANSIT_ICON_BASE64,
 } from "../constants/travelModeIcons";
-import { api } from "../services/api";
+import { api, errorMessage } from "../services/api";
 import { useAuth } from "../services/AuthContext";
 import {
   directionsFailureMessage,
@@ -235,7 +235,7 @@ export default function AttractionDetailScreen() {
         .map((asset) => ({ uri: asset.uri, payload: asset.base64 as string }));
       setPhotoDrafts((prev) => [...prev, ...encoded].slice(0, MAX_REVIEW_PHOTOS));
     } catch (err) {
-      Alert.alert("사진을 불러오지 못했어요", String(err));
+      Alert.alert("사진을 불러오지 못했어요", errorMessage(err));
     } finally {
       setPickingPhoto(false);
     }
@@ -277,7 +277,7 @@ export default function AttractionDetailScreen() {
       setReviews(reviewList);
       Alert.alert("리뷰가 등록됐어요. 감사합니다!");
     } catch (err) {
-      Alert.alert("등록 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+      Alert.alert("등록 실패", errorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -356,7 +356,7 @@ export default function AttractionDetailScreen() {
     try {
       await Linking.openURL(option.url);
     } catch (err) {
-      Alert.alert("열기 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+      Alert.alert("열기 실패", errorMessage(err));
     }
   };
 

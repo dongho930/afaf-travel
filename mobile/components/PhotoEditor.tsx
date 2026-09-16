@@ -1,5 +1,6 @@
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { CheckIcon, XIcon } from "phosphor-react-native";
+import { errorMessage } from "../services/api";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -243,7 +244,7 @@ export function PhotoEditor({
       // 바뀌지 않아 신호가 오지 않고 또 시간만 초과합니다.
       setExportUri(null);
       exportReadyResolveRef.current = null;
-      Alert.alert("사진 처리 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+      Alert.alert("사진 처리 실패", errorMessage(err));
     } finally {
       setProcessing(false);
     }

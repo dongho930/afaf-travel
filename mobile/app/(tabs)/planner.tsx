@@ -30,7 +30,7 @@ import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
 import { radius, spacing } from "../../constants/tokens";
 import { userTypeIcon } from "../../constants/userTypeIcons";
-import { api } from "../../services/api";
+import { api, errorMessage } from "../../services/api";
 import { useCourseContext } from "../../services/CourseContext";
 import { storage } from "../../services/storage";
 import { useTheme } from "../../services/ThemeContext";
@@ -196,7 +196,7 @@ export default function PlannerScreen() {
       setPendingQueryText(queryText);
       router.push("/select");
     } catch (err) {
-      Alert.alert("장소 추천 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+      Alert.alert("장소 추천 실패", errorMessage(err));
     } finally {
       setIsSubmitting(false);
     }

@@ -21,7 +21,7 @@ import { PhotoEditor } from "../components/PhotoEditor";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
-import { api } from "../services/api";
+import { api, errorMessage } from "../services/api";
 import { useAuth } from "../services/AuthContext";
 import { useTheme } from "../services/ThemeContext";
 import { VisitedPlace } from "../types";
@@ -115,7 +115,7 @@ export default function PostCreateScreen() {
         ...picked.map((a, i) => ({ key: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`, uri: a.uri })),
       ]);
     } catch (err) {
-      Alert.alert("사진을 불러오지 못했어요", String(err));
+      Alert.alert("사진을 불러오지 못했어요", errorMessage(err));
     } finally {
       setPickingPhoto(false);
     }
@@ -167,7 +167,7 @@ export default function PostCreateScreen() {
       }
       router.replace("/posts");
     } catch (err) {
-      Alert.alert("등록 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+      Alert.alert("등록 실패", errorMessage(err));
     } finally {
       setSubmitting(false);
     }

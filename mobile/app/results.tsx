@@ -29,7 +29,7 @@ import { useReduceMotion } from "../services/useReduceMotion";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
-import { api } from "../services/api";
+import { api, errorMessage } from "../services/api";
 import { useAuth } from "../services/AuthContext";
 import { useCourseContext } from "../services/CourseContext";
 import { useTheme } from "../services/ThemeContext";
@@ -97,7 +97,7 @@ export default function ResultsScreen() {
     api
       .getExtraInfo(targets.map((a) => ({ contentId: a.content_id, category: a.category })))
       .then(setExtraInfoMap)
-      .catch(() => {})
+      .catch((err) => console.warn("[부가 정보] 불러오지 못했습니다:", err))
       .finally(() => setExtraInfoReady(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extraInfoKey]);
@@ -159,7 +159,7 @@ export default function ResultsScreen() {
       setDayCourses(next);
       if (dayIndex === 0) await storage.saveCourse(result.today);
     } catch (err) {
-      Alert.alert("코스를 나누지 못했어요", "잠시 후 다시 시도해주세요.\n" + String(err));
+      Alert.alert("코스를 나누지 못했어요", errorMessage(err));
     } finally {
       setSplittingDay(null);
     }
@@ -231,7 +231,7 @@ export default function ResultsScreen() {
     try {
       await persistOrders();
     } catch (err) {
-      Alert.alert("순서 저장 실패", "잠시 후 다시 시도해주세요.\n" + String(err));
+      Alert.alert("순서 저장 실패", errorMessage(err));
     } finally {
       setSavingOrder(false);
     }

@@ -1,5 +1,5 @@
 import Constants from "expo-constants";
-import { getAccessToken } from "./authToken";
+import { getAccessToken, refreshAccessToken } from "./authToken";
 import { bumpDataVersion } from "./dataVersion";
 import {
   AccessibilityReport,
@@ -33,6 +33,93 @@ import {
 const API_BASE_URL: string =
   (Constants.expoConfig?.extra?.apiBaseUrl as string | undefined) ?? "http://localhost:8000";
 
+// 서버가 느리거나 네트워크가 끊겼을 때 화면이 영원히 로딩 상태로 남지 않도록
+// 요청마다 상한을 둡니다. 백엔드가 오래 걸리는 조회를 25초에 504로 끊으므로,
+// 그보다 조금 길게 잡아야 서버가 보내주는 안내 문구를 살릴 수 있습니다.
+const REQUEST_TIMEOUT_MS = 30000;
+
+/**
+ * API 호출 실패. message는 그대로 사용자에게 보여줄 수 있는 한국어 문장입니다.
+ *
+ * 예전에는 `API 요청 실패 (503): {"detail":"..."}` 같은 문자열을 던졌고, 화면들이
+ * 그걸 String(err)로 팝업에 그대로 붙였습니다. 사용자에게 상태코드와 JSON 원문이
+ * 노출됐고, 정작 백엔드가 보내준 한국어 안내는 그 안에 묻혔습니다.
+ */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number | null,
+    // 서버가 보낸 원문(detail). 화면에 띄우지 말고 로그·디버깅용으로만 씁니다.
+    readonly detail?: string
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+
+  /** 다시 로그인해야 하는 상황인지 — 화면에서 로그인 유도에 씁니다. */
+  get needsLogin(): boolean {
+    return this.status === 401;
+  }
+}
+
+function messageForStatus(status: number, detail?: string): string {
+  if (status === 401) return "다시 로그인해주세요. 로그인이 풀렸어요.";
+
+  // 서버 오류(5xx)의 detail은 사용자에게 보여주지 않습니다. 설정 문제나 외부
+  // API 응답 원문이 섞여 있습니다("TMAP_APP_KEY가 설정되지 않았습니다",
+  // "카카오모빌리티 API 오류: 429 {...}"). 원문은 ApiError.detail로 남겨 로그에서만 봅니다.
+  if (status >= 500) {
+    if (status === 502 || status === 503) return "서버가 잠시 바빠요. 잠시 후 다시 시도해주세요.";
+    if (status === 504) return "불러오는 데 너무 오래 걸렸어요. 잠시 후 다시 시도해주세요.";
+    return "서버에 문제가 생겼어요. 잠시 후 다시 시도해주세요.";
+  }
+
+  // 요청이 잘못됐다는 응답(4xx)은 백엔드가 사람이 읽을 문장으로 보냅니다
+  // (예: "첫 장소부터는 나눌 수 없어요"). 그대로 쓰는 게 가장 정확합니다.
+  if (detail && detail.trim() && !detail.trim().startsWith("[")) return detail.trim();
+  if (status === 403) return "권한이 없어요.";
+  if (status === 404) return "찾는 정보가 없어요.";
+  if (status === 429) return "요청이 너무 많아요. 잠시 후 다시 시도해주세요.";
+  return "요청을 처리하지 못했어요. 잠시 후 다시 시도해주세요.";
+}
+
+/** 응답 본문에서 FastAPI가 보낸 detail을 꺼냅니다(JSON이 아니면 원문 그대로). */
+async function readDetail(res: Response): Promise<string | undefined> {
+  try {
+    const body = await res.text();
+    if (!body) return undefined;
+    try {
+      const parsed = JSON.parse(body);
+      const detail = parsed?.detail;
+      if (typeof detail === "string") return detail;
+      // 유효성 검사 실패(422)는 detail이 배열로 옵니다 — 사용자에게 보여줄 문장이
+      // 아니므로 로그용으로만 남깁니다.
+      return detail ? JSON.stringify(detail) : body;
+    } catch {
+      return body;
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+async function send(path: string, options: RequestInit | undefined, token?: string): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(`${API_BASE_URL}${path}`, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      ...options,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   // 로그인 상태면 토큰을 실어 보내서, 백엔드가 "누가 만든 코스인지" 알 수 있게 합니다.
   // 로그인 안 했으면 그냥 토큰 없이 보내고(기존과 동일하게 동작), 백엔드도 이를 허용합니다.
@@ -40,16 +127,38 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   // 저장소에서 세션을 읽어오지 않습니다.
   const token = await getAccessToken();
 
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    ...options,
-  });
+  let res: Response;
+  try {
+    res = await send(path, options, token);
+  } catch (err) {
+    // 타임아웃(abort)과 네트워크 단절을 구분해서 안내합니다 — 사용자가 할 수 있는
+    // 일이 다릅니다(기다렸다 재시도 / 연결 확인).
+    const aborted = err instanceof Error && err.name === "AbortError";
+    throw new ApiError(
+      aborted
+        ? "응답이 너무 늦어요. 잠시 후 다시 시도해주세요."
+        : "네트워크에 연결할 수 없어요. 연결 상태를 확인해주세요.",
+      null,
+      errorMessage(err)
+    );
+  }
+
+  // 토큰이 아직 안 만료됐다고 판단했는데 서버가 거부하는 경우(기기 시계 오차,
+  // 다른 기기에서의 로그아웃 등)가 있어서, 한 번만 강제로 갱신해 다시 보냅니다.
+  if (res.status === 401 && token) {
+    const fresh = await refreshAccessToken();
+    if (fresh) {
+      try {
+        res = await send(path, options, fresh);
+      } catch (err) {
+        throw new ApiError("네트워크에 연결할 수 없어요. 연결 상태를 확인해주세요.", null, errorMessage(err));
+      }
+    }
+  }
+
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`API 요청 실패 (${res.status}): ${body}`);
+    const detail = await readDetail(res);
+    throw new ApiError(messageForStatus(res.status, detail), res.status, detail);
   }
 
   // 서버 상태를 바꾸는 요청이 성공했으면 표시를 남깁니다. 화면을 열 때마다
@@ -60,6 +169,51 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
 
   return res.json() as Promise<T>;
+}
+
+/**
+ * 오류를 사용자에게 보여줄 한 문장으로 바꿉니다.
+ * 화면에서는 String(err) 대신 이걸 씁니다.
+ *
+ * API 오류가 아닌 것(사진 선택기, 위치 등 라이브러리 오류)은 영어 기술 문구가
+ * 대부분이라 사용자에게 보여주지 않고 일반 안내로 바꿉니다. 원문은 개발자가 볼 수
+ * 있게 콘솔에만 남깁니다.
+ */
+export function errorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.detail && err.detail !== err.message) {
+      console.warn("[api]", err.status, err.detail);
+    }
+    return err.message;
+  }
+  console.warn("[error]", err);
+  return "잠시 후 다시 시도해주세요.";
+}
+
+/** 코스를 어디에 저장할지 — 기존 여행에 담거나, 새 여행을 만들면서 담습니다. */
+export type SaveCourseTarget =
+  | { tripId: string; newTripName?: never }
+  | {
+      tripId?: never;
+      newTripName: string;
+      category: CourseCategory;
+      startDate?: string | null;
+      endDate?: string | null;
+    };
+
+// 두 갈래를 함수로 빼서 타입이 좁혀지게 합니다. 예전에는 삼항식 안에서
+// "tripId" in params로 갈랐는데, 그 방식으로는 else 쪽이 좁혀지지 않아
+// newTripName/category를 읽는 곳에서 타입 오류가 났습니다.
+function saveCourseBody(params: SaveCourseTarget) {
+  if ("newTripName" in params && params.newTripName) {
+    return {
+      new_trip_name: params.newTripName,
+      category: params.category,
+      start_date: params.startDate ?? null,
+      end_date: params.endDate ?? null,
+    };
+  }
+  return { trip_id: params.tripId };
 }
 
 export const api = {
@@ -179,30 +333,10 @@ export const api = {
     }),
 
   // 결과 화면에서 '저장하기' — 기존 여행에 추가(tripId) 또는 새 여행 만들며 저장(newTripName+category+날짜)
-  saveCourse: (
-    courseId: string,
-    params:
-      | { tripId: string; newTripName?: never }
-      | {
-          tripId?: never;
-          newTripName: string;
-          category: CourseCategory;
-          startDate?: string | null;
-          endDate?: string | null;
-        }
-  ) =>
+  saveCourse: (courseId: string, params: SaveCourseTarget) =>
     request<{ ok: boolean; trip_id: string }>(`/api/courses/${courseId}/save`, {
       method: "POST",
-      body: JSON.stringify(
-        "tripId" in params && params.tripId
-          ? { trip_id: params.tripId }
-          : {
-              new_trip_name: params.newTripName,
-              category: params.category,
-              start_date: params.startDate ?? null,
-              end_date: params.endDate ?? null,
-            }
-      ),
+      body: JSON.stringify(saveCourseBody(params)),
     }),
 
   // 저장된 코스 하나를 여행에서 삭제 (여행 자체는 유지, 로그인 필요)
