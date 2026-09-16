@@ -215,7 +215,7 @@ export default function PostCreateScreen() {
                 <View key={p.id} style={[styles.photoPreviewWrap, { width: previewWidth, height: previewWidth }]}>
                   <Image
                     source={{ uri: p.uri }}
-                    style={{ width: previewWidth, height: previewWidth, backgroundColor: colors.background }}
+                    style={{ width: previewWidth, height: previewWidth, backgroundColor: colors.surfaceAlt }}
                   />
                   <TouchableOpacity
                     style={styles.photoRemoveButtonLarge}

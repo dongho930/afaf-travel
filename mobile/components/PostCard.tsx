@@ -184,7 +184,7 @@ export function PostCard({
                   <FadeImage
                     key={url}
                     source={{ uri: url }}
-                    style={{ width: photoWidth, height: photoWidth, backgroundColor: colors.background }}
+                    style={{ width: photoWidth, height: photoWidth, backgroundColor: colors.surfaceAlt }}
                   />
                 ))}
               </PhotoCarousel>

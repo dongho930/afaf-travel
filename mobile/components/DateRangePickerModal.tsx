@@ -107,6 +107,8 @@ export function DateRangePickerModal({ visible, initialStartDate, initialEndDate
             markingType="period"
             markedDates={markedDates}
             onDayPress={handleDayPress}
+            // 로케일만 등록하면 헤더가 "1월 2026"으로 나와 어순이 어색합니다.
+            monthFormat="yyyy년 M월"
             theme={{
               calendarBackground: colors.surfaceAlt,
               dayTextColor: colors.text,

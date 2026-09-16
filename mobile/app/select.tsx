@@ -302,13 +302,15 @@ function makeStyles(colors: ThemeColors) {
     borderRadius: radius.xl,
     marginBottom: spacing.lg,
     overflow: "hidden",
+    // 흰 배경 위에서 흰 카드의 경계가 사라지지 않도록, 짧은 접지 그림자와
+    // 넓은 들어올림 그림자를 겹쳐 씁니다 (AttractionCard와 동일한 레시피).
     ...Platform.select({
-      web: { boxShadow: "0 6px 20px rgba(0,0,0,0.08)" } as any,
+      web: { boxShadow: "0 1px 2px rgba(0,0,0,0.06), 0 4px 14px rgba(0,0,0,0.10)" } as any,
       default: {
         shadowColor: colors.shadow,
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.1,
-        shadowRadius: 16,
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.12,
+        shadowRadius: 10,
         elevation: 3,
       },
     }),

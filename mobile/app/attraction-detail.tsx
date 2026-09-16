@@ -960,7 +960,7 @@ function makeStyles(colors: ThemeColors) {
   },
   photoPickerRow: { marginBottom: spacing.sm + 2 },
   photoThumbWrap: { marginRight: spacing.sm, position: "relative" },
-  photoThumb: { width: 64, height: 64, borderRadius: spacing.sm, backgroundColor: colors.background },
+  photoThumb: { width: 64, height: 64, borderRadius: spacing.sm, backgroundColor: colors.surfaceAlt },
   photoRemoveButton: {
     position: "absolute",
     top: -6,
@@ -1016,6 +1016,6 @@ function makeStyles(colors: ThemeColors) {
   reviewStarsRow: { flexDirection: "row", gap: 1 },
   reviewBody: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.text, lineHeight: 19 },
   reviewPhotoRow: { marginTop: spacing.sm },
-  reviewPhoto: { width: 72, height: 72, borderRadius: spacing.sm, marginRight: spacing.sm, backgroundColor: colors.background },
+  reviewPhoto: { width: 72, height: 72, borderRadius: spacing.sm, marginRight: spacing.sm, backgroundColor: colors.surfaceAlt },
   });
 }

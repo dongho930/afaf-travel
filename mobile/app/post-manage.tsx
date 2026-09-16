@@ -175,7 +175,7 @@ function makeStyles(colors: ThemeColors) {
       borderBottomColor: colors.border,
       alignItems: "center",
     },
-    thumb: { width: 56, height: 56, borderRadius: radius.sm, backgroundColor: colors.background },
+    thumb: { width: 56, height: 56, borderRadius: radius.sm, backgroundColor: colors.surfaceAlt },
     thumbPlaceholder: {
       width: 56,
       height: 56,

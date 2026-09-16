@@ -9,6 +9,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { BottomTabBar } from "../components/BottomTabBar";
 import { WebFrame } from "../components/WebFrame";
 import { WebTabArrows } from "../components/WebTabArrows";
+import "../constants/calendarLocale"; // 달력(react-native-calendars) 표기를 한국어로 등록 — 부수효과만 있는 import입니다
 import { fontFamily, fontsToLoad } from "../constants/fonts";
 import { AuthProvider } from "../services/AuthContext";
 import { CourseProvider } from "../services/CourseContext";

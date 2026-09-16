@@ -106,14 +106,16 @@ function makeStyles(colors: ThemeColors) {
     borderRadius: radius.xl,
     marginBottom: spacing.lg,
     overflow: "hidden",
-    // 테두리 대신 배경색을 살짝 반영한 그림자로 카드를 떠 있게 합니다.
+    // 테두리 대신 그림자로 카드를 떠 있게 합니다. 배경이 흰색이라 카드(흰색)와
+    // 색이 같으므로, 경계를 잡아주는 짧은 접지 그림자와 들어올리는 넓은 그림자를
+    // 겹쳐 씁니다 — 넓은 그림자 하나만으로는 흰 배경 위에서 거의 안 보입니다.
     ...Platform.select({
-      web: { boxShadow: "0 6px 20px rgba(0,0,0,0.08)" } as any,
+      web: { boxShadow: "0 1px 2px rgba(0,0,0,0.06), 0 4px 14px rgba(0,0,0,0.10)" } as any,
       default: {
         shadowColor: colors.shadow,
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.1,
-        shadowRadius: 16,
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.12,
+        shadowRadius: 10,
         elevation: 3,
       },
     }),

@@ -2,9 +2,6 @@
  * 앱 전체에서 쓰는 색상을 '의미(semantic)' 단위로 정의합니다. 화면 코드에서는
  * "#FFFFFF" 같은 실제 색값을 직접 쓰지 않고, colors.surface / colors.text처럼
  * 의미로 참조합니다 — 그래야 테마(라이트/다크)에 따라 자동으로 바뀝니다.
- *
- * 라이트 테마 값은 기존 앱에서 실제로 쓰던 색값을 그대로 옮긴 것이라, 라이트
- * 모드일 때는 지금까지와 화면이 완전히 동일합니다.
  */
 export type ThemeColors = {
   background: string; // 화면 배경
@@ -33,7 +30,7 @@ export type ThemeColors = {
 };
 
 export const lightColors: ThemeColors = {
-  background: "#F4F7F5",
+  background: "#FFFFFF",
   surface: "#FFFFFF",
   surfaceAlt: "#F7F9F8",
   border: "#E2E8E4",
