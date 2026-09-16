@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Alert } from "../../services/crossPlatformAlert";
+import { ActionButton } from "../../components/ActionButton";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AccessibilityIcons, accessibilityFeatureLabels } from "../../components/AccessibilityIcons";
 import { FadeInView } from "../../components/FadeInView";
@@ -724,27 +725,18 @@ export default function AccessibilityScreen() {
               />
 
               <View style={styles.modalButtonRow}>
-                <Pressable
-                  style={({ pressed }) => [styles.modalCancelButton, pressed && styles.pressedFeedback]}
+                <ActionButton
+                  label="취소"
+                  variant="secondary"
+                  style={styles.modalButton}
                   onPress={() => setReportModalVisible(false)}
-                >
-                  <Text style={styles.modalCancelButtonText}>취소</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.modalSubmitButton,
-                    submittingReport && styles.buttonDisabled,
-                    pressed && !submittingReport && styles.pressedFeedback,
-                  ]}
+                />
+                <ActionButton
+                  label="제출하기"
+                  style={styles.modalButton}
                   onPress={handleSubmitReport}
-                  disabled={submittingReport}
-                >
-                  {submittingReport ? (
-                    <ActivityIndicator color={colors.onPrimary} />
-                  ) : (
-                    <Text style={styles.modalSubmitButtonText}>제출하기</Text>
-                  )}
-                </Pressable>
+                  loading={submittingReport}
+                />
               </View>
             </KeyboardAwareScrollView>
           </View>
@@ -912,23 +904,6 @@ function makeStyles(colors: ThemeColors) {
   reportCategoryChipText: { fontSize: 12, fontFamily: fontFamily.semiBold, color: colors.textSecondary },
   reportCategoryChipTextSelected: { color: colors.onPrimary },
   modalButtonRow: { flexDirection: "row", gap: spacing.sm + 2, marginTop: spacing.xl - 4, marginBottom: spacing.sm },
-  modalCancelButton: {
-    flex: 1,
-    paddingVertical: spacing.md + 1,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: "center",
-  },
-  modalCancelButtonText: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.textSecondary },
-  modalSubmitButton: {
-    flex: 1,
-    paddingVertical: spacing.md + 1,
-    borderRadius: radius.md,
-    backgroundColor: colors.primary,
-    alignItems: "center",
-  },
-  modalSubmitButtonText: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.onPrimary },
-  buttonDisabled: { opacity: 0.6 },
+  modalButton: { flex: 1 },
   });
 }

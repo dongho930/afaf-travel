@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Alert } from "../services/crossPlatformAlert";
+import { EditDeleteButtons } from "../components/EditDeleteButtons";
 import { api } from "../services/api";
 import { useCourseContext } from "../services/CourseContext";
 import { useTheme } from "../services/ThemeContext";
@@ -144,14 +145,11 @@ export default function TripDetailScreen() {
             <View style={styles.rowContent}>
               <View style={styles.cardHeader}>
                 <Text style={styles.dayBadge}>{index + 1}번째 코스</Text>
-                <View style={styles.cardActions}>
-                  <TouchableOpacity onPress={() => openEditTitle(item)} hitSlop={10}>
-                    <Text style={styles.editText}>수정</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => handleDelete(item.course_id)} hitSlop={10}>
-                    <Text style={styles.deleteText}>삭제</Text>
-                  </TouchableOpacity>
-                </View>
+                <EditDeleteButtons
+                  name={item.title}
+                  onEdit={() => openEditTitle(item)}
+                  onDelete={() => handleDelete(item.course_id)}
+                />
               </View>
               <Text style={styles.title} numberOfLines={1}>
                 {item.title}
@@ -226,8 +224,6 @@ function makeStyles(colors: ThemeColors) {
   },
   rowContent: { flex: 1, minWidth: 0 },
   cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.xs + 2 },
-  cardActions: { flexDirection: "row", gap: spacing.md },
-  editText: { fontSize: 13, color: colors.primary, fontFamily: fontFamily.semiBold },
   dayBadge: {
     fontSize: 12,
     fontFamily: fontFamily.bold,
@@ -238,7 +234,6 @@ function makeStyles(colors: ThemeColors) {
     borderRadius: radius.pill,
     overflow: "hidden",
   },
-  deleteText: { fontSize: 13, color: colors.danger, fontFamily: fontFamily.semiBold },
   title: { fontSize: 16, fontFamily: fontFamily.bold, color: colors.text, marginBottom: 2 },
   summary: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginBottom: spacing.xs + 2 },
   meta: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary },

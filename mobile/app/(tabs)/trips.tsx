@@ -29,6 +29,7 @@ import { Alert } from "../../services/crossPlatformAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AnimatedChip } from "../../components/AnimatedChip";
 import { DateRangePickerModal } from "../../components/DateRangePickerModal";
+import { EditDeleteButtons } from "../../components/EditDeleteButtons";
 import { FadeInView } from "../../components/FadeInView";
 import { ProfileButton } from "../../components/ProfileButton";
 import { fontFamily } from "../../constants/fonts";
@@ -543,14 +544,11 @@ export default function TripsScreen() {
                 </View>
               )}
             </View>
-            <View style={styles.cardActions}>
-              <TouchableOpacity onPress={() => openEdit(item)} hitSlop={10}>
-                <Text style={styles.editText}>수정</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => handleDelete(item.trip_id, item.name)} hitSlop={10}>
-                <Text style={styles.deleteText}>삭제</Text>
-              </TouchableOpacity>
-            </View>
+            <EditDeleteButtons
+              name={item.name}
+              onEdit={() => openEdit(item)}
+              onDelete={() => handleDelete(item.trip_id, item.name)}
+            />
           </View>
           <Text style={styles.name} numberOfLines={1}>
             {item.name}
@@ -666,14 +664,11 @@ export default function TripsScreen() {
             <Text style={styles.name} numberOfLines={1}>
               {item.place_name}
             </Text>
-            <View style={styles.cardActions}>
-              <TouchableOpacity onPress={() => openEditVisitedDate(item)} hitSlop={10}>
-                <Text style={styles.editText}>수정</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => handleDeleteVisited(item.id, item.place_name)} hitSlop={10}>
-                <Text style={styles.deleteText}>삭제</Text>
-              </TouchableOpacity>
-            </View>
+            <EditDeleteButtons
+              name={item.place_name}
+              onEdit={() => openEditVisitedDate(item)}
+              onDelete={() => handleDeleteVisited(item.id, item.place_name)}
+            />
           </View>
           <Text style={styles.meta}>{item.visited_at?.slice(0, 10)} 방문</Text>
         </View>
@@ -860,7 +855,6 @@ function makeStyles(colors: ThemeColors) {
   },
   visitedBadgeText: { fontSize: 10, fontFamily: fontFamily.bold, color: colors.onPrimary },
   cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.xs + 2 },
-  cardActions: { flexDirection: "row", gap: spacing.md },
   categoryBadge: {
     backgroundColor: colors.primaryLight,
     paddingHorizontal: spacing.sm + 2,
@@ -869,8 +863,6 @@ function makeStyles(colors: ThemeColors) {
     overflow: "hidden",
   },
   categoryBadgeText: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.primary },
-  editText: { fontSize: 13, color: colors.primary, fontFamily: fontFamily.semiBold },
-  deleteText: { fontSize: 13, color: colors.danger, fontFamily: fontFamily.semiBold },
   name: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.text, flexShrink: 1 },
   dateLabelRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs, marginBottom: 2 },
   dateLabel: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textSecondary },

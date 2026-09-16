@@ -1,5 +1,12 @@
 import { useRouter } from "expo-router";
-import { ClockCounterClockwiseIcon, FloppyDiskIcon, HandTapIcon, MapTrifoldIcon, WifiSlashIcon } from "phosphor-react-native";
+import {
+  ClockCounterClockwiseIcon,
+  FloppyDiskIcon,
+  HandTapIcon,
+  ListNumbersIcon,
+  MapTrifoldIcon,
+  WifiSlashIcon,
+} from "phosphor-react-native";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -18,6 +25,7 @@ import { EXTRA_INFO_LABELS_BY_CATEGORY } from "../components/ExtraInfoList";
 import { FadeInView } from "../components/FadeInView";
 import { SaveCourseModal, SaveCourseParams } from "../components/SaveCourseModal";
 import { ScreenHeader } from "../components/ScreenHeader";
+import { SplitButton } from "../components/SplitButton";
 import { TimelineStopItem } from "../components/TimelineStopItem";
 import { useReduceMotion } from "../services/useReduceMotion";
 import { fontFamily } from "../constants/fonts";
@@ -223,10 +231,24 @@ export default function ResultsScreen() {
           <Text style={styles.title}>{course.title}</Text>
           <Text style={styles.summary}>{course.summary}</Text>
         </View>
-        <TouchableOpacity style={styles.saveButton} onPress={openSaveModal}>
-          <FloppyDiskIcon size={13} color={colors.primary} weight="bold" />
-          <Text style={styles.saveButtonText}>저장</Text>
-        </TouchableOpacity>
+        {/* 순서를 바꾼 뒤에는 '순서 저장'이 가장 급한 동작이라 주 버튼으로 올립니다. */}
+        <SplitButton
+          label={orderChanged ? "순서 저장" : "저장"}
+          onPress={orderChanged ? handleSaveOrder : openSaveModal}
+          loading={savingOrder}
+          accessibilityHint={orderChanged ? "바꾼 방문 순서를 저장합니다" : "이 코스를 내 여행에 저장합니다"}
+          menuAccessibilityLabel="저장 방법 고르기"
+          menuItems={[
+            { key: "trip", label: "여행에 저장", icon: FloppyDiskIcon, onPress: openSaveModal },
+            {
+              key: "order",
+              label: "순서 저장",
+              icon: ListNumbersIcon,
+              onPress: handleSaveOrder,
+              disabled: !orderChanged || savingOrder,
+            },
+          ]}
+        />
       </View>
 
       {/* 문 닫은 뒤 도착하거나 그날 쉬는 장소가 있으면 다음 날로 나누자고 제안합니다. */}
@@ -274,24 +296,11 @@ export default function ResultsScreen() {
               : "오른쪽 화살표나 카드를 길게 눌러 순서를 바꿀 수 있어요"}
           </Text>
         </View>
-        {orderChanged && (
-          <TouchableOpacity
-            style={[styles.saveOrderButton, savingOrder && styles.saveOrderButtonDisabled]}
-            onPress={handleSaveOrder}
-            disabled={savingOrder}
-          >
-            {savingOrder ? (
-              <ActivityIndicator size="small" color={colors.onPrimary} />
-            ) : (
-              <Text style={styles.saveOrderButtonText}>순서 저장</Text>
-            )}
-          </TouchableOpacity>
-        )}
       </View>
       {orderChanged && (
         <View style={styles.staleNotice}>
           <ClockCounterClockwiseIcon size={13} color={colors.textSecondary} weight="bold" />
-          <Text style={styles.staleNoticeText}>순서를 저장하면 방문 시간이 다시 계산돼요</Text>
+          <Text style={styles.staleNoticeText}>위의 '순서 저장'을 누르면 방문 시간이 다시 계산돼요</Text>
         </View>
       )}
     </>
@@ -314,6 +323,7 @@ export default function ResultsScreen() {
           extraInfo={extraInfoMap[stop.attraction.content_id]}
           isFirst={i === 0}
           isLast={i === nextDayCourse.stops.length - 1}
+          nextUnfit={nextDayCourse.stops[i + 1]?.fits_today === false}
         />
       ))}
     </View>
@@ -344,6 +354,7 @@ export default function ResultsScreen() {
                     extraInfo={extraInfoMap[id]}
                     isFirst={index === 0}
                     isLast={index === course.stops.length - 1}
+                    nextUnfit={course.stops[index + 1]?.fits_today === false}
                     timeStale={orderChanged}
                     onMoveUp={() => handleMoveStop(index, -1)}
                     onMoveDown={() => handleMoveStop(index, 1)}
@@ -395,28 +406,9 @@ function makeStyles(colors: ThemeColors) {
   titleRow: { flexDirection: "row", alignItems: "flex-start", marginBottom: spacing.lg, gap: spacing.sm + 2 },
   title: { fontSize: 21, fontFamily: fontFamily.bold, color: colors.text, marginBottom: spacing.xs },
   summary: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary },
-  saveButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs + 2,
-    backgroundColor: colors.primaryLight,
-    borderRadius: radius.sm + 2,
-    paddingHorizontal: spacing.md + 2,
-    paddingVertical: spacing.md,
-  },
-  saveButtonText: { color: colors.primary, fontFamily: fontFamily.bold, fontSize: 13 },
   orderHintRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm + 2 },
   orderHintTextRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs, flexShrink: 1 },
   orderHint: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary, flexShrink: 1 },
-  saveOrderButton: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.md + 2,
-    paddingVertical: spacing.xs + 3,
-    marginLeft: spacing.sm,
-  },
-  saveOrderButtonDisabled: { opacity: 0.6 },
-  saveOrderButtonText: { color: colors.onPrimary, fontFamily: fontFamily.bold, fontSize: 12 },
   staleNotice: {
     flexDirection: "row",
     alignItems: "center",

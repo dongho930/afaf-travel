@@ -92,6 +92,17 @@ export function accessibilityFeatureLabels(features: Partial<AccessibilityFeatur
   return ICON_MAP.filter((item) => features[item.key]).map((item) => item.label);
 }
 
+function availableItems(features: Partial<AccessibilityFeatures>, userType?: UserType) {
+  const relevantKeys = userType ? RELEVANT_KEYS_BY_USER_TYPE[userType] : undefined;
+  const iconMap = relevantKeys ? ICON_MAP.filter((item) => relevantKeys.includes(item.key)) : ICON_MAP;
+  return iconMap.filter((item) => features[item.key]);
+}
+
+/** AccessibilityIcons가 칩을 하나라도 그리는지. */
+export function hasAccessibilityIcons(features: Partial<AccessibilityFeatures>, userType?: UserType): boolean {
+  return availableItems(features, userType).length > 0;
+}
+
 export function AccessibilityIcons({
   features,
   userType,
@@ -105,9 +116,7 @@ export function AccessibilityIcons({
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
-  const relevantKeys = userType ? RELEVANT_KEYS_BY_USER_TYPE[userType] : undefined;
-  const iconMap = relevantKeys ? ICON_MAP.filter((item) => relevantKeys.includes(item.key)) : ICON_MAP;
-  const available = iconMap.filter((item) => features[item.key]);
+  const available = availableItems(features, userType);
   if (available.length === 0) return null;
 
   return (

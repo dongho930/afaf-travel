@@ -2,13 +2,15 @@ import { useRouter } from "expo-router";
 import {
   CaretDownIcon,
   CaretUpIcon,
+  ClockIcon,
   FirstAidKitIcon,
   ImageSquareIcon,
   StarIcon,
   WarningCircleIcon,
 } from "phosphor-react-native";
 import React, { useEffect, useRef, useState } from "react";
-import { Animated, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, Platform, Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
+import Svg, { Line } from "react-native-svg";
 import { getCongestionDisplay } from "../constants/congestion";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
@@ -16,16 +18,20 @@ import { radius, spacing } from "../constants/tokens";
 import { useReduceMotion } from "../services/useReduceMotion";
 import { useTheme } from "../services/ThemeContext";
 import { Attraction, CourseStop, UserType } from "../types";
-import { AccessibilityIcons } from "./AccessibilityIcons";
+import { AccessibilityIcons, hasAccessibilityIcons } from "./AccessibilityIcons";
 import { renderExtraInfo } from "./ExtraInfoList";
 import { FadeImage } from "./FadeImage";
 
-const AXIS_WIDTH = 52;
+const PHOTO_WIDTH = 72;
+const PHOTO_HEIGHT = Math.round((PHOTO_WIDTH * 9) / 16);
+const PHOTO_BORDER = 2;
+const AXIS_WIDTH = PHOTO_WIDTH + PHOTO_BORDER * 2;
 const TIME_HEIGHT = 18;
-const DOT_SIZE = 24;
-const DOT_GAP = 6;
-// 세로선이 순서 점의 한가운데에서 끊기고 이어지도록 맞추는 기준 위치입니다.
-const DOT_CENTER = TIME_HEIGHT + DOT_GAP + DOT_SIZE / 2;
+const TIME_GAP = 4;
+const NODE_HEIGHT = PHOTO_HEIGHT + PHOTO_BORDER * 2;
+const ROW_GAP = spacing.lg;
+const LINE_WIDTH = 3;
+const FLOW_MARKER_SIZE = 16;
 const PLACEHOLDER_BG = "#3A4038";
 
 export function TimelineStopItem({
@@ -34,6 +40,7 @@ export function TimelineStopItem({
   extraInfo,
   isFirst,
   isLast,
+  nextUnfit = false,
   timeStale = false,
   onMoveUp,
   onMoveDown,
@@ -46,6 +53,8 @@ export function TimelineStopItem({
   extraInfo?: Attraction["extra_info"];
   isFirst: boolean;
   isLast: boolean;
+  // 다음 장소가 그날 방문이 어려운지. 그리로 이어지는 선을 점선으로 그립니다.
+  nextUnfit?: boolean;
   // 순서를 바꾸고 아직 저장하지 않아 시각이 옛 순서 기준일 때.
   timeStale?: boolean;
   // 둘 다 없으면 오른쪽 순서 버튼 칸을 그리지 않습니다(2일차 구간).
@@ -78,9 +87,13 @@ export function TimelineStopItem({
   const congestion = getCongestionDisplay(attraction, colors);
   const place = extraInfo?.length ? { ...attraction, extra_info: extraInfo } : attraction;
   const extraInfoNode = renderExtraInfo(place, colors);
-  const hasMore = !!extraInfoNode || !!attraction.nearby_medical_info || stop.reason.length > 60;
+  const hasAccessibility = hasAccessibilityIcons(attraction.accessibility, userType);
+  const hasMore =
+    hasAccessibility || !!extraInfoNode || !!attraction.nearby_medical_info || stop.reason.length > 60;
 
   const timeColor = unfit ? colors.warningText : timeStale ? colors.textTertiary : colors.text;
+  // 8자리 hex(#RRGGBBAA)로 강조색을 옅게 씁니다.
+  const solidLineColor = `${colors.primary}59`;
   const borderColor = highlight.interpolate({ inputRange: [0, 1], outputRange: [colors.border, colors.primary] });
 
   return (
@@ -90,19 +103,50 @@ export function TimelineStopItem({
         accessible
         accessibilityLabel={`${stop.order}번째, 도착 예정 ${stop.recommended_arrival_time}${timeStale ? ", 순서 저장 후 다시 계산됨" : ""}${unfit ? ", 이날 방문 어려움" : ""}`}
       >
-        {!(isFirst && isLast) && (
-          <View
-            style={[
-              styles.line,
-              isFirst ? { top: DOT_CENTER, bottom: 0 } : isLast ? { top: 0, height: DOT_CENTER } : { top: 0, bottom: 0 },
-            ]}
+        {/* 선은 위(이전 장소에서 들어오는)·아래(다음 장소로 나가는) 두 구간으로 나눠 그립니다.
+            그날 방문이 어려운 장소로 이어지는 구간은 경고색 점선으로 표시합니다. */}
+        {!isFirst && (
+          <LineSegment
+            style={{ top: 0, height: "50%" }}
+            dashed={unfit}
+            color={unfit ? colors.warning : solidLineColor}
           />
         )}
-        <Text style={[styles.time, { color: timeColor }]} numberOfLines={1} adjustsFontSizeToFit>
-          {stop.recommended_arrival_time}
-        </Text>
-        <View style={[styles.dot, unfit && styles.dotUnfit, timeStale && styles.dotStale]}>
-          <Text style={[styles.dotText, unfit && styles.dotTextUnfit]}>{stop.order}</Text>
+        {!isLast && (
+          <>
+            {/* 항목 사이 여백(row의 paddingBottom)까지 늘려야 다음 항목과 이어집니다. */}
+            <LineSegment
+              style={{ top: "50%", bottom: -ROW_GAP }}
+              dashed={nextUnfit}
+              color={nextUnfit ? colors.warning : solidLineColor}
+            />
+            <View style={[styles.flowMarker, { borderColor: nextUnfit ? colors.warning : colors.primary }]}>
+              <CaretDownIcon size={9} color={nextUnfit ? colors.warning : colors.primary} weight="bold" />
+            </View>
+          </>
+        )}
+        <View style={[styles.photoNode, unfit && styles.photoNodeUnfit, timeStale && styles.photoNodeStale]}>
+          {/* 사진이 카드 세로 중앙에 오도록, 시각은 흐름에서 빼서 사진 바로 위에 띄웁니다. */}
+          <View style={styles.timeWrap}>
+            <View style={styles.timeRow}>
+              <ClockIcon size={13} color={timeColor} weight="bold" />
+              <Text style={[styles.time, { color: timeColor }]} numberOfLines={1}>
+                {stop.recommended_arrival_time}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.photo}>
+            {attraction.image_url ? (
+              <FadeImage source={{ uri: attraction.image_url }} style={StyleSheet.absoluteFill} contentFit="cover" />
+            ) : (
+              <View style={[StyleSheet.absoluteFill, styles.photoPlaceholder]}>
+                <ImageSquareIcon size={18} color="rgba(255,255,255,0.4)" weight="light" />
+              </View>
+            )}
+          </View>
+          <View style={[styles.orderBadge, unfit && styles.orderBadgeUnfit]}>
+            <Text style={[styles.orderText, unfit && styles.orderTextUnfit]}>{stop.order}</Text>
+          </View>
         </View>
       </View>
 
@@ -120,16 +164,6 @@ export function TimelineStopItem({
           accessibilityLabel={`${attraction.name}, 상세 페이지 보기`}
           accessibilityHint={onLongPress ? "길게 누르면 끌어서 순서를 바꿀 수 있습니다" : undefined}
         >
-          <View style={styles.thumb}>
-            {attraction.image_url ? (
-              <FadeImage source={{ uri: attraction.image_url }} style={StyleSheet.absoluteFill} contentFit="cover" />
-            ) : (
-              <View style={[StyleSheet.absoluteFill, styles.thumbPlaceholder]}>
-                <ImageSquareIcon size={24} color="rgba(255,255,255,0.35)" weight="light" />
-              </View>
-            )}
-          </View>
-
           <View style={[styles.body, hasMore && styles.bodyWithFooter]}>
             <Text style={styles.name} numberOfLines={2}>
               {attraction.name}
@@ -173,6 +207,11 @@ export function TimelineStopItem({
 
             {expanded && (
               <>
+                {hasAccessibility && (
+                  <View style={styles.accessibilityRow}>
+                    <AccessibilityIcons features={attraction.accessibility} userType={userType} />
+                  </View>
+                )}
                 {extraInfoNode}
                 {attraction.nearby_medical_info && (
                   <View style={styles.medicalRow}>
@@ -182,10 +221,6 @@ export function TimelineStopItem({
                 )}
               </>
             )}
-
-            <View style={styles.accessibilityRow}>
-              <AccessibilityIcons features={attraction.accessibility} userType={userType} />
-            </View>
           </View>
         </Pressable>
 
@@ -196,7 +231,7 @@ export function TimelineStopItem({
             style={styles.moreButton}
             accessibilityRole="button"
             accessibilityState={{ expanded }}
-            accessibilityLabel={expanded ? "정보 접기" : "이용시간 등 정보 더보기"}
+            accessibilityLabel={expanded ? "정보 접기" : "편의시설, 이용시간 등 정보 더보기"}
           >
             <Text style={styles.moreText}>{expanded ? "접기" : "더보기"}</Text>
           </Pressable>
@@ -226,6 +261,41 @@ export function TimelineStopItem({
     </View>
   );
 }
+
+function LineSegment({
+  style,
+  dashed,
+  color,
+}: {
+  style: StyleProp<ViewStyle>;
+  dashed: boolean;
+  color: string;
+}) {
+  if (!dashed) {
+    return <View style={[lineStyles.box, style, { backgroundColor: color, borderRadius: LINE_WIDTH / 2 }]} />;
+  }
+  // RN의 dashed 테두리는 iOS에서 한쪽 변에만 줄 수 없어서, 점선은 SVG로 그립니다.
+  return (
+    <View style={[lineStyles.box, style]}>
+      <Svg width={LINE_WIDTH} height="100%">
+        <Line
+          x1={LINE_WIDTH / 2}
+          y1="2"
+          x2={LINE_WIDTH / 2}
+          y2="100%"
+          stroke={color}
+          strokeWidth={LINE_WIDTH - 0.5}
+          strokeDasharray="3 5"
+          strokeLinecap="round"
+        />
+      </Svg>
+    </View>
+  );
+}
+
+const lineStyles = StyleSheet.create({
+  box: { position: "absolute", left: AXIS_WIDTH / 2 - LINE_WIDTH / 2, width: LINE_WIDTH },
+});
 
 function MoveButton({
   direction,
@@ -261,38 +331,77 @@ function MoveButton({
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
     // 항목 사이 간격을 margin이 아닌 paddingBottom으로 둬야 세로선이 끊기지 않습니다.
-    row: { flexDirection: "row", gap: spacing.sm, paddingBottom: spacing.lg },
-    axis: { width: AXIS_WIDTH, alignItems: "center" },
-    line: {
+    row: { flexDirection: "row", gap: spacing.sm, paddingBottom: ROW_GAP },
+    // 시각 라벨이 사진 위로 튀어나오므로, 카드가 아주 낮아도 잘리지 않게 최소 높이를 둡니다.
+    axis: {
+      width: AXIS_WIDTH,
+      minHeight: (TIME_HEIGHT + TIME_GAP) * 2 + NODE_HEIGHT,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    // 항목 사이 여백 한가운데, 선 위에 놓이는 진행 방향 표시.
+    flowMarker: {
       position: "absolute",
-      left: AXIS_WIDTH / 2 - 1,
-      width: 2,
-      backgroundColor: colors.border,
+      bottom: -(ROW_GAP + FLOW_MARKER_SIZE) / 2,
+      left: AXIS_WIDTH / 2 - FLOW_MARKER_SIZE / 2,
+      width: FLOW_MARKER_SIZE,
+      height: FLOW_MARKER_SIZE,
+      borderRadius: FLOW_MARKER_SIZE / 2,
+      borderWidth: 1.5,
+      backgroundColor: colors.background,
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 1,
+    },
+    timeWrap: {
+      position: "absolute",
+      bottom: NODE_HEIGHT - PHOTO_BORDER + TIME_GAP,
+      left: -PHOTO_BORDER,
+      right: -PHOTO_BORDER,
+      alignItems: "center",
+    },
+    timeRow: {
+      height: TIME_HEIGHT,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+      paddingHorizontal: 3,
+      // 세로선이 시각 글자 뒤로 지나가지 않도록 배경으로 가립니다.
+      backgroundColor: colors.background,
     },
     time: {
-      height: TIME_HEIGHT,
       lineHeight: TIME_HEIGHT,
       fontSize: 13,
       fontFamily: fontFamily.bold,
       fontVariant: ["tabular-nums"],
-      backgroundColor: colors.background,
-      paddingHorizontal: 2,
     },
-    dot: {
-      marginTop: DOT_GAP,
-      width: DOT_SIZE,
-      height: DOT_SIZE,
-      borderRadius: DOT_SIZE / 2,
+    photoNode: {
+      width: AXIS_WIDTH,
+      height: NODE_HEIGHT,
+      borderRadius: radius.sm + PHOTO_BORDER,
+      borderWidth: PHOTO_BORDER,
+      borderColor: colors.primary,
+      backgroundColor: colors.background,
+    },
+    photoNodeUnfit: { borderColor: colors.warning },
+    photoNodeStale: { opacity: 0.55 },
+    photo: { flex: 1, borderRadius: radius.sm, overflow: "hidden", backgroundColor: colors.surfaceAlt },
+    photoPlaceholder: { backgroundColor: PLACEHOLDER_BG, alignItems: "center", justifyContent: "center" },
+    orderBadge: {
+      position: "absolute",
+      top: 3,
+      left: 3,
+      minWidth: 18,
+      height: 18,
+      paddingHorizontal: 4,
+      borderRadius: 9,
       backgroundColor: colors.primary,
       alignItems: "center",
       justifyContent: "center",
-      borderWidth: 3,
-      borderColor: colors.background,
     },
-    dotUnfit: { backgroundColor: colors.warning },
-    dotStale: { opacity: 0.55 },
-    dotText: { color: colors.onPrimary, fontSize: 11, fontFamily: fontFamily.bold },
-    dotTextUnfit: { color: "#FFFFFF" },
+    orderBadgeUnfit: { backgroundColor: colors.warning },
+    orderText: { color: colors.onPrimary, fontSize: 10, lineHeight: 12, fontFamily: fontFamily.bold },
+    orderTextUnfit: { color: "#FFFFFF" },
 
     card: {
       flex: 1,
@@ -313,8 +422,6 @@ function makeStyles(colors: ThemeColors) {
       }),
     },
     cardDragging: { opacity: 0.8 },
-    thumb: { width: "100%", aspectRatio: 16 / 9, backgroundColor: colors.surfaceAlt },
-    thumbPlaceholder: { backgroundColor: PLACEHOLDER_BG, alignItems: "center", justifyContent: "center" },
     body: { padding: spacing.md },
     name: { fontSize: 15, lineHeight: 20, fontFamily: fontFamily.extraBold, color: colors.text },
     address: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary, marginTop: 2 },
@@ -343,7 +450,7 @@ function makeStyles(colors: ThemeColors) {
     moreButton: { alignSelf: "flex-start", paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.md },
     moreText: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.primary },
 
-    moveColumn: { width: 32, gap: spacing.xs + 2, paddingTop: TIME_HEIGHT + DOT_GAP - 4 },
+    moveColumn: { width: 32, gap: spacing.xs + 2, justifyContent: "center" },
     moveButton: {
       width: 32,
       height: 32,

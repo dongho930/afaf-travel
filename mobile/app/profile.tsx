@@ -7,6 +7,7 @@ import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Alert } from "../services/crossPlatformAlert";
+import { ActionButton } from "../components/ActionButton";
 import { api } from "../services/api";
 import { useAuth } from "../services/AuthContext";
 import { useProfile } from "../services/ProfileContext";
@@ -178,26 +179,16 @@ export default function ProfileScreen() {
               autoCorrect={false}
               placeholderTextColor={colors.textTertiary}
             />
-            <TouchableOpacity
-              style={[styles.smallButton, isSavingUsername && styles.smallButtonDisabled]}
-              onPress={handleSaveUsername}
-              disabled={isSavingUsername}
-            >
-              {isSavingUsername ? (
-                <ActivityIndicator size="small" color={colors.onPrimary} />
-              ) : (
-                <Text style={styles.smallButtonText}>저장</Text>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.smallButtonOutline}
+            <ActionButton label="저장" size="sm" onPress={handleSaveUsername} loading={isSavingUsername} />
+            <ActionButton
+              label="취소"
+              size="sm"
+              variant="secondary"
               onPress={() => {
                 setUsernameDraft(profile?.username ?? "");
                 setUsernameEditing(false);
               }}
-            >
-              <Text style={styles.smallButtonOutlineText}>취소</Text>
-            </TouchableOpacity>
+            />
           </View>
         ) : (
           <View style={styles.rowBetween}>
@@ -258,28 +249,23 @@ export default function ProfileScreen() {
               value={newPasswordConfirm}
               onChangeText={setNewPasswordConfirm}
             />
-            <View style={styles.editRow}>
-              <TouchableOpacity
-                style={[styles.smallButton, { flex: 1 }, isSavingPassword && styles.smallButtonDisabled]}
-                onPress={handleChangePassword}
-                disabled={isSavingPassword}
-              >
-                {isSavingPassword ? (
-                  <ActivityIndicator size="small" color={colors.onPrimary} />
-                ) : (
-                  <Text style={styles.smallButtonText}>변경하기</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.smallButtonOutline}
+            <View style={[styles.editRow, styles.modalButtonRow]}>
+              <ActionButton
+                label="취소"
+                variant="secondary"
+                style={styles.modalButton}
                 onPress={() => {
                   setPasswordModalVisible(false);
                   setNewPassword("");
                   setNewPasswordConfirm("");
                 }}
-              >
-                <Text style={styles.smallButtonOutlineText}>취소</Text>
-              </TouchableOpacity>
+              />
+              <ActionButton
+                label="변경하기"
+                style={styles.modalButton}
+                onPress={handleChangePassword}
+                loading={isSavingPassword}
+              />
             </View>
           </View>
         </View>
@@ -340,22 +326,8 @@ function makeStyles(colors: ThemeColors) {
       fontFamily: fontFamily.regular,
       color: colors.text,
     },
-    smallButton: {
-      backgroundColor: colors.primary,
-      borderRadius: radius.sm + 2,
-      paddingHorizontal: spacing.md + 2,
-      paddingVertical: spacing.sm + 2,
-    },
-    smallButtonDisabled: { opacity: 0.6 },
-    smallButtonText: { color: colors.onPrimary, fontFamily: fontFamily.bold, fontSize: 13 },
-    smallButtonOutline: {
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: radius.sm + 2,
-      paddingHorizontal: spacing.md + 2,
-      paddingVertical: spacing.sm + 2,
-    },
-    smallButtonOutlineText: { color: colors.textSecondary, fontFamily: fontFamily.bold, fontSize: 13 },
+    modalButtonRow: { marginTop: spacing.lg },
+    modalButton: { flex: 1 },
 
     signOutButton: { marginTop: spacing.md, alignItems: "center", padding: spacing.md },
     signOutButtonText: { color: colors.danger, fontFamily: fontFamily.bold, fontSize: 14 },

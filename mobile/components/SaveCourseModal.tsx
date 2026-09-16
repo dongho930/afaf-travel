@@ -38,13 +38,15 @@ interface Props {
   // course_id로 바로 api.saveCourse()를 부르고, 관광지 상세 페이지는 먼저
   // 1개짜리 코스를 만든 뒤 그 course_id로 api.saveCourse()를 부릅니다.
   onConfirm: (params: SaveCourseParams) => Promise<void>;
+  // 처음 열릴 탭. 저장한 여행이 하나도 없으면 이 값과 상관없이 '새 여행 만들기'로 엽니다.
+  initialMode?: "pick" | "create";
 }
 
 /**
  * '저장하기' 모달 — 기존 여행에 추가하거나 새 여행을 만들면서 저장합니다.
  * AI플래너 결과 화면과 관광지 상세 페이지의 '저장' 버튼이 공용으로 씁니다.
  */
-export function SaveCourseModal({ visible, onClose, defaultNewTripName, onConfirm }: Props) {
+export function SaveCourseModal({ visible, onClose, defaultNewTripName, onConfirm, initialMode = "pick" }: Props) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const [trips, setTrips] = useState<TripSummary[]>([]);
@@ -68,7 +70,7 @@ export function SaveCourseModal({ visible, onClose, defaultNewTripName, onConfir
     setCustomCategoryText("");
     setStartDate(null);
     setEndDate(null);
-    setMode("pick");
+    setMode(initialMode);
     setLoadingTrips(true);
     api
       .listTrips()
@@ -78,7 +80,7 @@ export function SaveCourseModal({ visible, onClose, defaultNewTripName, onConfir
       })
       .catch(() => Alert.alert("여행 목록을 불러오지 못했어요", "잠시 후 다시 시도해주세요."))
       .finally(() => setLoadingTrips(false));
-  }, [visible, defaultNewTripName]);
+  }, [visible, defaultNewTripName, initialMode]);
 
   const handleSave = async () => {
     setIsSaving(true);

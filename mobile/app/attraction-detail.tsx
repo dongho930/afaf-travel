@@ -12,6 +12,7 @@ import {
   MapPinIcon,
   MapTrifoldIcon,
   NotebookIcon,
+  PlusIcon,
   StarIcon,
   TrainIcon,
   XIcon,
@@ -39,6 +40,8 @@ import { HorizontalScrollWeb } from "../components/HorizontalScrollWeb";
 import { PostCard } from "../components/PostCard";
 import { RatingSummary, ReviewRatingSummary, summarizeRatings } from "../components/ReviewRatingSummary";
 import { SaveCourseModal, SaveCourseParams } from "../components/SaveCourseModal";
+import { SegmentedButtonGroup } from "../components/SegmentedButtonGroup";
+import { SplitButton } from "../components/SplitButton";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
@@ -135,6 +138,7 @@ export default function AttractionDetailScreen() {
   const [findingRoute, setFindingRoute] = useState<TravelMode | null>(null);
   const [transitModalVisible, setTransitModalVisible] = useState(false);
   const [saveModalVisible, setSaveModalVisible] = useState(false);
+  const [saveMode, setSaveMode] = useState<"pick" | "create">("pick");
   const [postsModalVisible, setPostsModalVisible] = useState(false);
   const [placePosts, setPlacePosts] = useState<PostItem[]>([]);
   const [loadingPlacePosts, setLoadingPlacePosts] = useState(false);
@@ -276,7 +280,7 @@ export default function AttractionDetailScreen() {
     }
   };
 
-  const openSaveModal = () => {
+  const openSaveModal = (mode: "pick" | "create") => {
     if (!session) {
       Alert.alert("로그인이 필요해요", "이 장소를 저장하려면 먼저 로그인해주세요.", [
         { text: "취소", style: "cancel" },
@@ -284,6 +288,7 @@ export default function AttractionDetailScreen() {
       ]);
       return;
     }
+    setSaveMode(mode);
     setSaveModalVisible(true);
   };
 
@@ -444,46 +449,43 @@ export default function AttractionDetailScreen() {
       </View>
 
       <View style={styles.actionButtonRow}>
-        <Pressable
-          style={({ pressed }) => [styles.directionsButton, pressed && styles.pressedFeedback]}
-          onPress={handleOpenDirections}
-          accessibilityRole="button"
-          accessibilityLabel="길찾기"
-          accessibilityHint="지도 앱에서 이 장소까지 가는 길을 봅니다"
-        >
-          <MapTrifoldIcon size={16} color={colors.primary} weight="bold" />
-          <Text style={styles.directionsButtonText}>길찾기</Text>
-        </Pressable>
-        <Pressable
-          style={({ pressed }) => [styles.directionsButton, pressed && styles.pressedFeedback]}
-          onPress={() => setTransitModalVisible(true)}
-          accessibilityRole="button"
-          accessibilityLabel="교통편 예약"
-          accessibilityHint="기차나 버스 예매 사이트를 고릅니다"
-        >
-          <TrainIcon size={16} color={colors.primary} weight="bold" />
-          <Text style={styles.directionsButtonText}>교통편 예약</Text>
-        </Pressable>
-        <Pressable
-          style={({ pressed }) => [styles.directionsButton, pressed && styles.pressedFeedback]}
-          onPress={handleOpenPosts}
-          accessibilityRole="button"
-          accessibilityLabel="게시물"
-          accessibilityHint="이 장소에 올라온 여행 기록을 봅니다"
-        >
-          <NotebookIcon size={16} color={colors.primary} weight="bold" />
-          <Text style={styles.directionsButtonText}>게시물</Text>
-        </Pressable>
-        <Pressable
-          style={({ pressed }) => [styles.directionsButton, pressed && styles.pressedFeedback]}
-          onPress={openSaveModal}
-          accessibilityRole="button"
-          accessibilityLabel="저장"
+        <SegmentedButtonGroup
+          style={styles.actionGroup}
+          items={[
+            {
+              key: "directions",
+              label: "길찾기",
+              icon: MapTrifoldIcon,
+              onPress: handleOpenDirections,
+              accessibilityHint: "지도 앱에서 이 장소까지 가는 길을 봅니다",
+            },
+            {
+              key: "transit",
+              label: "교통편",
+              icon: TrainIcon,
+              onPress: () => setTransitModalVisible(true),
+              accessibilityLabel: "교통편 예약",
+              accessibilityHint: "기차나 버스 예매 사이트를 고릅니다",
+            },
+            {
+              key: "posts",
+              label: "게시물",
+              icon: NotebookIcon,
+              onPress: handleOpenPosts,
+              accessibilityHint: "이 장소에 올라온 여행 기록을 봅니다",
+            },
+          ]}
+        />
+        <SplitButton
+          label="저장"
+          onPress={() => openSaveModal("pick")}
           accessibilityHint="이 장소를 내 여행에 저장합니다"
-        >
-          <FloppyDiskIcon size={16} color={colors.primary} weight="bold" />
-          <Text style={styles.directionsButtonText}>저장</Text>
-        </Pressable>
+          menuAccessibilityLabel="저장 방법 고르기"
+          menuItems={[
+            { key: "pick", label: "기존 여행에 추가", icon: FloppyDiskIcon, onPress: () => openSaveModal("pick") },
+            { key: "create", label: "새 여행 만들어 저장", icon: PlusIcon, onPress: () => openSaveModal("create") },
+          ]}
+        />
       </View>
       </FadeInView>
       )}
@@ -777,6 +779,7 @@ export default function AttractionDetailScreen() {
       onClose={() => setSaveModalVisible(false)}
       defaultNewTripName={attraction.name}
       onConfirm={handleConfirmSave}
+      initialMode={saveMode}
     />
 
     <Modal
@@ -827,18 +830,8 @@ function makeStyles(colors: ThemeColors) {
   addressRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2, marginTop: spacing.sm },
   address: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, flexShrink: 1 },
 
-  actionButtonRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm + 2, marginTop: spacing.md },
-  directionsButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs + 2,
-    alignSelf: "flex-start",
-    backgroundColor: colors.primaryLight,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.xl - 4,
-    paddingVertical: spacing.md + 1,
-  },
-  directionsButtonText: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.primary },
+  actionButtonRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.md },
+  actionGroup: { flex: 1, minWidth: 0 },
 
   modalBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end", alignItems: "center" },
   modalSheet: {
