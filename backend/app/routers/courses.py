@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 from typing import Optional
@@ -63,21 +64,24 @@ logger = logging.getLogger(__name__)
 courses_router = APIRouter(prefix="/api/courses", tags=["courses"])
 trips_router = APIRouter(prefix="/api/trips", tags=["trips"])
 
-# 1·2단계가 후보를 받아올 때 쓰는 개수. 두 단계가 같은 값을 써야 2단계에서
-# "1단계에서 고른 장소가 후보에 없다"는 상황이 덜 생깁니다.
-_CANDIDATE_LIMIT = 25
+# AI에게 넘길 후보 개수. 25곳일 땐 '맛집 위주로' 같은 질의에 음식점이 다섯 곳밖에
+# 안 실려서, AI가 최대 12개를 고르고 싶어도 고를 게 없었습니다. 후보가 늘면
+# 프롬프트도 커지지만 장소당 싣는 정보(이름·카테고리·편의시설 몇 필드·혼잡도)가
+# 작아서 이 정도는 감당됩니다.
+_CANDIDATE_LIMIT = 40
 
 
 async def _candidates_with_conditions(
     query_text: str, user_type: str, region: str, sigungu_cd: Optional[int]
 ) -> tuple[list[Attraction], ParsedQuery]:
     """
-    질의에서 조건을 뽑아낸 뒤, 그 조건(특히 지역)으로 좁힌 무장애 관광지 후보를 돌려줍니다.
+    질의에서 조건을 뽑아낸 뒤, 그 조건(지역·목적·키워드)에 맞는 무장애 관광지
+    후보를 지역 전체에서 표본으로 뽑아 돌려줍니다.
 
-    1단계(추천)와 2단계(코스 생성)가 똑같은 방식으로 후보를 만들어야, 사용자가
-    1단계에서 고른 장소를 2단계가 그대로 찾을 수 있습니다. 그래서 두 단계가 이
-    함수 하나를 공유합니다 (parse_query는 같은 질의를 10분간 캐시하므로, 2단계에서
-    AI를 다시 부르지 않습니다).
+    후보는 매번 달라집니다. 예전에는 카테고리마다 목록 맨 앞에서 여섯 개씩
+    가져와서 후보가 늘 같은 25곳(전부 이름이 ㄱ으로 시작)으로 고정됐습니다.
+    2단계(코스 생성)는 이제 후보 목록을 다시 만들지 않고 고른 장소만 직접
+    불러오므로, 후보가 매번 달라져도 문제가 없습니다.
 
     질의에서 읽어낸 지역으로 좁혔는데 후보가 하나도 없으면 지역 제한을 풀고 다시
     찾습니다 — 사용자가 직접 고른 지역이 아니라 문장에서 넘겨짚은 지역이라,
@@ -85,11 +89,13 @@ async def _candidates_with_conditions(
     """
     parsed = await parse_query(query_text, sigungu_cd, region)
 
-    candidates = await tour_api_client.search_accessible_attractions(
+    candidates = await tour_api_client.sample_accessible_candidates(
         region=region,
         user_type=user_type,
         limit=_CANDIDATE_LIMIT,
         sigungu_cd=parsed.sigungu_cds or None,
+        purposes=[p.value for p in parsed.purposes],
+        keywords=parsed.keywords,
     )
 
     if not candidates and parsed.region_source == "query_text":
@@ -98,8 +104,13 @@ async def _candidates_with_conditions(
             parsed.region_text,
             query_text,
         )
-        candidates = await tour_api_client.search_accessible_attractions(
-            region=region, user_type=user_type, limit=_CANDIDATE_LIMIT, sigungu_cd=None
+        candidates = await tour_api_client.sample_accessible_candidates(
+            region=region,
+            user_type=user_type,
+            limit=_CANDIDATE_LIMIT,
+            sigungu_cd=None,
+            purposes=[p.value for p in parsed.purposes],
+            keywords=parsed.keywords,
         )
         # 캐시에 들어있는 원본을 그대로 고치면 다른 단계까지 오염되므로 복사본을 만듭니다.
         parsed = parsed.model_copy(
@@ -151,21 +162,20 @@ async def create_course_from_selection(
     - 고른 장소들의 날짜별 혼잡도 예보 — 붐비는 곳을 한산한 시간대로 옮기려면
       실제 혼잡도 값이 있어야 합니다.
     """
-    candidates, parsed = await _candidates_with_conditions(
-        request.query_text, request.user_type.value, request.region, request.sigungu_cd
-    )
-    by_id = {a.content_id: a for a in candidates}
+    # 후보 목록을 다시 만들지 않고, 사용자가 고른 장소만 곧바로 불러옵니다.
+    #
+    # 예전에는 1단계와 똑같이 후보를 다시 뽑아서 그 안에서 찾았습니다. 후보를 뽑는
+    # 일 자체가 무거운 데다, 1·2단계 사이에 후보 구성이 조금만 달라져도(이제는
+    # 표본이라 매번 달라집니다) 고른 장소가 빠져서 어차피 단건 조회로 떨어졌습니다.
+    # 조건(parsed)은 질의만 다시 해석하면 되고, 같은 질의는 10분간 캐시되므로
+    # AI를 다시 부르지 않습니다.
+    parsed = await parse_query(request.query_text, request.sigungu_cd, request.region)
 
+    details = await asyncio.gather(
+        *(tour_api_client.get_attraction_detail(cid) for cid in request.selected_content_ids)
+    )
     selected_attractions: list[Attraction] = []
-    for content_id in request.selected_content_ids:
-        found = by_id.get(content_id)
-        if found is not None:
-            selected_attractions.append(found)
-            continue
-        # 후보 목록에 없으면 단건으로 직접 불러옵니다. 1단계와 2단계 사이에 후보
-        # 구성이 조금만 달라져도(평점 변동에 따른 정렬 변화 등) 방금 고른 장소가
-        # 통째로 빠지면서 "다시 불러오지 못했습니다"가 뜨던 문제를 막습니다.
-        detail = await tour_api_client.get_attraction_detail(content_id)
+    for content_id, detail in zip(request.selected_content_ids, details):
         if detail is None:
             logger.warning("선택한 관광지를 불러오지 못했습니다 (content_id=%s)", content_id)
             continue

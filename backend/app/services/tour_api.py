@@ -22,6 +22,7 @@ import asyncio
 import datetime
 import logging
 import math
+import random
 import re
 
 import httpx
@@ -126,6 +127,74 @@ def _region_token_sets(sigungu_cd: int | list[int] | None) -> list[list[str]]:
         return []
     codes = [sigungu_cd] if isinstance(sigungu_cd, int) else list(sigungu_cd)
     return [name.split() for name in (signgu_name(code) for code in codes) if name]
+
+
+def _matches_user_type(a: Attraction, user_type: str) -> bool:
+    """
+    그 사용자 유형에게 필요한 편의시설이 있는 곳인지. (일반 유형은 전부 통과)
+
+    접근성 탭(get_accessibility_summary)의 카테고리별 판단 기준과 같은 식이어야
+    '접근성 탭에서 우수한 곳'과 'AI 추천 후보'가 서로 다른 기준으로 갈리지 않습니다.
+    """
+    if user_type == "wheelchair":
+        return a.accessibility.wheelchair_accessibility_count > 0
+    if user_type == "stroller":
+        return a.accessibility.family_accessibility_count > 0
+    if user_type == "senior":
+        return a.accessibility.has_rest_area
+    if user_type == "pregnant":
+        return a.accessibility.pregnant_accessibility_count > 0
+    if user_type == "visual":
+        return a.accessibility.has_visual_accessibility
+    if user_type == "hearing":
+        return a.accessibility.has_hearing_accessibility
+    return True
+
+
+# 질의에서 읽어낸 목적(TravelPurpose) → 후보로 더 실어줄 카테고리.
+# 예전에는 카테고리를 6개씩 균등하게만 담아서, '맛집 위주로' 같은 질의에도 후보에
+# 음식점이 다섯 곳뿐이라 AI가 더 고르고 싶어도 고를 게 없었습니다.
+_PURPOSE_CATEGORIES: dict[str, tuple[str, ...]] = {
+    "식도락": ("음식점",),
+    "문화예술": ("문화시설",),
+    "역사": ("문화시설", "관광지"),
+    "자연": ("관광지",),
+    "휴식": ("관광지", "숙박"),
+    "체험": ("레포츠",),
+    "사진": ("관광지",),
+    "쇼핑": ("관광지",),
+}
+
+# 조건에 맞는 곳을 후보의 몇 할까지 채울지. 나머지는 다른 카테고리에서 골고루
+# 담아서, 목적이 뚜렷한 질의여도 곁들일 만한 곳이 함께 보이게 합니다.
+_PREFERRED_CANDIDATE_RATIO = 0.7
+
+
+def _stratified_sample(attractions: list[Attraction], count: int) -> list[Attraction]:
+    """
+    카테고리별로 나눠 담은 뒤 무작위로 섞어 번갈아 뽑습니다.
+
+    그냥 무작위로 뽑으면 후보 목록에서 수가 많은 카테고리(관광지)가 대부분을
+    차지합니다. 카테고리를 번갈아 뽑아야 '관광지 + 밥집 + 쉴 곳'이 고르게 실립니다.
+    """
+    if count <= 0 or not attractions:
+        return []
+
+    groups: dict[str, list[Attraction]] = {}
+    for a in attractions:
+        groups.setdefault(a.category or "기타", []).append(a)
+    for group in groups.values():
+        random.shuffle(group)
+
+    picked: list[Attraction] = []
+    order = sorted(groups)
+    index = 0
+    while len(picked) < count and any(groups[key] for key in order):
+        group = groups[order[index % len(order)]]
+        if group:
+            picked.append(group.pop())
+        index += 1
+    return picked
 
 
 def _filter_and_mix_by_regions(
@@ -1524,6 +1593,142 @@ class TourApiClient:
             for content_id in sorted(cached_ids - exclude_ids)
         ]
 
+    async def sample_accessible_candidates(
+        self,
+        region: str,
+        user_type: str,
+        limit: int = 40,
+        sigungu_cd: int | list[int] | None = None,
+        purposes: list[str] | None = None,
+        keywords: list[str] | None = None,
+    ) -> list[Attraction]:
+        """
+        AI 장소 추천(1단계)에 넘길 후보를 지역 전체에서 표본으로 뽑습니다.
+
+        search_accessible_attractions는 카테고리마다 목록 '맨 앞'에서 여섯 개씩
+        가져옵니다. 그 목록이 이름 가나다순이라 후보가 늘 ㄱ으로 시작하는 같은
+        곳들로 고정됐습니다 — 경기도 1,200곳이 넘는데 25곳만, 그것도 매번 같은
+        25곳만 AI에게 갔습니다. 그 함수는 홈 화면이 offset 기반 페이지네이션으로
+        쓰고 있어서 무작위를 섞을 수 없으므로(스크롤할 때마다 목록이 뒤바뀝니다),
+        추천 전용 경로를 따로 둡니다.
+
+        목록 캐시(경기도 전체)에서 뽑기 때문에 공공데이터 API를 부르지 않습니다.
+        편의시설·혼잡도·평점은 전부 DB 캐시에서 채웁니다.
+        """
+        if self.use_mock:
+            return await self.search_accessible_attractions(
+                region=region, user_type=user_type, limit=limit, sigungu_cd=sigungu_cd
+            )
+
+        ldong_regn_map = {"경기도": "41", "서울": "11"}
+        pool = await self._region_attractions(ldong_regn_map.get(region, "41"))
+        pool = _filter_and_mix_by_regions(pool, _region_token_sets(sigungu_cd))
+        if not pool:
+            return []
+
+        # 1) 질의 조건에 맞는 곳과 나머지로 가릅니다.
+        wanted_categories: set[str] = set()
+        for purpose in purposes or []:
+            wanted_categories.update(_PURPOSE_CATEGORIES.get(str(purpose), ()))
+        needles = [k.replace(" ", "").lower() for k in (keywords or []) if len(k) >= 2]
+
+        def matches_conditions(a: Attraction) -> bool:
+            if needles and any(n in (a.name or "").replace(" ", "").lower() for n in needles):
+                return True
+            return bool(wanted_categories) and a.category in wanted_categories
+
+        preferred = [a for a in pool if matches_conditions(a)]
+        others = [a for a in pool if not matches_conditions(a)]
+
+        # 2) 편의시설 필터에서 상당수가 걸러지므로 넉넉히(3배) 뽑아둡니다.
+        target = limit * 3
+        preferred_quota = int(target * _PREFERRED_CANDIDATE_RATIO) if preferred else 0
+        picked = _stratified_sample(preferred, preferred_quota)
+        picked += _stratified_sample(others, target - len(picked))
+        # 조건에 맞는 곳을 앞에 몰아둔 채로 두면, 아래에서 limit만큼 자를 때 앞쪽만
+        # 살아남아 후보가 그 카테고리 하나로 도배됩니다('맛집' 질의에 음식점 40곳).
+        # 섞어야 의도한 비율(7:3)이 최종 후보까지 유지됩니다.
+        random.shuffle(picked)
+
+        # 3) 편의시설 정보를 캐시에서 한 번에 채우고 사용자 유형으로 거릅니다.
+        #    목록 캐시에는 편의시설이 안 들어 있어서 이 단계가 반드시 필요합니다.
+        #    캐시 원본을 그대로 고치면 다음 요청까지 오염되므로 복사본에 채웁니다.
+        rows = await get_cached_place_accessibility([a.content_id for a in picked if a.content_id])
+        candidates: list[Attraction] = []
+        for a in picked:
+            copied = a.model_copy(deep=True)
+            row = rows.get(a.content_id)
+            if row is not None:
+                copied.accessibility = _accessibility_from_cache_row(row)
+            if not _matches_user_type(copied, user_type):
+                continue
+            candidates.append(copied)
+            if len(candidates) >= limit:
+                break
+
+        # 4) 유형에 맞는 곳이 워낙 드문 경우(예: 청각장애 편의시설은 경기도에 몇 곳
+        #    뿐이라 표본에 하나도 안 걸릴 수 있음) 기존 방식으로 보완합니다.
+        #    새 방식이 옛 방식보다 못한 결과를 주는 일이 없게 하는 안전장치입니다.
+        if len(candidates) < max(8, limit // 4):
+            logger.info(
+                "표본에서 %s 유형 후보가 %d곳뿐이라 기존 방식으로 보완합니다.",
+                user_type,
+                len(candidates),
+            )
+            known = {a.content_id for a in candidates}
+            for a in await self.search_accessible_attractions(
+                region=region, user_type=user_type, limit=limit, sigungu_cd=sigungu_cd
+            ):
+                if a.content_id not in known:
+                    candidates.append(a)
+                    known.add(a.content_id)
+                if len(candidates) >= limit:
+                    break
+            return candidates
+
+        await self._fill_display_info(candidates)
+        return candidates
+
+    async def _fill_display_info(self, attractions: list[Attraction]) -> None:
+        """
+        장소 선택 화면 카드에 보이는 값(혼잡도·평점·편의시설 요약)을 채웁니다.
+        전부 DB 캐시만 읽고, 느리면 그 값 없이 넘어갑니다 — 목록 자체는 이미
+        확보돼 있으니 화면이 멈추는 것보다 일부가 비는 편이 낫습니다.
+        """
+        signgu_by_content_id: dict[str, int] = {}
+        for a in attractions:
+            area_signgu = find_area_signgu(a.address)
+            if area_signgu:
+                signgu_by_content_id[a.content_id] = area_signgu[1]
+        distinct_signgu = sorted(set(signgu_by_content_id.values()))
+
+        try:
+            congestion_rows = (
+                await asyncio.wait_for(get_cached_congestion_rates(distinct_signgu), timeout=5.0)
+                if distinct_signgu
+                else {}
+            )
+        except Exception:
+            logger.warning("sample_accessible_candidates: 혼잡도 캐시 조회를 건너뜁니다.")
+            congestion_rows = {}
+
+        try:
+            rating_rows = await asyncio.wait_for(
+                get_average_ratings([a.content_id for a in attractions if a.content_id]), timeout=5.0
+            )
+        except Exception:
+            logger.warning("sample_accessible_candidates: 평점 조회를 건너뜁니다.")
+            rating_rows = {}
+
+        for a in attractions:
+            signgu_cd = signgu_by_content_id.get(a.content_id)
+            row = congestion_rows.get((signgu_cd, a.name)) if signgu_cd is not None else None
+            a.congestion_rate = float(row["cnctr_rate"]) if row else None
+            a.accessibility_benefits = _accessibility_benefit_labels(a.accessibility)
+            rating_row = rating_rows.get(a.content_id)
+            a.avg_rating = rating_row["avg_rating"] if rating_row else None
+            a.review_count = rating_row["review_count"] if rating_row else 0
+
     async def _accessibility_fallback_candidates(self, category_key: str) -> list[Attraction]:
         """
         실시간 표본에 원하는 접근성 유형이 하나도 안 걸렸을 때 쓰는 안전망입니다.
@@ -1769,19 +1974,7 @@ class TourApiClient:
         }
 
         def by_feature(a: Attraction) -> bool:
-            if user_type == "wheelchair":
-                return a.accessibility.wheelchair_accessibility_count > 0
-            if user_type == "stroller":
-                return a.accessibility.family_accessibility_count > 0
-            if user_type == "senior":
-                return a.accessibility.has_rest_area
-            if user_type == "pregnant":
-                return a.accessibility.pregnant_accessibility_count > 0
-            if user_type == "visual":
-                return a.accessibility.has_visual_accessibility
-            if user_type == "hearing":
-                return a.accessibility.has_hearing_accessibility
-            return True
+            return _matches_user_type(a, user_type)
 
         if user_type in category_key_by_user_type:
             results = [a for a in attractions if by_feature(a)]
