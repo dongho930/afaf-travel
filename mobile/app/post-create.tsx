@@ -174,7 +174,7 @@ export default function PostCreateScreen() {
   };
 
   return (
-    <KeyboardAwareScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" bottomOffset={20}>
+    <KeyboardAwareScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled" bottomOffset={20}>
       <Text style={styles.fieldLabel}>어떤 여행지인가요?</Text>
       {selectedPlace ? (
         <View style={styles.selectedPlaceChip}>
@@ -281,7 +281,7 @@ export default function PostCreateScreen() {
                 <Text style={styles.modalClose}>닫기</Text>
               </TouchableOpacity>
             </View>
-            <ScrollView>
+            <ScrollView showsVerticalScrollIndicator={false}>
               {loadingPlaces ? (
                 <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: 6 }} />
               ) : visitedPlaces.length === 0 ? (

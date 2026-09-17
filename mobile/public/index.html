@@ -43,6 +43,17 @@
         flex: 1;
       }
     </style>
+
+    <!-- 앱 화면처럼 보이도록 웹에서도 스크롤바를 숨깁니다(스크롤 자체는 그대로 됩니다).
+         각 화면의 showsVerticalScrollIndicator={false}가 빠진 곳이나 여러 줄 입력칸까지 한 번에 덮습니다. -->
+    <style id="hide-scrollbars">
+      * {
+        scrollbar-width: none;
+      }
+      *::-webkit-scrollbar {
+        display: none;
+      }
+    </style>
   </head>
 
   <body>

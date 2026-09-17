@@ -75,6 +75,7 @@ export default function PostManageScreen() {
   return (
     <>
       <FlatList
+        showsVerticalScrollIndicator={false}
         data={posts}
       keyExtractor={(item) => item.id}
       contentContainerStyle={styles.list}

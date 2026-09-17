@@ -643,7 +643,7 @@ export default function AccessibilityScreen() {
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
-            <KeyboardAwareScrollView keyboardShouldPersistTaps="handled" bottomOffset={20}>
+            <KeyboardAwareScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" bottomOffset={20}>
               <Text style={styles.modalTitle}>접근성 제보하기</Text>
 
               <Text style={styles.fieldLabel}>어떤 여행지인가요?</Text>

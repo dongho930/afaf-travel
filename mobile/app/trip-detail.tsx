@@ -130,6 +130,7 @@ export default function TripDetailScreen() {
   return (
     <>
       <FlatList
+        showsVerticalScrollIndicator={false}
         data={courses}
         keyExtractor={(item) => item.course_id}
         contentContainerStyle={styles.list}

@@ -156,6 +156,7 @@ export function SaveCourseModal({ visible, onClose, defaultNewTripName, onConfir
                 <ActivityIndicator style={{ marginVertical: 24 }} color={colors.primary} />
               ) : (
                 <FlatList
+                  showsVerticalScrollIndicator={false}
                   data={trips}
                   keyExtractor={(t) => t.trip_id}
                   style={{ maxHeight: 260 }}

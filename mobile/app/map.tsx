@@ -526,7 +526,7 @@ export default function MapScreen() {
                 <Text style={styles.modalClose}>닫기</Text>
               </TouchableOpacity>
             </View>
-            <ScrollView>{selectedStop && <AttractionCard stop={selectedStop} userType={course.generated_for} />}</ScrollView>
+            <ScrollView showsVerticalScrollIndicator={false}>{selectedStop && <AttractionCard stop={selectedStop} userType={course.generated_for} />}</ScrollView>
           </View>
         </View>
       </Modal>

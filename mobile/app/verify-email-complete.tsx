@@ -39,7 +39,7 @@ export default function VerifyEmailCompleteScreen() {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.debugContainer}>
+    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.debugContainer}>
       <Text style={styles.debugTitle}>처리가 오래 걸리고 있어요</Text>
       <Text style={styles.text}>아래 내용을 캡처해서 보내주시면 원인을 확인할 수 있어요.</Text>
       <View style={styles.debugBox}>

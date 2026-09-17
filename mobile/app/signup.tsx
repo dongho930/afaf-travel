@@ -95,6 +95,7 @@ export default function SignupScreen() {
 
   return (
     <KeyboardAwareScrollView
+      showsVerticalScrollIndicator={false}
       contentContainerStyle={styles.container}
       keyboardShouldPersistTaps="handled"
       bottomOffset={20}

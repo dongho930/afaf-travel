@@ -24,6 +24,7 @@ export default function PrivacyPolicyScreen() {
 
   return (
     <ScrollView
+      showsVerticalScrollIndicator={false}
       style={styles.screen}
       contentContainerStyle={[styles.container, { paddingBottom: spacing.xxl + insets.bottom }]}
     >

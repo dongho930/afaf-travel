@@ -207,6 +207,7 @@ export default function PlannerScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top", "left", "right"]}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
       <FlatList
+        showsVerticalScrollIndicator={false}
         data={[1]}
         keyExtractor={() => "content"}
         keyboardShouldPersistTaps="handled"
@@ -361,6 +362,7 @@ export default function PlannerScreen() {
               <ActivityIndicator style={{ marginTop: 24 }} color={colors.primary} />
             ) : (
               <FlatList
+                showsVerticalScrollIndicator={false}
                 data={filteredRegions}
                 keyExtractor={(item) => String(item.code)}
                 renderItem={({ item }) => (
