@@ -60,6 +60,23 @@ def searches(monkeypatch) -> list:
     return calls
 
 
+@pytest.fixture
+def details(monkeypatch) -> dict:
+    """
+    2단계는 후보를 다시 검색하지 않고 고른 장소를 get_attraction_detail로 한 곳씩
+    불러옵니다. 그 조회가 돌려줄 장소를 content_id별로 넣어두는 표입니다
+    (표에 없는 id는 불러오지 못한 것으로 봅니다). 기본으로 "1", "2"가 들어 있습니다.
+    """
+    places = {"1": _attraction("1", "수원화성"), "2": _attraction("2", "광교호수공원")}
+
+    async def fake_detail(content_id):
+        place = places.get(content_id)
+        return place.model_copy(deep=True) if place else None
+
+    monkeypatch.setattr(courses.tour_api_client, "get_attraction_detail", fake_detail)
+    return places
+
+
 def test_질의에_쓴_지역으로_후보를_좁힌다(client, searches):
     """화면에서 지역을 안 골라도, 문장에 '수원'이 있으면 수원으로 좁혀야 합니다."""
     response = client.post(
@@ -114,7 +131,7 @@ def test_추측한_지역으로_후보가_없으면_지역_제한을_푼다(clie
     assert response.json()["candidates"]
 
 
-def test_2단계에서_예보를_채운_뒤_코스를_만든다(client, searches, monkeypatch):
+def test_2단계에서_예보를_채운_뒤_코스를_만든다(client, details, monkeypatch):
     filled: list = []
 
     async def fake_fill(attractions):
@@ -156,20 +173,18 @@ def test_방문일에_쉬는_곳은_추천_뒤로_밀린다(client, monkeypatch)
     assert names.index("open") < names.index("closed")
 
 
-def test_방문_날짜를_보내면_휴무일을_경고한다(client, monkeypatch):
+def test_방문_날짜를_보내면_휴무일을_경고한다(client, details, monkeypatch):
     """휴무일에 코스를 짜놓고 현장에서 알게 되는 일을 막습니다."""
     monday = "2026-09-14"
 
-    async def fake_search(region, user_type, limit=20, sigungu_cd=None, **kwargs):
-        place = _attraction("1", "월요일 휴관 박물관")
-        place.category = "문화시설"
-        place.extra_info = [InfoField(label="쉬는날", value="매주 월요일")]
-        return [place]
+    place = _attraction("1", "월요일 휴관 박물관")
+    place.category = "문화시설"
+    place.extra_info = [InfoField(label="쉬는날", value="매주 월요일")]
+    details["1"] = place
 
     async def noop_fill(attractions):
         return 0
 
-    monkeypatch.setattr(courses.tour_api_client, "search_accessible_attractions", fake_search)
     monkeypatch.setattr(courses.tour_api_client, "fill_extra_info", noop_fill)
     monkeypatch.setattr(courses.tour_api_client, "fill_congestion_forecasts", noop_fill)
 
@@ -187,7 +202,7 @@ def test_방문_날짜를_보내면_휴무일을_경고한다(client, monkeypatc
     assert "쉬는 날" in (stop["closed_note"] or "")
 
 
-def test_코스를_만들기_전에_영업시간_정보를_채운다(client, searches, monkeypatch):
+def test_코스를_만들기_전에_영업시간_정보를_채운다(client, details, monkeypatch):
     filled: list = []
 
     async def fake_extra(attractions):
@@ -208,16 +223,18 @@ def test_코스를_만들기_전에_영업시간_정보를_채운다(client, sea
     assert filled == [["1", "2"]]
 
 
-def test_후보에_없는_선택지는_상세_조회로_살린다(client, searches, monkeypatch):
-    """1단계와 2단계 사이에 후보 구성이 달라져도, 사용자가 고른 장소는 살아남아야 합니다."""
-    async def fake_detail(content_id):
-        return _attraction(content_id, "직접 불러온 곳") if content_id == "99" else None
+def test_2단계는_후보를_다시_찾지_않고_고른_장소를_직접_불러온다(client, details, monkeypatch):
+    """1·2단계 사이에 후보 표본이 달라져도, 사용자가 고른 장소는 그대로 코스에 들어가야 합니다."""
+    async def must_not_search(*args, **kwargs):
+        raise AssertionError("2단계에서 후보를 다시 검색하면 안 됩니다")
 
-    async def fake_fill(attractions):
+    async def noop_fill(attractions):
         return 0
 
-    monkeypatch.setattr(courses.tour_api_client, "get_attraction_detail", fake_detail)
-    monkeypatch.setattr(courses.tour_api_client, "fill_congestion_forecasts", fake_fill)
+    details["99"] = _attraction("99", "직접 불러온 곳")
+    monkeypatch.setattr(courses.tour_api_client, "search_accessible_attractions", must_not_search)
+    monkeypatch.setattr(courses.tour_api_client, "sample_accessible_candidates", must_not_search)
+    monkeypatch.setattr(courses.tour_api_client, "fill_congestion_forecasts", noop_fill)
 
     response = client.post(
         "/api/courses/generate-from-selection",
@@ -226,3 +243,28 @@ def test_후보에_없는_선택지는_상세_조회로_살린다(client, search
 
     assert response.status_code == 200
     assert {s["attraction"]["content_id"] for s in response.json()["stops"]} == {"1", "99"}
+
+
+def test_불러오지_못한_장소는_빼고_코스를_만든다(client, details, monkeypatch):
+    async def noop_fill(attractions):
+        return 0
+
+    monkeypatch.setattr(courses.tour_api_client, "fill_congestion_forecasts", noop_fill)
+
+    response = client.post(
+        "/api/courses/generate-from-selection",
+        json={"query_text": "수원 나들이", "user_type": "general", "selected_content_ids": ["1", "없는곳"]},
+    )
+
+    assert response.status_code == 200
+    assert [s["attraction"]["content_id"] for s in response.json()["stops"]] == ["1"]
+
+
+def test_고른_장소를_하나도_못_불러오면_다시_시도하라고_알린다(client, details):
+    response = client.post(
+        "/api/courses/generate-from-selection",
+        json={"query_text": "수원 나들이", "user_type": "general", "selected_content_ids": ["없는곳"]},
+    )
+
+    assert response.status_code == 422
+    assert "다시 시도" in response.json()["detail"]
