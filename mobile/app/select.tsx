@@ -93,11 +93,17 @@ export default function SelectPlacesScreen() {
 
   // 마음에 드는 곳이 없을 때 같은 질의로 후보를 다시 받아옵니다. 서버가 매번
   // 다른 표본을 뽑아주므로 누를 때마다 새로운 장소가 나옵니다.
+  //
+  // 이미 고른 장소는 새로고침해도 그대로 남습니다 — 몇 군데는 마음에 들고 나머지만
+  // 다시 보고 싶은 게 보통인데, 예전에는 목록과 선택이 통째로 날아가서 고른 것을
+  // 처음부터 다시 찾아야 했습니다. 고른 카드는 맨 위로 모아두고, 그 아래를 새 후보로
+  // 채웁니다.
   const handleRefresh = async () => {
     if (!pendingQueryText.trim()) {
       Alert.alert("다시 추천할 수 없어요", "어떤 여행을 원하는지 먼저 입력해주세요.");
       return;
     }
+    const keptCandidates = recommendations.filter((c) => selectedIds.has(c.attraction.content_id));
     setIsRefreshing(true);
     try {
       const { candidates, parsed } = await api.recommendPlaces({
@@ -110,10 +116,15 @@ export default function SelectPlacesScreen() {
         Alert.alert("추천 결과 없음", "조건에 맞는 장소를 더 찾지 못했어요. 다른 표현으로 다시 시도해주세요.");
         return;
       }
-      setRecommendations(candidates);
+      // 고른 장소가 새 후보에도 들어 있으면 카드가 둘로 늘어나므로 걸러냅니다.
+      const freshCandidates = candidates.filter((c) => !selectedIds.has(c.attraction.content_id));
+      if (freshCandidates.length === 0) {
+        Alert.alert("새로운 장소가 없어요", "이미 고르신 곳 말고는 더 찾지 못했어요. 다른 표현으로 다시 시도해주세요.");
+        return;
+      }
+      setRecommendations([...keptCandidates, ...freshCandidates]);
       setParsedQuery(parsed ?? null);
-      // 목록이 바뀌었으니 이전 선택은 더 이상 유효하지 않습니다.
-      setSelectedIds(new Set());
+      // 선택(selectedIds)은 그대로 둡니다 — 고른 카드가 목록에 남아 있으니 유효합니다.
       listRef.current?.scrollToOffset({ offset: 0, animated: true });
     } catch (err) {
       Alert.alert("새로 추천받지 못했어요", errorMessage(err));
@@ -239,7 +250,7 @@ export default function SelectPlacesScreen() {
           disabled={isBusy}
           accessibilityRole="button"
           accessibilityLabel="장소 새로고침"
-          accessibilityHint="같은 조건으로 다른 장소를 다시 추천받습니다"
+          accessibilityHint="고른 장소는 그대로 두고, 나머지를 같은 조건으로 다시 추천받습니다"
         >
           {isRefreshing ? (
             <ActivityIndicator size="small" color={colors.primary} />
