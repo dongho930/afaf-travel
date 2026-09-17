@@ -3,7 +3,7 @@
     "name": "경기포올",
     "slug": "afaf-travel-planner",
     "version": "0.1.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "scheme": "afaftravel",
     "userInterfaceStyle": "automatic",
@@ -87,7 +87,9 @@
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "usesCleartextTraffic": false
           }
         }
       ],

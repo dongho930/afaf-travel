@@ -147,7 +147,7 @@ export default function SearchScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.screen} edges={["top"]}>
+    <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
       <ScreenHeader title="여행지 검색" style={styles.header} />
 
       <View style={styles.searchRow}>

@@ -613,7 +613,7 @@ export default function HomeScreen() {
   return (
     // edges=["top"]로 화면 상단만 안전영역 처리합니다 — 스크롤을 위로 당겨도
     // 콘텐츠가 상태표시줄(시계/배터리) 영역까지 밀려 올라가지 않게 막아줍니다.
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top", "left", "right"]}>
       <KeyboardAwareScrollView
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}

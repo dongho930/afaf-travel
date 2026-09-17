@@ -148,7 +148,7 @@ export default function SelectPlacesScreen() {
 
   if (recommendations.length === 0) {
     return (
-      <SafeAreaView style={styles.screen} edges={["top"]}>
+      <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
         <ScreenHeader title="장소 선택하기" style={styles.standaloneHeader} />
         <View style={styles.empty}>
           <Text style={styles.emptyText}>추천받은 장소가 없어요. 먼저 원하는 여행을 말씀해주세요.</Text>
@@ -198,7 +198,7 @@ export default function SelectPlacesScreen() {
 
   return (
     // edges=["top"]로 상태표시줄(시계/배터리) 영역만 피해서 그립니다 — 홈 화면과 같습니다.
-    <SafeAreaView style={styles.container} edges={["top"]}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       {extraInfoReady ? (
         <FadeInView duration={250} style={{ flex: 1 }}>
           <FlatList

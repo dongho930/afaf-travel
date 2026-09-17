@@ -244,7 +244,7 @@ export default function ResultsScreen() {
 
   if (!course) {
     return (
-      <SafeAreaView style={styles.screen} edges={["top"]}>
+      <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
         <ScreenHeader title="추천 코스" style={styles.standaloneHeader} />
         <View style={styles.empty}>
           <Text style={styles.emptyText}>표시할 코스가 없어요.</Text>
@@ -391,7 +391,7 @@ export default function ResultsScreen() {
 
   return (
     // edges=["top"]로 상태표시줄(시계/배터리) 영역만 피해서 그립니다 — 홈 화면과 같습니다.
-    <SafeAreaView style={styles.container} edges={["top"]}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       {extraInfoReady ? (
         <FadeInView duration={250} style={{ flex: 1 }}>
           <DraggableFlatList

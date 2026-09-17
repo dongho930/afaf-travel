@@ -204,7 +204,7 @@ export default function PlannerScreen() {
 
   return (
     // edges=["top"]로 화면 상단만 안전영역 처리합니다 (홈 화면과 동일한 방식).
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top", "left", "right"]}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
       <FlatList
         data={[1]}

@@ -40,7 +40,15 @@ export function BottomTabBar() {
     <View
       style={[
         styles.container,
-        { paddingBottom: Math.max(insets.bottom, 8), backgroundColor: colors.surface, borderTopColor: colors.border },
+        {
+          paddingBottom: Math.max(insets.bottom, 8),
+          // 가로 화면에서는 노치·카메라 컷아웃이 좌우에 옵니다. 그만큼 비워두지
+          // 않으면 양 끝 탭(홈·내 여행)이 컷아웃 아래로 들어가 잘립니다.
+          paddingLeft: insets.left,
+          paddingRight: insets.right,
+          backgroundColor: colors.surface,
+          borderTopColor: colors.border,
+        },
       ]}
       // 화면을 못 보는 사용자에게 여기가 '탭 모음'이라는 것을 알려줍니다.
       accessibilityRole="tablist"

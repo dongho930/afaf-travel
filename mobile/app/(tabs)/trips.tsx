@@ -506,7 +506,7 @@ export default function TripsScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top", "left", "right"]}>
         <View style={styles.center}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
@@ -681,7 +681,7 @@ export default function TripsScreen() {
 
   return (
     // edges=["top"]로 화면 상단만 안전영역 처리합니다 (홈 화면과 동일한 방식).
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top", "left", "right"]}>
       <FlatList
         data={listData}
         keyExtractor={keyExtractor}
