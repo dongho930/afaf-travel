@@ -18,6 +18,12 @@ import { Platform, StyleProp, View, ViewStyle } from "react-native";
  * preventDefault가 아니라 stopPropagation만 하므로, 이 텍스트 위에서 시작한 세로
  * 스크롤은 브라우저 기본 동작으로 그대로 동작합니다.
  *
+ * 막는 건 '여기서 시작한' 드래그뿐입니다. 밖에서 시작해 이 위를 지나가는 드래그까지
+ * 막았더니, 화면을 넘기던 중에 mousemove/mouseup이 document에 닿지 못해
+ * react-native-web의 responder 시스템이 제스처를 끝내지 못했습니다. 그러면 페이저가
+ * responder를 쥔 채 남아서, 누르지도 않았는데 마우스만 움직여도 화면이 넘어가고,
+ * 그동안 커서가 이동한 거리가 한꺼번에 반영돼 확 넘어갔습니다.
+ *
  * 선택은 '여기서 시작한 드래그'일 때만 켭니다. 늘 켜두면, 화면을 넘기려고 다른
  * 곳에서 시작한 드래그가 이 영역 위를 지나가는 동안 글자가 잡혀 파랗게 깜빡였습니다
  * (user-select는 상속값보다 요소 자신의 값이 우선이라, 위쪽에서 꺼도 소용이 없습니다).
@@ -27,7 +33,9 @@ import { Platform, StyleProp, View, ViewStyle } from "react-native";
  *
  * 앱(iOS/Android)은 페이저 구현이 달라서 이 처리가 필요 없고, 아무것도 하지 않습니다.
  */
-const BLOCKED_EVENTS = ["mousedown", "mousemove", "mouseup", "touchstart", "touchmove"];
+const START_EVENTS = ["mousedown", "touchstart"];
+const MOVE_EVENTS = ["mousemove", "touchmove"];
+const END_EVENTS = ["mouseup", "touchend", "touchcancel"];
 
 /** 탭 레이아웃(SwipeTapGuard)이 선택 가능한 영역을 알아보는 표식입니다. */
 export const SELECTABLE_AREA_ATTR = "data-selectable-area";
@@ -54,13 +62,39 @@ export function SelectableArea({ children, style }: { children: React.ReactNode;
     };
     document.addEventListener("pointerdown", syncSelectable, true);
 
-    const stop = (event: Event) => event.stopPropagation();
-    BLOCKED_EVENTS.forEach((type) => node.addEventListener(type, stop));
+    // 이 영역 '안에서 시작한' 드래그인지. 밖에서 시작해 여기를 지나가는 드래그
+    // (=화면 넘기기)는 절대 막으면 안 됩니다 — 위 주석 참고.
+    let startedHere = false;
+
+    // 시작은 이 노드에서만 봅니다. 여기서 전파를 끊으면 페이저는 제스처를 시작조차
+    // 하지 않습니다.
+    const handleStart = (event: Event) => {
+      startedHere = true;
+      event.stopPropagation();
+    };
+    // 이어지는 이동/종료는 window에서 캡처로 막습니다 — 문단 전체를 긁다 보면
+    // 커서가 영역 밖으로 나가는데, 노드에만 걸어두면 그때부터 이벤트가 document로
+    // 새어 나가 선택 도중에 화면이 넘어갑니다.
+    const handleMove = (event: Event) => {
+      if (startedHere) event.stopPropagation();
+    };
+    const handleEnd = (event: Event) => {
+      if (!startedHere) return;
+      startedHere = false;
+      event.stopPropagation();
+    };
+
+    START_EVENTS.forEach((type) => node.addEventListener(type, handleStart));
+    MOVE_EVENTS.forEach((type) => window.addEventListener(type, handleMove, true));
+    END_EVENTS.forEach((type) => window.addEventListener(type, handleEnd, true));
+
     return () => {
       node.removeAttribute(SELECTABLE_AREA_ATTR);
       node.style.removeProperty("user-select");
       document.removeEventListener("pointerdown", syncSelectable, true);
-      BLOCKED_EVENTS.forEach((type) => node.removeEventListener(type, stop));
+      START_EVENTS.forEach((type) => node.removeEventListener(type, handleStart));
+      MOVE_EVENTS.forEach((type) => window.removeEventListener(type, handleMove, true));
+      END_EVENTS.forEach((type) => window.removeEventListener(type, handleEnd, true));
     };
   }, []);
 
