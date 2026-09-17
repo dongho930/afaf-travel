@@ -169,7 +169,9 @@ export function PostCard({
             </TouchableOpacity>
           )}
         </View>
-        <Text style={styles.commentBody}>{comment.body}</Text>
+        <SelectableArea>
+          <Text style={styles.commentBody}>{comment.body}</Text>
+        </SelectableArea>
       </View>
     </View>
   );

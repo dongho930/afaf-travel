@@ -7,6 +7,7 @@ import type { ParamListBase, TabNavigationState } from "@react-navigation/native
 import { withLayoutContext } from "expo-router";
 import React, { useEffect, useRef } from "react";
 import { Platform, View } from "react-native";
+import { SELECTABLE_AREA_ATTR } from "../../components/SelectableArea";
 import { TAB_ROUTES } from "../../constants/tabs";
 
 /**
@@ -46,6 +47,14 @@ const SwipeTabs = withLayoutContext<
  *
  * 기준값은 페이저가 스와이프로 인정하는 거리(react-native-tab-view의 DEAD_ZONE = 12)와
  * 맞췄습니다 — 그보다 작게 잡으면 넘어가지도 않았는데 버튼만 안 눌리는 일이 생깁니다.
+ *
+ * 같은 이유로 '밀고 난 자리에 글자가 선택된 채 남는' 것도 여기서 막습니다.
+ * react-native-web은 View/Text에 user-select를 지정하지 않아서 웹에서는 모든 글자가
+ * 브라우저 기본값대로 선택 가능합니다. 그래서 화면을 넘기려고 민 드래그가 지나간
+ * 자리의 글자들이 파랗게 선택된 채 남았습니다. 드래그로 판정되는 순간 선택을 끄고
+ * 이미 잡힌 범위를 해제하되, SelectableArea 안에서 시작한 드래그(=진짜 복사하려는
+ * 동작)는 손대지 않습니다.
+ *
  * 앱(iOS/Android)은 responder 시스템이 press를 제대로 취소하므로 그냥 둡니다.
  */
 const TAP_SLOP = 12;
@@ -58,16 +67,51 @@ function SwipeTapGuard({ children }: { children: React.ReactNode }) {
     const node = ref.current as unknown as HTMLElement | null;
     if (!node) return;
 
-    let start: { x: number; y: number } | null = null;
+    let start: { x: number; y: number; selecting: boolean } | null = null;
+    let dragging = false;
+
+    const movedBeyondSlop = (event: MouseEvent) =>
+      start != null &&
+      (Math.abs(event.clientX - start.x) > TAP_SLOP || Math.abs(event.clientY - start.y) > TAP_SLOP);
+
+    const endDrag = () => {
+      if (!dragging) return;
+      dragging = false;
+      node.style.removeProperty("user-select");
+    };
 
     const handlePointerDown = (event: Event) => {
-      const { clientX, clientY } = event as PointerEvent;
-      start = { x: clientX, y: clientY };
+      const pointer = event as PointerEvent;
+      const target = pointer.target as Element | null;
+      endDrag();
+      start = {
+        x: pointer.clientX,
+        y: pointer.clientY,
+        // 복사하려고 긁는 중인지 — 이 경우에는 선택을 그대로 둡니다.
+        selecting: target?.closest?.(`[${SELECTABLE_AREA_ATTR}="true"]`) != null,
+      };
     };
+
+    const handlePointerMove = (event: Event) => {
+      if (!start || start.selecting || dragging) return;
+      if (!movedBeyondSlop(event as PointerEvent)) return;
+      dragging = true;
+      // 여기서부터는 글자가 더 선택되지 않게 하고, 드래그 초반에 이미 잡힌
+      // 범위도 해제합니다.
+      node.style.setProperty("user-select", "none");
+      window.getSelection()?.removeAllRanges();
+    };
+
+    const handlePointerUp = () => {
+      // 12px을 넘기 전(=아직 드래그로 판정하기 전)에 잡힌 글자가 남아 있을 수 있어서
+      // 손을 뗄 때 한 번 더 지웁니다.
+      if (dragging) window.getSelection()?.removeAllRanges();
+      endDrag();
+    };
+
     const handleClick = (event: Event) => {
       if (!start) return;
-      const { clientX, clientY } = event as MouseEvent;
-      const dragged = Math.abs(clientX - start.x) > TAP_SLOP || Math.abs(clientY - start.y) > TAP_SLOP;
+      const dragged = movedBeyondSlop(event as MouseEvent);
       start = null;
       if (dragged) {
         event.stopPropagation();
@@ -78,10 +122,18 @@ function SwipeTapGuard({ children }: { children: React.ReactNode }) {
     // 캡처 단계로 답니다 — 안쪽에서 전파를 끊는 곳(SelectableArea)이 있어도
     // 누른 지점은 놓치지 않고, click은 목표 요소에 닿기 전에 멈출 수 있습니다.
     node.addEventListener("pointerdown", handlePointerDown, true);
+    node.addEventListener("pointermove", handlePointerMove, true);
     node.addEventListener("click", handleClick, true);
+    // 손을 떼는 건 화면 밖에서 일어날 수도 있어서 window에서 받습니다.
+    window.addEventListener("pointerup", handlePointerUp, true);
+    window.addEventListener("pointercancel", handlePointerUp, true);
     return () => {
       node.removeEventListener("pointerdown", handlePointerDown, true);
+      node.removeEventListener("pointermove", handlePointerMove, true);
       node.removeEventListener("click", handleClick, true);
+      window.removeEventListener("pointerup", handlePointerUp, true);
+      window.removeEventListener("pointercancel", handlePointerUp, true);
+      endDrag();
     };
   }, []);
 
