@@ -254,7 +254,7 @@ export default function SelectPlacesScreen() {
         <Pressable
           style={({ pressed }) => [
             styles.submitButton,
-            pressed && !isBusy && styles.buttonPressed,
+            pressed && !isBusy && styles.submitButtonPressed,
             isBusy && styles.buttonDisabled,
           ]}
           onPress={handleCreateCourse}
@@ -267,10 +267,10 @@ export default function SelectPlacesScreen() {
           }
         >
           {isSubmitting ? (
-            <ActivityIndicator color={colors.primary} />
+            <ActivityIndicator color={colors.onPrimary} />
           ) : (
             <>
-              <SparkleIcon size={17} color={colors.primary} weight="bold" />
+              <SparkleIcon size={17} color={colors.onPrimary} weight="bold" />
               <Text style={styles.submitText}>
                 {selectedIds.size > 0 ? `${selectedIds.size}곳 코스 만들기` : "장소를 선택해주세요"}
               </Text>
@@ -445,25 +445,27 @@ function makeStyles(colors: ThemeColors) {
     gap: spacing.xs + 1,
   },
   refreshText: { color: colors.primary, fontSize: 14, fontFamily: fontFamily.bold },
-  // 추천 코스 화면의 '지도로 전체 보기' 버튼과 같은 모양 — 테두리만 있는
-  // 52px 높이에 아이콘 + 글자.
+  // 이 화면의 주요 동작이라 초록으로 꽉 채웁니다 — 옆의 새로고침 버튼은
+  // 테두리만 있는 보조 버튼으로 남겨서 둘의 역할이 한눈에 구분되게 합니다.
+  // (여행 요청 화면 planner.tsx의 제출 버튼과 같은 방식)
   submitButton: {
     flex: 1,
     height: 52,
     flexDirection: "row",
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.primary,
+    backgroundColor: colors.primary,
     borderRadius: radius.lg - 2,
     alignItems: "center",
     justifyContent: "center",
     gap: spacing.xs + 2,
   },
+  // 채움형이라 배경색을 바꾸면(surfaceAlt) 초록이 사라져 버려서, 다른 채움형
+  // 버튼들과 똑같이 투명도로만 눌린 것을 알립니다.
+  submitButtonPressed: { opacity: 0.6 },
   buttonPressed: { backgroundColor: colors.surfaceAlt },
   buttonDisabled: { opacity: 0.45 },
   // 새로고침 버튼이 옆자리를 차지해서, 좁은 폰(320px)에서도 글자가 눌리지 않도록
   // 한 단계 줄였습니다.
-  submitText: { color: colors.primary, fontSize: 15, fontFamily: fontFamily.bold },
+  submitText: { color: colors.onPrimary, fontSize: 15, fontFamily: fontFamily.bold },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, backgroundColor: colors.background },
   emptyText: { fontSize: 15, fontFamily: fontFamily.regular, color: colors.textTertiary, marginBottom: spacing.lg, textAlign: "center", lineHeight: 20 },
   emptyButton: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.xl - 4, paddingVertical: spacing.md },
