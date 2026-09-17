@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AnimatedChip } from "../components/AnimatedChip";
+import { DataCreditLine } from "../components/DataCredit";
 import { FadeImage } from "../components/FadeImage";
 import { HorizontalScrollWeb } from "../components/HorizontalScrollWeb";
 import { ScreenHeader } from "../components/ScreenHeader";
@@ -197,6 +198,7 @@ export default function SearchScreen() {
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        ListFooterComponent={results.length > 0 ? <DataCreditLine /> : null}
         ListEmptyComponent={
           emptyMessage() ? <Text style={styles.empty}>{emptyMessage()}</Text> : null
         }

@@ -5,6 +5,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { CongestionDisplay } from "../constants/congestion";
 import { fontFamily } from "../constants/fonts";
 import { radius, spacing } from "../constants/tokens";
+import { DATA_CREDIT_TEXT } from "./DataCredit";
 import { FadeImage } from "./FadeImage";
 
 // 사진이 없는 카드를 위한 자리표시 배경색입니다. 라이트/다크 테마와 무관하게
@@ -87,6 +88,18 @@ export function PhotoCardHeader({
             )}
           </View>
         )}
+        {/* 사진은 관광공사 데이터라 출처를 표기합니다. 카드마다 반복되니 스크린리더는 건너뜁니다. */}
+        {imageUrl ? (
+          <Text
+            style={styles.credit}
+            numberOfLines={1}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            aria-hidden
+          >
+            {DATA_CREDIT_TEXT}
+          </Text>
+        ) : null}
       </View>
     </View>
   );
@@ -125,5 +138,6 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: radius.pill,
   },
+  credit: { fontSize: 10, fontFamily: fontFamily.regular, color: "rgba(255,255,255,0.75)", marginTop: spacing.xs },
   congestionPillText: { fontSize: 11, fontFamily: fontFamily.extraBold, color: "#FFFFFF" },
 });

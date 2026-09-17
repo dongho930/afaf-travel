@@ -24,6 +24,7 @@ import { AccessibilityIcons, accessibilityFeatureLabels } from "../../components
 import { AnimatedChip } from "../../components/AnimatedChip";
 import { AppLogo } from "../../components/AppLogo";
 import { EXTRA_INFO_LABELS_BY_CATEGORY, renderExtraInfo as renderExtraInfoRow } from "../../components/ExtraInfoList";
+import { DATA_CREDIT_TEXT } from "../../components/DataCredit";
 import { FadeInView } from "../../components/FadeInView";
 import { HorizontalScrollWeb } from "../../components/HorizontalScrollWeb";
 import { PhotoCardHeader } from "../../components/PhotoCardHeader";
@@ -671,6 +672,10 @@ export default function HomeScreen() {
             aria-hidden
           />
           <View style={styles.heroOverlay} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden />
+          {/* 배경 사진(관광공사 데이터)의 출처. 장식 사진과 같이 스크린리더는 건너뜁니다. */}
+          <Text style={styles.heroCredit} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden>
+            {DATA_CREDIT_TEXT}
+          </Text>
           <View style={styles.heroContent}>
             <View style={styles.heroBadge}>
               <SparkleIcon size={11} color={colors.onPrimary} weight="fill" />
@@ -840,8 +845,6 @@ export default function HomeScreen() {
             {loadingMore && <ActivityIndicator style={{ marginTop: spacing.sm }} color={colors.primary} />}
           </>
         ))}
-        {/* 이 화면의 여행지 정보·사진이 모두 관광공사 데이터라 출처를 목록 맨 아래에 표기합니다. */}
-        <Text style={styles.dataCredit}>출처: ⓒ한국관광콘텐츠랩</Text>
       </KeyboardAwareScrollView>
     </SafeAreaView>
   );
@@ -921,7 +924,6 @@ function makeStyles(colors: ThemeColors) {
     backgroundColor: colors.surfaceAlt,
   },
   logoSub: { fontSize: 12, fontFamily: fontFamily.medium, color: colors.textTertiary },
-  dataCredit: { marginTop: spacing.xl, fontSize: 12, fontFamily: fontFamily.regular, color: colors.textSecondary, textAlign: "center" },
 
   hero: {
     // 사진이 로드되기 전에도 항상 오버레이+흰 글자와 어울리는 어두운 배경을 써서,
@@ -956,6 +958,15 @@ function makeStyles(colors: ThemeColors) {
   // position+zIndex로 오버레이보다 위 레이어에 두어 해결합니다(네이티브 앱은
   // 원래도 정상 동작이라 영향 없음).
   heroContent: { position: "relative", zIndex: 1 },
+  heroCredit: {
+    position: "absolute",
+    top: spacing.sm,
+    right: spacing.md,
+    zIndex: 1,
+    fontSize: 10,
+    fontFamily: fontFamily.regular,
+    color: "rgba(255,255,255,0.8)",
+  },
   heroBadge: {
     flexDirection: "row",
     alignItems: "center",

@@ -34,6 +34,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Alert } from "../services/crossPlatformAlert";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AccessibilityIcons } from "../components/AccessibilityIcons";
+import { DataCreditLine } from "../components/DataCredit";
 import { FadeInView } from "../components/FadeInView";
 import { HorizontalScrollWeb } from "../components/HorizontalScrollWeb";
 import { PostCard } from "../components/PostCard";
@@ -544,6 +545,7 @@ export default function AttractionDetailScreen() {
                 </Pressable>
               ))}
             </HorizontalScrollWeb>
+            <DataCreditLine style={styles.nearbyCredit} />
           </View>
         </FadeInView>
       )}
@@ -905,6 +907,7 @@ function makeStyles(colors: ThemeColors) {
   nearbySectionTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2, marginBottom: spacing.sm + 2 },
   nearbySectionTitle: { fontSize: 15, fontFamily: fontFamily.extraBold, color: colors.text },
   nearbyRow: { gap: spacing.md, paddingRight: spacing.xs },
+  nearbyCredit: { marginTop: spacing.sm, textAlign: "left" },
   nearbyCard: { width: 130 },
   nearbyImage: { width: 130, height: 90, borderRadius: radius.md, backgroundColor: colors.primaryLight },
   nearbyImagePlaceholder: { alignItems: "center", justifyContent: "center" },

@@ -21,6 +21,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Alert } from "../services/crossPlatformAlert";
 import DraggableFlatList, { ScaleDecorator } from "react-native-draggable-flatlist";
 import { EXTRA_INFO_LABELS_BY_CATEGORY } from "../components/ExtraInfoList";
+import { DataCreditLine } from "../components/DataCredit";
 import { FadeInView } from "../components/FadeInView";
 import { SaveCourseModal, SaveCourseParams } from "../components/SaveCourseModal";
 import { ScreenHeader } from "../components/ScreenHeader";
@@ -400,7 +401,12 @@ export default function ResultsScreen() {
             data={course.stops}
             keyExtractor={(item) => item.attraction.content_id}
             ListHeaderComponent={listHeader}
-            ListFooterComponent={laterDaySections || null}
+            ListFooterComponent={
+              <>
+                {laterDaySections || null}
+                <DataCreditLine />
+              </>
+            }
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
             onDragEnd={handleDragEnd}
