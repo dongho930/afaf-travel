@@ -2,18 +2,27 @@ import * as FileSystem from "expo-file-system/legacy";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { Redirect, useRouter } from "expo-router";
-import { CameraIcon } from "phosphor-react-native";
+import {
+  CameraIcon,
+  EnvelopeSimpleIcon,
+  FileTextIcon,
+  GearIcon,
+  LockIcon,
+  SignOutIcon,
+  UserIcon,
+} from "phosphor-react-native";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Alert } from "../services/crossPlatformAlert";
 import { ActionButton } from "../components/ActionButton";
+import { SettingsRow } from "../components/SettingsRow";
 import { api, errorMessage } from "../services/api";
 import { useAuth } from "../services/AuthContext";
 import { useProfile } from "../services/ProfileContext";
 import { useTheme } from "../services/ThemeContext";
 import { fontFamily } from "../constants/fonts";
-import { ThemeColors } from "../constants/theme";
+import { THEME_LABELS, ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
 
 /**
@@ -33,7 +42,7 @@ export default function ProfileScreen() {
   // 각 탭 상단의 프로필 버튼에도 곧바로 반영되고, 화면에 들어올 때마다 다시
   // 조회하느라 기다릴 필요도 없습니다.
   const { profile, loaded, refresh, applyLocalChange } = useProfile();
-  const { colors } = useTheme();
+  const { colors, theme } = useTheme();
   const styles = makeStyles(colors);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
@@ -172,73 +181,83 @@ export default function ProfileScreen() {
         <Text style={styles.avatarHint}>사진을 눌러 프로필 사진 변경</Text>
       </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionLabel}>아이디</Text>
+      <View style={styles.group}>
         {usernameEditing ? (
-          <View style={styles.editRow}>
-            <TextInput
-              style={styles.input}
-              value={usernameDraft}
-              onChangeText={setUsernameDraft}
-              autoCapitalize="none"
-              autoCorrect={false}
-              placeholderTextColor={colors.textTertiary}
-            />
-            <ActionButton label="저장" size="sm" onPress={handleSaveUsername} loading={isSavingUsername} />
-            <ActionButton
-              label="취소"
-              size="sm"
-              variant="secondary"
-              onPress={() => {
-                setUsernameDraft(profile?.username ?? "");
-                setUsernameEditing(false);
-              }}
-            />
+          <View style={styles.editCell}>
+            <Text style={styles.editLabel}>아이디</Text>
+            <View style={styles.editRow}>
+              <TextInput
+                style={styles.input}
+                value={usernameDraft}
+                onChangeText={setUsernameDraft}
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholderTextColor={colors.textTertiary}
+              />
+              <ActionButton label="저장" size="sm" onPress={handleSaveUsername} loading={isSavingUsername} />
+              <ActionButton
+                label="취소"
+                size="sm"
+                variant="secondary"
+                onPress={() => {
+                  setUsernameDraft(profile?.username ?? "");
+                  setUsernameEditing(false);
+                }}
+              />
+            </View>
           </View>
         ) : (
-          <View style={styles.rowBetween}>
-            <Text style={styles.valueText}>{profile?.username ?? "-"}</Text>
-            <TouchableOpacity onPress={() => setUsernameEditing(true)}>
-              <Text style={styles.linkText}>아이디 변경</Text>
-            </TouchableOpacity>
-          </View>
+          <SettingsRow
+            icon={UserIcon}
+            label="아이디"
+            value={profile?.username ?? "-"}
+            onPress={() => setUsernameEditing(true)}
+            accessibilityHint="아이디를 변경합니다"
+          />
         )}
+        {/* 이메일은 바꿀 수 없는 값이라 onPress를 주지 않습니다(셰브론도 안 그려집니다). */}
+        <SettingsRow
+          icon={EnvelopeSimpleIcon}
+          label="이메일"
+          value={profile?.email ?? session?.user.email ?? "-"}
+          divider
+        />
+        <SettingsRow
+          icon={LockIcon}
+          label="비밀번호"
+          value="••••••"
+          onPress={() => setPasswordModalVisible(true)}
+          divider
+          accessibilityHint="비밀번호를 변경합니다"
+        />
       </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionLabel}>이메일</Text>
-        <Text style={styles.valueText}>{profile?.email ?? session?.user.email ?? "-"}</Text>
+      <View style={styles.group}>
+        {/* 지금 켜져 있는 테마를 값으로 보여줍니다 — 설정 화면에 들어가 보지 않아도
+            밝은/어두운 중 무엇인지 알 수 있습니다. */}
+        <SettingsRow
+          icon={GearIcon}
+          label="설정"
+          value={THEME_LABELS[theme]}
+          onPress={() => router.push("/settings")}
+          accessibilityHint="화면 테마 등을 설정합니다"
+        />
+        <SettingsRow
+          icon={FileTextIcon}
+          label="개인정보처리방침"
+          onPress={() => router.push("/privacy")}
+          divider
+          role="link"
+        />
       </View>
 
-      <View style={styles.section}>
-        <View style={styles.rowBetween}>
-          <Text style={styles.sectionLabel}>비밀번호</Text>
-          <TouchableOpacity onPress={() => setPasswordModalVisible(true)}>
-            <Text style={styles.linkText}>비밀번호 변경</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <TouchableOpacity style={styles.section} onPress={() => router.push("/settings")}>
-        <View style={styles.rowBetween}>
-          <Text style={styles.sectionLabel}>설정</Text>
-          <Text style={styles.linkText}>화면 테마 등 →</Text>
-        </View>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={styles.section}
-        onPress={() => router.push("/privacy")}
-        accessibilityRole="link"
-        accessibilityLabel="개인정보처리방침 보기"
+      <Pressable
+        style={({ pressed }) => [styles.signOutButton, pressed && styles.signOutButtonPressed]}
+        onPress={signOut}
+        accessibilityRole="button"
+        accessibilityLabel="로그아웃"
       >
-        <View style={styles.rowBetween}>
-          <Text style={styles.sectionLabel}>개인정보처리방침</Text>
-          <Text style={styles.linkText}>보기 →</Text>
-        </View>
-      </TouchableOpacity>
-
-      <Pressable style={styles.signOutButton} onPress={signOut}>
+        <SignOutIcon size={18} color={colors.danger} weight="bold" />
         <Text style={styles.signOutButtonText}>로그아웃</Text>
       </Pressable>
 
@@ -314,20 +333,20 @@ function makeStyles(colors: ThemeColors) {
     },
     avatarHint: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary, marginTop: spacing.sm + 2 },
 
-    section: {
+    // 설정 줄들을 묶는 카드입니다. overflow: hidden이 있어야 첫 줄/마지막 줄을
+    // 눌렀을 때 생기는 배경색이 둥근 모서리 밖으로 삐져나오지 않습니다.
+    group: {
       backgroundColor: colors.surface,
       borderRadius: radius.lg - 2,
       borderWidth: 1,
       borderColor: colors.border,
-      padding: spacing.lg,
       marginBottom: spacing.md,
+      overflow: "hidden",
     },
-    sectionLabel: { fontSize: 12, fontFamily: fontFamily.semiBold, color: colors.textTertiary, marginBottom: spacing.xs + 2 },
-    rowBetween: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-    valueText: { fontSize: 16, fontFamily: fontFamily.bold, color: colors.text },
-    linkText: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.primary },
+    editCell: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md, gap: spacing.xs },
+    editLabel: { fontSize: 12, fontFamily: fontFamily.semiBold, color: colors.textTertiary },
 
-    editRow: { flexDirection: "row", gap: spacing.sm, alignItems: "center", marginTop: spacing.sm },
+    editRow: { flexDirection: "row", gap: spacing.sm, alignItems: "center", marginTop: spacing.xs },
     input: {
       flex: 1,
       // 웹에서 <input>이 고유 최소 너비 아래로 안 줄어들어 옆 버튼(저장/취소)이
@@ -346,8 +365,18 @@ function makeStyles(colors: ThemeColors) {
     modalButtonRow: { marginTop: spacing.lg },
     modalButton: { flex: 1 },
 
-    signOutButton: { marginTop: spacing.md, alignItems: "center", padding: spacing.md },
-    signOutButtonText: { color: colors.danger, fontFamily: fontFamily.bold, fontSize: 14 },
+    signOutButton: {
+      marginTop: spacing.md,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: spacing.sm,
+      height: 48,
+      borderRadius: radius.md,
+      backgroundColor: colors.dangerLight,
+    },
+    signOutButtonPressed: { opacity: 0.8 },
+    signOutButtonText: { color: colors.danger, fontFamily: fontFamily.bold, fontSize: 15 },
 
     passwordModal: {
       position: "absolute",

@@ -3,14 +3,14 @@ import { CaretRightIcon, CheckIcon, MoonIcon, SunIcon, type Icon } from "phospho
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { fontFamily } from "../constants/fonts";
-import { ThemeColors } from "../constants/theme";
+import { THEME_LABELS, ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
 import { useTheme } from "../services/ThemeContext";
 import { ThemeMode } from "../constants/theme";
 
 const OPTIONS: { mode: ThemeMode; icon: Icon; label: string; desc: string }[] = [
-  { mode: "light", icon: SunIcon, label: "밝은", desc: "밝은 배경의 기본 화면" },
-  { mode: "dark", icon: MoonIcon, label: "어두운", desc: "어두운 배경으로 눈부심 줄이기" },
+  { mode: "light", icon: SunIcon, label: THEME_LABELS.light, desc: "밝은 배경의 기본 화면" },
+  { mode: "dark", icon: MoonIcon, label: THEME_LABELS.dark, desc: "어두운 배경으로 눈부심 줄이기" },
 ];
 
 /**

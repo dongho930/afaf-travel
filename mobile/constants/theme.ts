@@ -87,3 +87,13 @@ export const Colors: Record<ThemeMode, ThemeColors> = {
   light: lightColors,
   dark: darkColors,
 };
+
+/**
+ * 테마 이름은 설정 화면(선택 카드의 제목)과 프로필 화면(지금 켜져 있는 테마 표시)
+ * 두 곳에서 쓰이므로 여기서 한 번만 정의합니다 — 나중에 '시스템 설정 따름'을
+ * 추가하더라도 고칠 곳이 한 군데입니다.
+ */
+export const THEME_LABELS: Record<ThemeMode, string> = {
+  light: "밝은",
+  dark: "어두운",
+};
