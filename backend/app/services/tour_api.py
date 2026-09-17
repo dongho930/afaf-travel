@@ -2160,7 +2160,12 @@ class TourApiClient:
                 if attraction.content_id and attraction.content_id not in seen:
                     seen.add(attraction.content_id)
                     merged.append(attraction)
-        _REGION_ATTRACTIONS_CACHE.set(ldong_regn_cd, merged)
+        # DB를 한 카테고리라도 못 읽었으면(None) 이번 결과는 들고 있지 않습니다.
+        # 예전에는 순간적인 DB 오류로 받은 빈/반쪽 목록을 5분 동안 캐시해서, 그동안
+        # AI 플래너가 매번 "장소 추천 실패"(후보 없음)로 끝나고 검색·근처 관광지도
+        # 비어 있었습니다. 다음 요청이 곧바로 다시 읽도록 캐시하지 않습니다.
+        if all(items is not None for items in per_type):
+            _REGION_ATTRACTIONS_CACHE.set(ldong_regn_cd, merged)
         return merged
 
     async def search_attractions(

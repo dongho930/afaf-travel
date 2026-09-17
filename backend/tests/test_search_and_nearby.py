@@ -119,3 +119,46 @@ def test_반경을_넓히면_더_나온다():
 
 def test_거리가_먼_곳은_안_나온다():
     assert "가나아트파크" not in [r["name"] for r in nearby("1", radius_km=10.0)]
+
+
+# ---- DB를 순간적으로 못 읽었을 때 ----
+
+def test_DB를_못_읽은_결과는_캐시하지_않는다(monkeypatch):
+    """
+    순간적인 DB 오류로 받은 빈 목록을 5분 동안 들고 있으면, 그동안 AI 플래너가
+    매번 '장소 추천 실패'(후보 없음)로 끝나고 검색도 비어 있었습니다.
+    DB가 돌아오면 바로 다음 요청부터 정상 목록이 나와야 합니다.
+    """
+    from app.services.supabase_service import CacheUnavailable
+
+    good_list_cache = tour_api.get_cached_attraction_list
+    down = {"value": True}
+
+    async def flaky_list_cache(ldong_regn_cd, content_type_id, max_age_hours=24.0):
+        if down["value"]:
+            raise CacheUnavailable("DB 연결 실패")
+        return await good_list_cache(ldong_regn_cd, content_type_id, max_age_hours)
+
+    monkeypatch.setattr(tour_api, "get_cached_attraction_list", flaky_list_cache)
+
+    assert search("화성") == []  # 장애 중에는 비어 있어도
+
+    down["value"] = False
+    assert "수원화성" in [r["name"] for r in search("화성")]  # 복구되면 곧바로 나옵니다
+
+
+def test_정상적으로_읽은_목록은_캐시한다(monkeypatch):
+    calls = {"count": 0}
+    good_list_cache = tour_api.get_cached_attraction_list
+
+    async def counting_list_cache(ldong_regn_cd, content_type_id, max_age_hours=24.0):
+        calls["count"] += 1
+        return await good_list_cache(ldong_regn_cd, content_type_id, max_age_hours)
+
+    monkeypatch.setattr(tour_api, "get_cached_attraction_list", counting_list_cache)
+
+    search("화성")
+    first = calls["count"]
+    search("팔달")
+
+    assert first > 0 and calls["count"] == first  # 두 번째 검색은 DB를 다시 읽지 않습니다
