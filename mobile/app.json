@@ -21,7 +21,7 @@
       }
     },
     "android": {
-      "package": "kr.afaftravel.app",
+      "package": "com.gyeonggiforall",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FFFFFF"
