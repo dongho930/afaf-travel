@@ -25,6 +25,7 @@ import { Alert } from "../../services/crossPlatformAlert";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DateRangePickerModal } from "../../components/DateRangePickerModal";
 import { FadeInView } from "../../components/FadeInView";
+import { SelectableArea } from "../../components/SelectableArea";
 import { ProfileButton } from "../../components/ProfileButton";
 import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
@@ -267,7 +268,11 @@ export default function PlannerScreen() {
 
             <Text style={styles.fieldLabel}>어떤 여행을 원하세요?</Text>
             <FadeInView key={`hint-${userType}`} duration={200} translateY={4}>
-              <Text style={styles.hint}>예: "{exampleQuery}"</Text>
+              {/* 아래 입력창에 옮겨 적으려고 이 문장을 긁는 사람이 많은데, 웹에서는
+                  그 드래그가 탭 넘김으로 먹혔습니다. 이 영역만 선택이 되게 합니다. */}
+              <SelectableArea>
+                <Text style={styles.hint}>예: "{exampleQuery}"</Text>
+              </SelectableArea>
             </FadeInView>
             <TextInput
               style={styles.input}

@@ -23,6 +23,7 @@ import { useTheme } from "../services/ThemeContext";
 import { PostComment, PostItem } from "../types";
 import { FadeImage } from "./FadeImage";
 import { PhotoCarousel } from "./PhotoCarousel";
+import { SelectableArea } from "./SelectableArea";
 
 // 웹에서 본문이 잘렸는지 어림잡을 때 쓰는 한 줄당 글자 수. 카드 폭(모바일 기준)에
 // 14px 글자가 대략 이만큼 들어갑니다. 네이티브는 실제 줄 수를 재므로 쓰이지 않습니다.
@@ -207,9 +208,11 @@ export function PostCard({
               </Text>
             </View>
           </View>
-          <Text style={styles.body} numberOfLines={isBodyExpanded ? undefined : bodyNumberOfLines}>
-            {item.body}
-          </Text>
+          <SelectableArea>
+            <Text style={styles.body} numberOfLines={isBodyExpanded ? undefined : bodyNumberOfLines}>
+              {item.body}
+            </Text>
+          </SelectableArea>
 
           {/* 잘렸는지 알려면 줄 수 제한 없이 그린 높이를 재봐야 합니다. 눈에 보이지
               않게 겹쳐 그린 뒤 한 번 재고 나면 사라져서, 이후에는 비용이 없습니다.
