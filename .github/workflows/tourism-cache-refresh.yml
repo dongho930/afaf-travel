@@ -48,11 +48,11 @@ name: Tourism cache refresh
 
 on:
   schedule:
-    # UTC 15:00 = KST 00:00(자정). GitHub Actions 스케줄도 UTC 기준입니다.
-    # 공공데이터포털 일일 한도가 KST 자정에 초기화되므로, 초기화 직후에 도는 셈입니다.
+    # UTC 20:00 = KST 05:00. GitHub Actions 스케줄도 UTC 기준입니다.
+    # 공공데이터포털 일일 한도가 KST 자정에 초기화되므로, 초기화된 뒤(05시)에 도는 셈입니다.
     # 참고: GitHub 스케줄은 부하가 몰리면 수 분~수십 분 늦게 실행될 수 있습니다
     # (정시 보장이 아님). 하루 한 번이면 되는 성격이라 문제되지 않습니다.
-    - cron: "0 15 * * *"
+    - cron: "0 20 * * *"
   workflow_dispatch: # Actions 탭에서 수동 실행 버튼으로도 바로 테스트 가능
     inputs:
       region:

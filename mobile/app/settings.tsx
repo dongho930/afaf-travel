@@ -13,9 +13,9 @@ const OPTIONS: { mode: ThemeMode; icon: Icon; label: string; desc: string }[] = 
 ];
 
 /**
- * 프로필 화면의 '설정'을 눌러서 들어오는 화면입니다. 현재는 화면 테마(라이트/
- * 다크) 하나만 있습니다. 선택하면 즉시 앱 전체에 반영되고, 다음에 앱을 다시
- * 켜도 그대로 유지됩니다(AsyncStorage에 저장).
+ * 프로필 화면의 '설정'을 눌러서 들어오는 화면입니다. 화면 테마(라이트/다크)
+ * 선택과 데이터 출처 표기가 있습니다. 테마는 선택하면 즉시 앱 전체에 반영되고,
+ * 다음에 앱을 다시 켜도 그대로 유지됩니다(AsyncStorage에 저장).
  */
 export default function SettingsScreen() {
   const { theme, colors, setTheme } = useTheme();
@@ -49,6 +49,12 @@ export default function SettingsScreen() {
           );
         })}
       </View>
+
+      <Text style={[styles.sectionTitle, styles.sectionSpacing]}>데이터 출처</Text>
+      <View style={styles.creditCard}>
+        <Text style={styles.creditLabel}>관광지 정보 · 사진</Text>
+        <Text style={styles.creditValue}>출처 : ⓒ한국관광콘텐츠랩</Text>
+      </View>
     </View>
   );
 }
@@ -59,6 +65,17 @@ function makeStyles(colors: ThemeColors) {
     sectionTitle: { fontSize: 16, fontFamily: fontFamily.extraBold, color: colors.text, marginBottom: spacing.xs },
     sectionDesc: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textTertiary, marginBottom: spacing.lg },
     optionRow: { flexDirection: "row", gap: spacing.md },
+    sectionSpacing: { marginTop: spacing.xl, marginBottom: spacing.md },
+    creditCard: {
+      backgroundColor: colors.surface,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: spacing.lg,
+      gap: spacing.xs,
+    },
+    creditLabel: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textSecondary },
+    creditValue: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.text },
     optionCard: {
       flex: 1,
       backgroundColor: colors.surface,

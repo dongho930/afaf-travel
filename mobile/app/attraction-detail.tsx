@@ -388,14 +388,20 @@ export default function AttractionDetailScreen() {
       {stage >= 1 && (
       <FadeInView duration={280}>
       {attraction.image_url ? (
-        <Image
-          source={{ uri: httpsImageUrl(attraction.image_url) }}
-          style={styles.heroImage}
-          // 바로 아래에 이름이 읽히므로, 사진은 장식으로 두고 건너뜁니다.
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          aria-hidden
-        />
+        <View style={styles.heroWrap}>
+          <Image
+            source={{ uri: httpsImageUrl(attraction.image_url) }}
+            style={styles.heroImage}
+            // 바로 아래에 이름이 읽히므로, 사진은 장식으로 두고 건너뜁니다.
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            aria-hidden
+          />
+          {/* TourAPI 사진의 출처 표기(이용 조건). 사진 위라서 테마와 상관없이 어두운 배경 + 흰 글씨로 고정합니다. */}
+          <View style={styles.heroCredit}>
+            <Text style={styles.heroCreditText}>ⓒ한국관광콘텐츠랩</Text>
+          </View>
+        </View>
       ) : null}
 
       {/* 이름과 평점·혼잡도 배지가 따로 읽히면 "4.5" "(2)" "혼잡도 98%"처럼
@@ -804,7 +810,18 @@ function makeStyles(colors: ThemeColors) {
   emptyText: { fontSize: 15, fontFamily: fontFamily.regular, color: colors.textTertiary, textAlign: "center" },
   container: { padding: spacing.xl - 4, paddingBottom: spacing.xxl + spacing.xl, backgroundColor: colors.background },
 
-  heroImage: { width: "100%", height: 200, borderRadius: radius.lg, marginBottom: spacing.lg, backgroundColor: colors.primaryLight },
+  heroWrap: { marginBottom: spacing.lg },
+  heroImage: { width: "100%", height: 200, borderRadius: radius.lg, backgroundColor: colors.primaryLight },
+  heroCredit: {
+    position: "absolute",
+    right: spacing.sm,
+    bottom: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    backgroundColor: "rgba(0,0,0,0.55)",
+  },
+  heroCreditText: { fontSize: 11, fontFamily: fontFamily.regular, color: "#FFFFFF" },
 
   titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   title: { fontSize: 22, fontFamily: fontFamily.extraBold, color: colors.text, flexShrink: 1 },

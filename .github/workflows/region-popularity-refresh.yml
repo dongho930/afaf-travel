@@ -7,8 +7,8 @@ name: Region popularity refresh
 # 신호만 보내는 역할이라 비용이 들지 않습니다.
 on:
   schedule:
-    # UTC 15:00 = KST 00:00(자정). GitHub Actions 스케줄도 UTC 기준입니다.
-    - cron: "0 15 * * *"
+    # UTC 20:00 = KST 05:00. GitHub Actions 스케줄도 UTC 기준입니다.
+    - cron: "0 20 * * *"
   workflow_dispatch: {} # Actions 탭에서 수동 실행 버튼으로도 바로 테스트 가능
 
 jobs:
