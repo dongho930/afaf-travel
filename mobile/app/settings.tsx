@@ -1,4 +1,5 @@
-import { CheckIcon, MoonIcon, SunIcon, type Icon } from "phosphor-react-native";
+import { useRouter } from "expo-router";
+import { CaretRightIcon, CheckIcon, MoonIcon, SunIcon, type Icon } from "phosphor-react-native";
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { fontFamily } from "../constants/fonts";
@@ -14,10 +15,11 @@ const OPTIONS: { mode: ThemeMode; icon: Icon; label: string; desc: string }[] = 
 
 /**
  * 프로필 화면의 '설정'을 눌러서 들어오는 화면입니다. 화면 테마(라이트/다크)
- * 선택과 데이터 출처 표기가 있습니다. 테마는 선택하면 즉시 앱 전체에 반영되고,
+ * 선택, 데이터 출처 표기, 개인정보처리방침 링크가 있습니다. 테마는 선택하면 즉시 앱 전체에 반영되고,
  * 다음에 앱을 다시 켜도 그대로 유지됩니다(AsyncStorage에 저장).
  */
 export default function SettingsScreen() {
+  const router = useRouter();
   const { theme, colors, setTheme } = useTheme();
   const styles = makeStyles(colors);
 
@@ -55,6 +57,17 @@ export default function SettingsScreen() {
         <Text style={styles.creditLabel}>관광지 정보 · 사진</Text>
         <Text style={styles.creditValue}>출처: ⓒ한국관광콘텐츠랩</Text>
       </View>
+
+      <Text style={[styles.sectionTitle, styles.sectionSpacing]}>약관 및 정책</Text>
+      <TouchableOpacity
+        style={[styles.creditCard, styles.linkRow]}
+        onPress={() => router.push("/privacy")}
+        accessibilityRole="link"
+        accessibilityLabel="개인정보처리방침 보기"
+      >
+        <Text style={styles.creditValue}>개인정보처리방침</Text>
+        <CaretRightIcon size={16} color={colors.textSecondary} weight="bold" />
+      </TouchableOpacity>
     </View>
   );
 }
@@ -74,6 +87,7 @@ function makeStyles(colors: ThemeColors) {
       padding: spacing.lg,
       gap: spacing.xs,
     },
+    linkRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
     creditLabel: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textSecondary },
     creditValue: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.text },
     optionCard: {

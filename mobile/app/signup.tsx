@@ -150,6 +150,14 @@ export default function SignupScreen() {
         {isSubmitting ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={styles.buttonText}>회원가입</Text>}
       </Pressable>
 
+      <Text style={styles.consentText}>
+        가입 시 수집하는 정보와 이용 목적은{"\n"}
+        <Text style={styles.consentLink} onPress={() => router.push("/privacy")} accessibilityRole="link">
+          개인정보처리방침
+        </Text>
+        에서 확인할 수 있어요.
+      </Text>
+
       <Pressable onPress={() => router.dismissTo("/login")} style={styles.linkButton}>
         <Text style={styles.linkText}>이미 계정이 있으신가요? 로그인</Text>
       </Pressable>
@@ -183,6 +191,15 @@ function makeStyles(colors: ThemeColors) {
   },
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: colors.onPrimary, fontSize: 16, fontFamily: fontFamily.bold },
+  consentText: {
+    marginTop: spacing.md,
+    fontSize: 12,
+    fontFamily: fontFamily.regular,
+    color: colors.textSecondary,
+    textAlign: "center",
+    lineHeight: 18,
+  },
+  consentLink: { fontFamily: fontFamily.semiBold, color: colors.primary, textDecorationLine: "underline" },
   linkButton: { marginTop: spacing.lg + 2, alignItems: "center" },
   linkText: { color: colors.primary, fontSize: 14, fontFamily: fontFamily.semiBold },
   });

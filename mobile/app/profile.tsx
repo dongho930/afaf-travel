@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system/legacy";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import { useRouter } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 import { CameraIcon } from "phosphor-react-native";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
@@ -19,7 +19,8 @@ import { radius, spacing } from "../constants/tokens";
 /**
  * 첫 화면에서 프로필 사진(아바타)을 누르면 들어오는 화면입니다.
  * 아이디/프로필 사진을 바꿀 수 있고, 비밀번호도 여기서 변경합니다.
- * '설정' 항목을 누르면 테마(라이트/다크) 설정 화면으로 이동합니다.
+ * '설정' 항목을 누르면 테마(라이트/다크) 설정 화면으로, '개인정보처리방침'을
+ * 누르면 방침 화면으로 이동합니다.
  *
  * 프로필 사진은 base64로 인코딩해서 백엔드로 보내고, 백엔드가 서비스 키(관리자
  * 권한)로 Supabase Storage에 대신 업로드합니다 — 클라이언트가 직접 Storage에
@@ -27,7 +28,7 @@ import { radius, spacing } from "../constants/tokens";
  */
 export default function ProfileScreen() {
   const router = useRouter();
-  const { session, signOut, changePassword } = useAuth();
+  const { session, loading: authLoading, signOut, changePassword } = useAuth();
   // 프로필은 앱 전체가 공유합니다(ProfileContext) — 이 화면에서 바꾼 내용이
   // 각 탭 상단의 프로필 버튼에도 곧바로 반영되고, 화면에 들어올 때마다 다시
   // 조회하느라 기다릴 필요도 없습니다.
@@ -46,10 +47,8 @@ export default function ProfileScreen() {
   const [isSavingPassword, setIsSavingPassword] = useState(false);
 
   useEffect(() => {
-    if (!session) {
-      router.replace("/login");
-      return;
-    }
+    // 로그인하지 않은 경우의 이동은 아래 <Redirect>가 맡습니다.
+    if (!session) return;
     // 이미 갖고 있는 값으로 화면을 먼저 그리고, 최신 값은 뒤에서 조용히 받아옵니다.
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -135,9 +134,15 @@ export default function ProfileScreen() {
     }
   };
 
+  // 웹에서 /profile을 새로고침하면 저장된 로그인 세션을 복원하는 동안 session이
+  // 잠깐 비어 있습니다. 그때 바로 로그인 화면으로 보내면 로그인한 사람도 튕겨 나가고,
+  // 화면 틀이 준비되기 전에 이동을 시도해 오류가 나므로 복원이 끝날 때까지 기다립니다.
+  // <Redirect>는 라우터가 준비된 뒤에 이동하므로 useEffect 안의 router.replace보다 안전합니다.
+  if (!authLoading && !session) return <Redirect href="/login" />;
+
   // 아직 한 번도 못 불러온 상태(앱을 켜자마자 바로 이 화면에 들어온 경우)에만
   // 로딩을 보여줍니다. 이미 값이 있으면 그걸 그대로 그리고 갱신은 뒤에서 합니다.
-  if (!loaded) {
+  if (authLoading || !loaded) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -218,6 +223,18 @@ export default function ProfileScreen() {
         <View style={styles.rowBetween}>
           <Text style={styles.sectionLabel}>설정</Text>
           <Text style={styles.linkText}>화면 테마 등 →</Text>
+        </View>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.section}
+        onPress={() => router.push("/privacy")}
+        accessibilityRole="link"
+        accessibilityLabel="개인정보처리방침 보기"
+      >
+        <View style={styles.rowBetween}>
+          <Text style={styles.sectionLabel}>개인정보처리방침</Text>
+          <Text style={styles.linkText}>보기 →</Text>
         </View>
       </TouchableOpacity>
 

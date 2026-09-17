@@ -74,6 +74,7 @@ function ThemedApp() {
               <Stack.Screen name="trip-detail" options={{ title: "여행 상세" }} />
               <Stack.Screen name="profile" options={{ title: "프로필" }} />
               <Stack.Screen name="settings" options={{ title: "설정" }} />
+              <Stack.Screen name="privacy" options={{ title: "개인정보처리방침" }} />
               <Stack.Screen name="attraction-detail" options={{ title: "관광지 상세" }} />
               <Stack.Screen name="post-create" options={{ title: "게시물 작성" }} />
               <Stack.Screen name="post-manage" options={{ title: "게시물 관리" }} />
