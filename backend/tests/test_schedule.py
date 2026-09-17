@@ -193,18 +193,18 @@ def test_그날_쉬는_곳인지_확실할_때만_알려준다():
     assert schedule.is_closed_on(irregular, monday) is False     # 확실하지 않으면 판단하지 않습니다
 
 
-# ---- 표시 시간 범위(09~22시) ----
+# ---- 표시 시간 범위(09~20시) ----
 
-def test_추천_시간은_아홉시와_스물두시_사이에_머문다():
-    """일정이 길어져 계산상 자정을 넘겨도 표시는 22:00에서 멈춰야 합니다.
+def test_추천_시간은_아홉시와_스무시_사이에_머문다():
+    """일정이 길어져 계산상 자정을 넘겨도 표시는 20:00에서 멈춰야 합니다.
     예전에는 25:00이 24시간 나머지 연산 때문에 '01:00'으로 감겨서, 새벽에
     가라는 것처럼 보였습니다."""
     far_apart = [_place(str(i), lat=37.0 + i, lng=127.0 + i) for i in range(6)]
 
     result = schedule.build_schedule(far_apart)
 
-    assert all("09:00" <= s.arrival_time <= "22:00" for s in result)
-    assert result[-1].arrival_time == "22:00"
+    assert all("09:00" <= s.arrival_time <= "20:00" for s in result)
+    assert result[-1].arrival_time == "20:00"
     # 시각만 멈출 뿐, 하루에 못 돈다는 사실은 그대로 알려줍니다.
     assert result[-1].fits_today is False
 
