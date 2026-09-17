@@ -399,7 +399,7 @@ export default function AttractionDetailScreen() {
           />
           {/* TourAPI 사진의 출처 표기(이용 조건). 사진 위라서 테마와 상관없이 어두운 배경 + 흰 글씨로 고정합니다. */}
           <View style={styles.heroCredit}>
-            <Text style={styles.heroCreditText}>ⓒ한국관광콘텐츠랩</Text>
+            <Text style={styles.heroCreditText}>출처: ⓒ한국관광콘텐츠랩</Text>
           </View>
         </View>
       ) : null}

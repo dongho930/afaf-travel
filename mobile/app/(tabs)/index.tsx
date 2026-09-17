@@ -840,6 +840,8 @@ export default function HomeScreen() {
             {loadingMore && <ActivityIndicator style={{ marginTop: spacing.sm }} color={colors.primary} />}
           </>
         ))}
+        {/* 이 화면의 여행지 정보·사진이 모두 관광공사 데이터라 출처를 목록 맨 아래에 표기합니다. */}
+        <Text style={styles.dataCredit}>출처: ⓒ한국관광콘텐츠랩</Text>
       </KeyboardAwareScrollView>
     </SafeAreaView>
   );
@@ -919,6 +921,7 @@ function makeStyles(colors: ThemeColors) {
     backgroundColor: colors.surfaceAlt,
   },
   logoSub: { fontSize: 12, fontFamily: fontFamily.medium, color: colors.textTertiary },
+  dataCredit: { marginTop: spacing.xl, fontSize: 12, fontFamily: fontFamily.regular, color: colors.textSecondary, textAlign: "center" },
 
   hero: {
     // 사진이 로드되기 전에도 항상 오버레이+흰 글자와 어울리는 어두운 배경을 써서,

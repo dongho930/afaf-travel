@@ -53,7 +53,7 @@ export default function SettingsScreen() {
       <Text style={[styles.sectionTitle, styles.sectionSpacing]}>데이터 출처</Text>
       <View style={styles.creditCard}>
         <Text style={styles.creditLabel}>관광지 정보 · 사진</Text>
-        <Text style={styles.creditValue}>출처 : ⓒ한국관광콘텐츠랩</Text>
+        <Text style={styles.creditValue}>출처: ⓒ한국관광콘텐츠랩</Text>
       </View>
     </View>
   );
