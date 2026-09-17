@@ -59,6 +59,7 @@ import {
 } from "../services/kakaoDirections";
 import { useTheme } from "../services/ThemeContext";
 import { Attraction, NearbyAttraction, PostItem, Review } from "../types";
+import { httpsImageUrl } from "../utils/imageUrl";
 
 // 카카오맵으로 실제로 여는 일은 services/kakaoDirections가 맡습니다 — 지도
 // 화면과 규칙(출발지 처리, 미설치 시 폴백, 수단 표기)을 한 곳에 모아뒀습니다.
@@ -388,7 +389,7 @@ export default function AttractionDetailScreen() {
       <FadeInView duration={280}>
       {attraction.image_url ? (
         <Image
-          source={{ uri: attraction.image_url }}
+          source={{ uri: httpsImageUrl(attraction.image_url) }}
           style={styles.heroImage}
           // 바로 아래에 이름이 읽히므로, 사진은 장식으로 두고 건너뜁니다.
           accessibilityElementsHidden
@@ -522,7 +523,7 @@ export default function AttractionDetailScreen() {
                   accessibilityHint="두 번 탭하면 이 장소를 봅니다"
                 >
                   {n.image_url ? (
-                    <Image source={{ uri: n.image_url }} style={styles.nearbyImage} />
+                    <Image source={{ uri: httpsImageUrl(n.image_url) }} style={styles.nearbyImage} />
                   ) : (
                     <View style={[styles.nearbyImage, styles.nearbyImagePlaceholder]}>
                       <MapPinIcon size={24} color={colors.primary} weight="bold" />

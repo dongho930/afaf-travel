@@ -36,6 +36,7 @@ import { api } from "../../services/api";
 import { useCourseContext } from "../../services/CourseContext";
 import { useTheme } from "../../services/ThemeContext";
 import { Attraction, RegionOption } from "../../types";
+import { httpsImageUrl } from "../../utils/imageUrl";
 
 // 서버(region-popularity, 매일 다시 계산되는 실사용 인기도 랭킹)에서 지역 칩을
 // 아직 못 받아왔거나 요청이 실패했을 때 보여줄 기본값입니다.
@@ -145,7 +146,11 @@ export default function HomeScreen() {
   // 배경 사진 후보를 갱신하고, 아직 히어로를 띄운 적이 없다면 첫 사진과 함께
   // 부드럽게 등장시킵니다. 최초 서버 응답과 저장해둔 내용(캐시) 양쪽에서 같은
   // 방식으로 등장해야 해서 함수로 빼뒀습니다.
-  const initHeroWithImages = (imageUrls: string[]) => {
+  const initHeroWithImages = (rawImageUrls: string[]) => {
+    // 저장해둔 캐시에는 평문 http:// 주소가 남아 있을 수 있는데, 앱에서는 그런
+    // 사진이 그려지지 않습니다(utils/imageUrl.ts 참고). 이 배경은 RN 기본
+    // Animated.Image라 FadeImage를 안 거치므로 여기서 직접 올려줍니다.
+    const imageUrls = rawImageUrls.map(httpsImageUrl);
     setHeroImageCandidates(imageUrls);
     if (heroInitializedRef.current) return;
     heroInitializedRef.current = true;

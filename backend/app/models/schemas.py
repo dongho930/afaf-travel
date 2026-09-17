@@ -1,7 +1,36 @@
 from enum import Enum
 from typing import Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+class HttpsImageUrl(BaseModel):
+    """
+    image_url의 http:// 를 https:// 로 올려주는 공통 규칙입니다.
+
+    TourAPI가 내려주는 사진 주소(firstimage)는 평문 http://tong.visitkorea.or.kr/...
+    입니다. 이 주소는 브라우저에서는 열리지만 앱에서는 사진이 통째로 안 나옵니다 —
+    안드로이드는 usesCleartextTraffic=false(app.json)와 targetSdk 28+ 기본 정책으로,
+    iOS는 ATS 기본 정책으로 평문 HTTP를 막기 때문입니다. 오류도 안 뜨고 그냥 빈
+    칸으로 보입니다.
+
+    같은 호스트가 https로도 똑같은 사진을 그대로 내려주는 것을 확인했기 때문에
+    (http/https 둘 다 200, 같은 바이트 수), 주소의 스킴만 바꿔주면 됩니다.
+
+    모델(직렬화 경계)에 두는 이유: 사진 주소는 TourAPI 응답뿐 아니라 Supabase
+    캐시에서도 올라옵니다. 캐시에는 이미 http:// 로 저장된 값이 쌓여 있어서,
+    TourAPI를 읽는 자리만 고치면 캐시가 새로 채워질 때까지 계속 http:// 가
+    나갑니다. 여기서 막으면 어느 경로로 들어온 값이든 앱에 나갈 때는 https 입니다.
+    """
+
+    # check_fields=False — 이 믹스인 자체에는 image_url 필드가 없고,
+    # 물려받는 모델에만 있습니다.
+    @field_validator("image_url", check_fields=False)
+    @classmethod
+    def _force_https_image_url(cls, value: Optional[str]) -> Optional[str]:
+        if value and value.startswith("http://"):
+            return "https://" + value[len("http://") :]
+        return value
 
 
 class UserType(str, Enum):
@@ -127,7 +156,7 @@ class InfoField(BaseModel):
     value: str
 
 
-class Attraction(BaseModel):
+class Attraction(HttpsImageUrl):
     content_id: str
     name: str
     address: str
@@ -347,7 +376,7 @@ class SavedCourseDetail(BaseModel):
     created_at: Optional[str] = None
 
 
-class NearbyAttraction(BaseModel):
+class NearbyAttraction(HttpsImageUrl):
     """관광지 상세 페이지 '근처 가볼 만한 곳' 목록 항목"""
     content_id: str
     name: str
@@ -356,7 +385,7 @@ class NearbyAttraction(BaseModel):
     distance_km: float
 
 
-class AccessibilityPlaceScore(BaseModel):
+class AccessibilityPlaceScore(HttpsImageUrl):
     """'접근성' 탭의 '휠체어 주요 여행지' 목록 항목"""
     # content_id를 나중에 추가하면서, 그 전에 캐시된 accessibility_stats 데이터에는
     # 이 필드가 없어서 필수로 두면 그 캐시를 읽을 때마다 검증 에러로 API 전체가
