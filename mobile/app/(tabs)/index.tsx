@@ -18,7 +18,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { KeyboardAwareScrollView, useKeyboardState } from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AccessibilityIcons, accessibilityFeatureLabels } from "../../components/AccessibilityIcons";
 import { AnimatedChip } from "../../components/AnimatedChip";
@@ -74,6 +74,11 @@ export default function HomeScreen() {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const { setPendingQueryText } = useCourseContext();
+  // 떠 있는 검색 버튼을 키보드가 올라온 동안 숨기려고 씁니다. selector로 isVisible만
+  // 골라 받아서 키보드 높이가 바뀔 때마다 화면 전체가 다시 그려지지 않게 합니다.
+  // (웹에서는 이 라이브러리가 아무 이벤트도 보내지 않아 항상 false입니다 — 브라우저는
+  // 화면 키보드가 따로 없으니 버튼이 계속 보이는 게 맞습니다.)
+  const keyboardVisible = useKeyboardState((state) => state.isVisible);
   const [searchText, setSearchText] = useState("");
   const [selectedRegion, setSelectedRegion] = useState("전체");
   const [selectedCategory, setSelectedCategory] = useState("전체");
@@ -636,20 +641,7 @@ export default function HomeScreen() {
             </View>
             <Text style={styles.logoSub}>당신만을 위한 여행 가이드</Text>
           </View>
-          <View style={styles.headerActions}>
-            {/* 아래 히어로의 검색창은 문장을 AI 플래너로 넘기는 입구입니다.
-                장소 이름을 이미 아는 사람을 위해, 바로 찾아 들어가는 길을 따로 둡니다. */}
-            <TouchableOpacity
-              style={styles.headerIconButton}
-              onPress={() => router.push("/search")}
-              accessibilityRole="button"
-              accessibilityLabel="여행지 검색"
-              accessibilityHint="이름으로 여행지를 찾아 상세 정보를 봅니다"
-            >
-              <MagnifyingGlassIcon size={19} color={colors.text} weight="bold" />
-            </TouchableOpacity>
-            <ProfileButton />
-          </View>
+          <ProfileButton />
         </View>
 
         <Animated.View style={[styles.hero, { opacity: heroContentOpacity }]}>
@@ -846,6 +838,23 @@ export default function HomeScreen() {
           </>
         ))}
       </KeyboardAwareScrollView>
+
+      {/* 이름을 이미 아는 곳을 바로 찾아 들어가는 입구입니다(히어로의 검색창은
+          문장을 AI 플래너로 넘기는 다른 길). 예전에는 헤더 우상단 아이콘이었는데,
+          한 손으로 잡았을 때 엄지가 닿는 하단바 바로 위로 내렸습니다.
+          키보드가 올라온 동안에는 숨깁니다 — 히어로 검색창에 입력하는 중에
+          키보드 바로 위에 버튼이 따라붙어 거슬리기 때문입니다. */}
+      {!keyboardVisible && (
+        <Pressable
+          style={({ pressed }) => [styles.searchFab, pressed && styles.searchFabPressed]}
+          onPress={() => router.push("/search")}
+          accessibilityRole="button"
+          accessibilityLabel="여행지 검색"
+          accessibilityHint="이름으로 여행지를 찾아 상세 정보를 봅니다"
+        >
+          <MagnifyingGlassIcon size={24} color={colors.onPrimary} weight="bold" />
+        </Pressable>
+      )}
     </SafeAreaView>
   );
 }
@@ -910,20 +919,33 @@ function AnimatedCountUpText({ value, style }: { value: number | null; style: Te
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { padding: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.xxl + spacing.lg },
+  // 아래쪽 여백은 떠 있는 검색 버튼(56)이 차지하는 만큼 더 둡니다 — 그래야 끝까지
+  // 내렸을 때 마지막 여행지 카드가 버튼에 가려지지 않습니다(게시물 탭과 같은 값).
+  container: { padding: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.xxl + 48 },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.xl - 2 },
   logoRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  // 프로필 아바타(34)와 같은 크기로 맞춰 두 버튼이 한 줄에서 나란히 보입니다.
-  headerIconButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+  logoSub: { fontSize: 12, fontFamily: fontFamily.medium, color: colors.textTertiary },
+
+  // 하단바 바로 위 오른쪽에 떠 있는 검색 버튼. 루트 레이아웃(app/_layout.tsx)이
+  // 화면 영역과 하단바를 세로로 쌓아두기 때문에, 여기서 bottom은 곧 하단바의
+  // 윗변 기준입니다 — 안전영역을 따로 더할 필요가 없습니다.
+  searchFab: {
+    position: "absolute",
+    right: spacing.xl,
+    bottom: spacing.lg,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.primary,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: colors.surfaceAlt,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 4,
   },
-  logoSub: { fontSize: 12, fontFamily: fontFamily.medium, color: colors.textTertiary },
+  searchFabPressed: { opacity: 0.85 },
 
   hero: {
     // 사진이 로드되기 전에도 항상 오버레이+흰 글자와 어울리는 어두운 배경을 써서,
