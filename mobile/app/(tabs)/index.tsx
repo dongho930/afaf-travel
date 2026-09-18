@@ -22,7 +22,9 @@ import { KeyboardAwareScrollView, useKeyboardState } from "react-native-keyboard
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AccessibilityIcons, accessibilityFeatureLabels } from "../../components/AccessibilityIcons";
 import { AnimatedChip } from "../../components/AnimatedChip";
+import { useFocusEffect } from "expo-router";
 import { AppLogo } from "../../components/AppLogo";
+import { HeroBackdrop } from "../../components/HeroBackdrop";
 import { EXTRA_INFO_LABELS_BY_CATEGORY, renderExtraInfo as renderExtraInfoRow } from "../../components/ExtraInfoList";
 import { DATA_CREDIT_TEXT } from "../../components/DataCredit";
 import { FadeInView } from "../../components/FadeInView";
@@ -34,6 +36,7 @@ import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
 import { radius, spacing } from "../../constants/tokens";
 import { api } from "../../services/api";
+import { withRetry } from "../../services/retry";
 import { useCourseContext } from "../../services/CourseContext";
 import { useTheme } from "../../services/ThemeContext";
 import { Attraction, RegionOption } from "../../types";
@@ -100,23 +103,10 @@ export default function HomeScreen() {
   // 겹쳐두고 하나씩 번갈아 투명도를 애니메이션합니다(둘 다 같은 실제 사진칸
   // 자리에 절대 위치로 겹쳐 있고, opacity만 서로 반대로 움직입니다).
   const [heroImageCandidates, setHeroImageCandidates] = useState<string[]>([]);
-  const [hero, setHero] = useState<{ a: string | null; b: string | null; visible: "a" | "b" }>({
-    a: null,
-    b: null,
-    visible: "a",
-  });
-  const heroRef = useRef(hero);
-  useEffect(() => {
-    heroRef.current = hero;
-  }, [hero]);
-  // 지역 목록이 뒤늦게 도착하면 여행지 목록 조회 useEffect가 한 번 더
-  // 실행되는데, 그때마다 배경 사진을 즉시(애니메이션 없이) 다시 뽑아버리면
-  // "첫 사진 → 뚝 끊기고 다음 사진 → 그 이후부터 부드러움" 현상이 생깁니다.
-  // 배경 사진은 최초 1회만 즉시 세팅하고, 그 뒤로는 3초 크로스페이드
-  // 인터벌만 사진을 바꾸도록 이 플래그로 막습니다.
+  // 배경 사진 자체(어느 사진을 언제 바꿀지)는 HeroBackdrop이 들고 있습니다 —
+  // 여기 두면 3초마다 홈 화면 전체가 다시 그려집니다. 여기서는 배너 묶음을
+  // 처음 한 번 나타내는 일만 합니다.
   const heroInitializedRef = useRef(false);
-  const heroOpacityA = useRef(new Animated.Value(1)).current;
-  const heroOpacityB = useRef(new Animated.Value(0)).current;
   // 배지/제목/설명/검색창 묶음은 배경 사진이 아예 없을 때는 숨겨뒀다가, 첫
   // 사진이 크로스페이드로 나타나는 타이밍에 맞춰 함께 부드럽게 나타납니다.
   const heroContentOpacity = useRef(new Animated.Value(0)).current;
@@ -163,14 +153,6 @@ export default function HomeScreen() {
     // 사진이 하나도 없는 경우(전부 이미지 URL 없음)에도 히어로 문구 자체는
     // 떠야 합니다 — 안 그러면 통계/인기 여행지 등장 순서가 영영 다음 단계로
     // 못 넘어갑니다. 이때는 사진 레이어 없이 배경색만으로 보여집니다.
-    if (imageUrls.length > 0) {
-      // 히어로 박스 전체(사진+글자)를 heroContentOpacity로 한 번에 나타내므로,
-      // 사진 레이어 자체는 처음부터 보이는 상태(1)로 둡니다 — 안 그러면 박스가
-      // 나타난 뒤 사진이 한 번 더 페이드인되어 두 단계로 나뉘어 보입니다.
-      heroOpacityA.setValue(1);
-      heroOpacityB.setValue(0);
-      setHero({ a: imageUrls[Math.floor(Math.random() * imageUrls.length)], b: null, visible: "a" });
-    }
     Animated.timing(heroContentOpacity, { toValue: 1, duration: 900, useNativeDriver: true }).start(() => {
       // 통계는 히어로가 다 나타난 뒤에만 등장 허용(이미 2단계 이상이면 유지).
       setRevealStage((s) => Math.max(s, 1));
@@ -226,16 +208,14 @@ export default function HomeScreen() {
     // 여기서 쓰는 건 이 숫자 하나뿐이라 목록은 빼고 받아옵니다(include_places=false).
     // 예전에는 6개 카테고리 × 최대 200곳(약 240KB)을 통째로 받아서 숫자 하나만
     // 꺼내 쓰고 나머지는 버렸습니다 — 홈 화면을 열 때마다 매번요.
-    api
-      .getAccessibilitySummary("경기도", false)
+    withRetry(() => api.getAccessibilitySummary("경기도", false))
       .then((s) => setTotalAccessibleCount(s.total_accessible_count))
       .catch(() => setTotalAccessibleCount(null))
       .finally(markStatSettled);
 
     // '지원 지역' 개수는 실제 시/군/구 목록의 개수이자, 지역 칩(수원/용인/...)을
     // 실제 시군구 코드로 변환하는 데도 이 목록을 그대로 씁니다.
-    api
-      .listRegions("경기도")
+    withRetry(() => api.listRegions("경기도"))
       .then((regions) => {
         setRegionOptions(regions);
         setSupportedRegionCount(regions.length);
@@ -254,6 +234,18 @@ export default function HomeScreen() {
       })
       .catch((err) => console.warn("[지역 칩] 불러오지 못했습니다:", err));
   }, []);
+
+  // 위 조회는 앱을 켤 때 한 번만 돕니다. 그런데 탭 화면은 언마운트되지 않아서,
+  // 그 한 번이 실패하면 '무장애 여행지' 숫자 자리가 앱을 껐다 켤 때까지 계속
+  // 비어 있었습니다. 홈으로 돌아올 때마다 아직 못 받은 값만 다시 받아옵니다.
+  useFocusEffect(
+    React.useCallback(() => {
+      if (totalAccessibleCount != null) return;
+      withRetry(() => api.getAccessibilitySummary("경기도", false))
+        .then((s) => setTotalAccessibleCount(s.total_accessible_count))
+        .catch(() => {}); // 또 실패해도 다음 진입 때 다시 시도합니다.
+    }, [totalAccessibleCount])
+  );
 
   // 지난번에 저장해둔 홈 화면 내용을 먼저 그려줍니다. 서버 응답을 기다리는
   // 동안 빈 화면을 보고 있을 필요가 없어져서, 두 번째 실행부터는 앱을 켜자마자
@@ -397,30 +389,6 @@ export default function HomeScreen() {
         }
       });
   }, [selectedRegion, matchedRegionKey]);
-
-  // 히어로 배경 사진을 3초마다 후보 목록에서 무작위로 다시 골라 바꿉니다.
-  // 지금 보이지 않는(opacity 0) 레이어에 다음 사진을 미리 얹어두고, 두
-  // 레이어의 opacity를 동시에 서로 반대로 애니메이션해서 깜빡임 없이
-  // 크로스페이드되게 합니다(바로 직전 사진은 후보에서 빼서 연달아 나오지 않게 함).
-  React.useEffect(() => {
-    if (heroImageCandidates.length <= 1) return;
-    const timer = setInterval(() => {
-      const prev = heroRef.current;
-      const currentUrl = prev.visible === "a" ? prev.a : prev.b;
-      const pool = heroImageCandidates.filter((url) => url !== currentUrl);
-      if (pool.length === 0) return;
-      const nextUrl = pool[Math.floor(Math.random() * pool.length)];
-      const nextLayer: "a" | "b" = prev.visible === "a" ? "b" : "a";
-      const fadeOut = prev.visible === "a" ? heroOpacityA : heroOpacityB;
-      const fadeIn = nextLayer === "a" ? heroOpacityA : heroOpacityB;
-      setHero({ ...prev, [nextLayer]: nextUrl, visible: nextLayer });
-      Animated.parallel([
-        Animated.timing(fadeOut, { toValue: 0, duration: 900, useNativeDriver: true }),
-        Animated.timing(fadeIn, { toValue: 1, duration: 900, useNativeDriver: true }),
-      ]).start();
-    }, 3000);
-    return () => clearInterval(timer);
-  }, [heroImageCandidates, heroOpacityA, heroOpacityB]);
 
   // 주어진 카드들 중 아직 부가 정보(이용시간/요금 등)가 없는 것만 골라 따로
   // 불러와서 채웁니다. 카테고리 탭 전환(아래 useEffect)처럼 이미 화면에 나와
@@ -645,24 +613,7 @@ export default function HomeScreen() {
         </View>
 
         <Animated.View style={[styles.hero, { opacity: heroContentOpacity }]}>
-          <Animated.Image
-            source={hero.a ? { uri: hero.a } : undefined}
-            style={[styles.heroImageLayer, { opacity: heroOpacityA }]}
-            resizeMode="cover"
-            // 3초마다 바뀌는 배경 장식이라, 스크린리더에는 방해만 됩니다.
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-            aria-hidden
-          />
-          <Animated.Image
-            source={hero.b ? { uri: hero.b } : undefined}
-            style={[styles.heroImageLayer, { opacity: heroOpacityB }]}
-            resizeMode="cover"
-            // 3초마다 바뀌는 배경 장식이라, 스크린리더에는 방해만 됩니다.
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-            aria-hidden
-          />
+          <HeroBackdrop imageUrls={heroImageCandidates} style={styles.heroImageLayer} />
           <View style={styles.heroOverlay} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden />
           {/* 배경 사진(관광공사 데이터)의 출처. 장식 사진과 같이 스크린리더는 건너뜁니다. */}
           <Text style={styles.heroCredit} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden>

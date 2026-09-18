@@ -1,10 +1,12 @@
 import { Image } from "expo-image";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { NotePencilIcon, XIcon, type Icon } from "phosphor-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Alert } from "../../services/crossPlatformAlert";
+import { withRetry } from "../../services/retry";
+import { storage } from "../../services/storage";
 import { ActionButton } from "../../components/ActionButton";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { AccessibilityIcons, accessibilityFeatureLabels } from "../../components/AccessibilityIcons";
@@ -244,6 +246,9 @@ export default function AccessibilityScreen() {
   // 덮어쓰는 걸 막습니다 (응답이 올 때 아직 그 카테고리인지 확인).
   const placesRequestRef = useRef(0);
 
+  // 재시도까지 다 실패했을 때만 true. 화면에 안내와 '다시 시도' 버튼을 띄웁니다.
+  const [summaryFailed, setSummaryFailed] = useState(false);
+  const [placesFailed, setPlacesFailed] = useState(false);
   const [reports, setReports] = useState<AccessibilityReport[]>([]);
   const [loadingReports, setLoadingReports] = useState(true);
 
@@ -258,42 +263,78 @@ export default function AccessibilityScreen() {
 
   // 숫자만 받아옵니다(include_places=false). 목록은 아래에서 고른 카테고리만
   // 따로 받아오므로, 여기서 6개 카테고리 목록을 다 받을 이유가 없습니다.
-  useEffect(() => {
-    api
-      .getAccessibilitySummary("경기도", false)
-      .then(setSummary)
-      .catch(() => setSummary(null))
-      .finally(() => setLoading(false));
+  //
+  // 서버가 잠깐 답하지 못하는 일이 하루 한두 번 있습니다(캐시 테이블 읽기가
+  // 순간적으로 거부됨). 예전에는 그 한 번에 여섯 유형이 전부 '-'가 되고, 탭
+  // 화면은 언마운트되지 않아 앱을 껐다 켤 때까지 그대로였습니다. 이제
+  // ⑴ 지난번 값을 먼저 보여주고 ⑵ 몇 번 다시 시도하고 ⑶ 그래도 안 되면
+  // 화면에 알려서 사용자가 직접 다시 시도할 수 있게 합니다.
+  const loadSummary = useCallback(async () => {
+    setSummaryFailed(false);
+    try {
+      const fresh = await withRetry(() => api.getAccessibilitySummary("경기도", false));
+      setSummary(fresh);
+      storage.saveAccessibilitySummary(fresh).catch(() => {}); // 저장 실패는 화면과 무관합니다.
+    } catch {
+      setSummaryFailed(true);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  // 카테고리가 바뀌면 그 카테고리의 첫 묶음을 새로 받아옵니다.
   useEffect(() => {
+    // 저장해둔 값이 있으면 먼저 그려서, 응답을 기다리는 동안 '-'가 보이지 않게 합니다.
+    storage
+      .loadAccessibilitySummary()
+      .then((cached) => {
+        if (cached) setSummary((current) => current ?? cached);
+      })
+      .catch(() => {});
+    loadSummary();
+  }, [loadSummary]);
+
+  // 고른 카테고리의 첫 묶음을 받아옵니다. '다시 시도' 버튼과 탭 재진입도
+  // 같은 함수를 부르므로 따로 떼어뒀습니다.
+  const loadPlaces = useCallback(async () => {
     const requestId = ++placesRequestRef.current;
     const category = REPORT_CATEGORY_MAP[selectedCategory];
     setLoadingPlaces(true);
+    setPlacesFailed(false);
     setPlaces([]);
     setPlacesTotal(0);
     placesOffsetRef.current = 0;
 
-    api
-      .getAccessibilityPlaces(category, 0, PLACES_FETCH_PAGE_SIZE)
-      .then((page) => {
-        // 그 사이에 카테고리를 또 바꿨으면 이 응답은 버립니다.
-        if (requestId !== placesRequestRef.current) return;
-        setPlaces(page.items);
-        setPlacesTotal(page.total);
-        placesOffsetRef.current = page.items.length;
-      })
-      .catch(() => {
-        if (requestId !== placesRequestRef.current) return;
-        setPlaces([]);
-        setPlacesTotal(0);
-      })
-      .finally(() => {
-        if (requestId !== placesRequestRef.current) return;
-        setLoadingPlaces(false);
-      });
+    try {
+      const page = await withRetry(() => api.getAccessibilityPlaces(category, 0, PLACES_FETCH_PAGE_SIZE));
+      // 그 사이에 카테고리를 또 바꿨으면 이 응답은 버립니다.
+      if (requestId !== placesRequestRef.current) return;
+      setPlaces(page.items);
+      setPlacesTotal(page.total);
+      placesOffsetRef.current = page.items.length;
+    } catch {
+      if (requestId !== placesRequestRef.current) return;
+      setPlaces([]);
+      setPlacesTotal(0);
+      // '아직 없어요'와 '못 받아왔어요'는 사용자가 할 일이 다릅니다.
+      setPlacesFailed(true);
+    } finally {
+      if (requestId === placesRequestRef.current) setLoadingPlaces(false);
+    }
   }, [selectedCategory]);
+
+  // 카테고리가 바뀌면 그 카테고리의 첫 묶음을 새로 받아옵니다.
+  useEffect(() => {
+    loadPlaces();
+  }, [loadPlaces]);
+
+  // 탭에 다시 들어올 때, 아직 값을 못 받았으면 한 번 더 시도합니다.
+  useFocusEffect(
+    useCallback(() => {
+      if (summary == null) loadSummary();
+      if (placesFailed) loadPlaces();
+    }, [summary, loadSummary, placesFailed, loadPlaces])
+  );
+
 
   // '더보기': 이미 받아둔 목록으로 채울 수 있으면 그냥 더 보여주고, 다 썼으면
   // 다음 묶음을 서버에서 받아옵니다.
@@ -309,8 +350,7 @@ export default function AccessibilityScreen() {
     const requestId = placesRequestRef.current;
     const category = REPORT_CATEGORY_MAP[selectedCategory];
     setLoadingMorePlaces(true);
-    api
-      .getAccessibilityPlaces(category, placesOffsetRef.current, PLACES_FETCH_PAGE_SIZE)
+    withRetry(() => api.getAccessibilityPlaces(category, placesOffsetRef.current, PLACES_FETCH_PAGE_SIZE))
       .then((page) => {
         if (requestId !== placesRequestRef.current) return;
         setPlaces((prev) => [...prev, ...page.items]);
@@ -458,6 +498,20 @@ export default function AccessibilityScreen() {
           ))}
         </View>
 
+        {summaryFailed && summary == null && (
+          <Pressable
+            style={({ pressed }) => [styles.loadFailedRow, pressed && styles.pressedFeedback]}
+            onPress={loadSummary}
+            accessibilityRole="button"
+            accessibilityLabel="접근성 정보를 다시 불러오기"
+          >
+            <Text style={styles.loadFailedText}>
+              접근성 정보를 불러오지 못했어요. 잠시 후 다시 시도해주세요.
+            </Text>
+            <Text style={styles.loadFailedAction}>다시 시도</Text>
+          </Pressable>
+        )}
+
         <View style={styles.legendRow}>
           <View style={styles.legendItem}>
             <View style={[styles.legendDot, { backgroundColor: colors.primary }]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden />
@@ -560,6 +614,16 @@ export default function AccessibilityScreen() {
           <Text style={styles.emptyText} accessibilityLiveRegion="polite">
             {selectedMeta.label} 주요 여행지를 불러오는 중이에요.
           </Text>
+        ) : placesFailed ? (
+          <Pressable
+            style={({ pressed }) => [styles.loadFailedRow, pressed && styles.pressedFeedback]}
+            onPress={loadPlaces}
+            accessibilityRole="button"
+            accessibilityLabel="주요 여행지를 다시 불러오기"
+          >
+            <Text style={styles.loadFailedText}>주요 여행지를 불러오지 못했어요.</Text>
+            <Text style={styles.loadFailedAction}>다시 시도</Text>
+          </Pressable>
         ) : (
           <Text style={styles.emptyText}>
             {selectedMeta.label} 관련 편의시설 정보가 있는 장소가 아직 없어요.
@@ -772,6 +836,21 @@ function makeStyles(colors: ThemeColors) {
   categoryDot: { width: 4, height: 4, borderRadius: 2, marginTop: -4 },
   mockBadge: { fontSize: 10, color: colors.warning, fontFamily: fontFamily.semiBold },
 
+  // 숫자를 못 받아왔을 때만 뜨는 줄. '-'만 남으면 사용자는 앱이 고장났다고
+  // 생각하게 되므로, 무슨 일인지와 다시 해볼 방법을 함께 보여줍니다.
+  loadFailedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.md,
+    backgroundColor: colors.warningLight,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md + 2,
+    paddingVertical: spacing.md,
+    marginBottom: spacing.md,
+  },
+  loadFailedText: { flex: 1, fontSize: 13, fontFamily: fontFamily.medium, color: colors.warningText, lineHeight: 18 },
+  loadFailedAction: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.warningText },
   legendRow: { flexDirection: "row", gap: spacing.lg, marginBottom: spacing.sm },
   legendItem: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2 },
   legendDot: { width: 8, height: 8, borderRadius: 4 },
