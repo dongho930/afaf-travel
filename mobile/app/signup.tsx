@@ -10,10 +10,12 @@ import {
 } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Alert } from "../services/crossPlatformAlert";
+import { ConsentCheckbox } from "../components/ConsentCheckbox";
 import { api } from "../services/api";
 import { useAuth } from "../services/AuthContext";
 import { useTheme } from "../services/ThemeContext";
 import { fontFamily } from "../constants/fonts";
+import { SIGNUP_CONSENT_ITEMS, SIGNUP_CONSENT_REFUSAL_NOTICE } from "../constants/privacyPolicy";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
 
@@ -28,6 +30,9 @@ export default function SignupScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
+  // 반드시 해제된 상태로 시작합니다 — 미리 체크해두면 이용자가 스스로 한 선택이
+  // 아니어서 명시적 동의로 인정되지 않습니다.
+  const [privacyAgreed, setPrivacyAgreed] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // 로그인 화면으로 돌아갈 때는 replace/push 대신 dismissTo 를 씁니다 — replace 는
@@ -52,6 +57,12 @@ export default function SignupScreen() {
     }
     if (password !== passwordConfirm) {
       Alert.alert("비밀번호가 일치하지 않아요", "다시 확인해주세요.");
+      return;
+    }
+    // 동의 없이는 어떤 정보도 서버로 보내지 않습니다. 버튼을 잠가두지만,
+    // 여기서도 한 번 더 막아 개인정보가 수집되는 경로를 하나로 유지합니다.
+    if (!privacyAgreed) {
+      Alert.alert("동의가 필요해요", "개인정보 수집·이용에 동의해주셔야 회원가입을 진행할 수 있어요.");
       return;
     }
 
@@ -143,21 +154,42 @@ export default function SignupScreen() {
         onChangeText={setPasswordConfirm}
       />
 
+      {/* 개인정보를 수집하기 '전에' 무엇을 왜 받는지 보여주고 동의를 받습니다.
+          방침 전문으로 보내기만 하면 이용자가 내용을 모른 채 가입하게 되고,
+          스토어 검증에서도 명시적 동의 절차로 인정되지 않습니다. */}
+      <View style={styles.consentBox}>
+        <Text style={styles.consentTitle} accessibilityRole="header">
+          개인정보 수집·이용 안내
+        </Text>
+        {SIGNUP_CONSENT_ITEMS.map((item) => (
+          <View key={item.label} style={styles.consentRow}>
+            <Text style={styles.consentLabel}>{item.label}</Text>
+            <Text style={styles.consentValue}>{item.value}</Text>
+          </View>
+        ))}
+        <Text style={styles.consentNotice}>{SIGNUP_CONSENT_REFUSAL_NOTICE}</Text>
+        <Pressable onPress={() => router.push("/privacy")} accessibilityRole="link" hitSlop={8}>
+          <Text style={styles.consentLink}>개인정보처리방침 전문 보기</Text>
+        </Pressable>
+      </View>
+
+      <ConsentCheckbox
+        checked={privacyAgreed}
+        onChange={setPrivacyAgreed}
+        required
+        label="개인정보 수집·이용에 동의합니다"
+      />
+
       <Pressable
-        style={[styles.button, isSubmitting && styles.buttonDisabled]}
+        style={[styles.button, (isSubmitting || !privacyAgreed) && styles.buttonDisabled]}
         onPress={handleSignup}
-        disabled={isSubmitting}
+        disabled={isSubmitting || !privacyAgreed}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: isSubmitting || !privacyAgreed }}
+        accessibilityHint={privacyAgreed ? undefined : "개인정보 수집·이용에 동의하셔야 누를 수 있어요"}
       >
         {isSubmitting ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={styles.buttonText}>회원가입</Text>}
       </Pressable>
-
-      <Text style={styles.consentText}>
-        가입 시 수집하는 정보와 이용 목적은{"\n"}
-        <Text style={styles.consentLink} onPress={() => router.push("/privacy")} accessibilityRole="link">
-          개인정보처리방침
-        </Text>
-        에서 확인할 수 있어요.
-      </Text>
 
       <Pressable onPress={() => router.dismissTo("/login")} style={styles.linkButton}>
         <Text style={styles.linkText}>이미 계정이 있으신가요? 로그인</Text>
@@ -192,15 +224,32 @@ function makeStyles(colors: ThemeColors) {
   },
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: colors.onPrimary, fontSize: 16, fontFamily: fontFamily.bold },
-  consentText: {
-    marginTop: spacing.md,
+  consentBox: {
+    marginTop: spacing.sm,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md + 2,
+    gap: spacing.sm,
+  },
+  consentTitle: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.text },
+  consentRow: { flexDirection: "row", gap: spacing.sm },
+  consentLabel: { width: 62, fontSize: 12, fontFamily: fontFamily.semiBold, color: colors.textTertiary },
+  consentValue: { flex: 1, fontSize: 12, fontFamily: fontFamily.regular, color: colors.text, lineHeight: 18 },
+  consentNotice: {
     fontSize: 12,
     fontFamily: fontFamily.regular,
     color: colors.textSecondary,
-    textAlign: "center",
     lineHeight: 18,
+    marginTop: spacing.xs,
   },
-  consentLink: { fontFamily: fontFamily.semiBold, color: colors.primary, textDecorationLine: "underline" },
+  consentLink: {
+    fontSize: 12,
+    fontFamily: fontFamily.semiBold,
+    color: colors.primary,
+    textDecorationLine: "underline",
+  },
   linkButton: { marginTop: spacing.lg + 2, alignItems: "center" },
   linkText: { color: colors.primary, fontSize: 14, fontFamily: fontFamily.semiBold },
   });
