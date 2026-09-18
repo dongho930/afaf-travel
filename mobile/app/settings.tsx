@@ -68,6 +68,15 @@ export default function SettingsScreen() {
         <Text style={styles.creditValue}>개인정보처리방침</Text>
         <CaretRightIcon size={16} color={colors.textSecondary} weight="bold" />
       </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.creditCard, styles.linkRow, styles.policyRowSpacing]}
+        onPress={() => router.push("/app-permissions")}
+        accessibilityRole="link"
+        accessibilityLabel="앱 접근권한 안내 보기"
+      >
+        <Text style={styles.creditValue}>앱 접근권한 안내</Text>
+        <CaretRightIcon size={16} color={colors.textSecondary} weight="bold" />
+      </TouchableOpacity>
     </View>
   );
 }
@@ -88,6 +97,7 @@ function makeStyles(colors: ThemeColors) {
       gap: spacing.xs,
     },
     linkRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+    policyRowSpacing: { marginTop: spacing.sm },
     creditLabel: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textSecondary },
     creditValue: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.text },
     optionCard: {

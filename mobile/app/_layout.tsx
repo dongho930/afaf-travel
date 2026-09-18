@@ -7,6 +7,7 @@ import { Platform, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { AppPermissionNotice } from "../components/AppPermissionNotice";
 import { BottomTabBar } from "../components/BottomTabBar";
 import { WebFrame } from "../components/WebFrame";
 import { WebTabArrows } from "../components/WebTabArrows";
@@ -75,6 +76,7 @@ function ThemedApp() {
               <Stack.Screen name="profile" options={{ title: "프로필" }} />
               <Stack.Screen name="settings" options={{ title: "설정" }} />
               <Stack.Screen name="privacy" options={{ title: "개인정보처리방침" }} />
+              <Stack.Screen name="app-permissions" options={{ title: "접근권한 안내" }} />
               <Stack.Screen name="attraction-detail" options={{ title: "관광지 상세" }} />
               <Stack.Screen name="post-create" options={{ title: "게시물 작성" }} />
               <Stack.Screen name="post-manage" options={{ title: "게시물 관리" }} />
@@ -84,6 +86,9 @@ function ThemedApp() {
             <WebTabArrows />
           </View>
           <BottomTabBar />
+          {/* 설치 후 처음 실행할 때 한 번 뜨는 접근권한 안내입니다. 하단바까지
+              덮도록 가장 마지막에 둡니다(웹에서는 뜨지 않습니다). */}
+          <AppPermissionNotice />
         </View>
       </WebFrame>
     </>
