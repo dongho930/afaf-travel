@@ -7,8 +7,11 @@ name: Region popularity refresh
 # 신호만 보내는 역할이라 비용이 들지 않습니다.
 on:
   schedule:
-    # UTC 20:00 = KST 05:00. GitHub Actions 스케줄도 UTC 기준입니다.
-    - cron: "0 20 * * *"
+    # UTC 20:23 = KST 05:23. GitHub Actions 스케줄도 UTC 기준입니다.
+    # 0분은 전 세계 워크플로우가 몰려 큐가 가장 길어서 정각을 피했고, 앞서 도는
+    # tourism-cache-refresh(KST 04:47)와도 시각을 갈라뒀습니다 — 둘이 같은 시각이면
+    # 같은 백엔드를 동시에 때립니다. 자세한 사정은 그쪽 워크플로우 주석 참고.
+    - cron: "23 20 * * *"
   workflow_dispatch: {} # Actions 탭에서 수동 실행 버튼으로도 바로 테스트 가능
 
 jobs:
