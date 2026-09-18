@@ -451,6 +451,12 @@ export const api = {
       `/api/tourism/attractions/${encodeURIComponent(contentId)}/nearby?radius_km=${radiusKm}`
     ),
 
+  // 함께 가볼 만한 곳 — 한국관광공사 '관광지별 연관 관광지 정보'가 알려주는
+  // 연계 관광지입니다. '근처'가 거리로만 고르는 것과 달리, 이건 테마·방문 패턴까지
+  // 반영된 추천이라 거리가 멀어도 같이 묶이는 곳이 나옵니다.
+  getRelatedAttractions: (contentId: string) =>
+    request<Attraction[]>(`/api/tourism/attractions/${encodeURIComponent(contentId)}/related`),
+
   // 특정 관광지의 방문자 리뷰 목록 (최신순, 로그인 불필요)
   getReviews: (contentId: string) =>
     request<Review[]>(`/api/reviews/${encodeURIComponent(contentId)}`),

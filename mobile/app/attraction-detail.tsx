@@ -12,6 +12,7 @@ import {
   MapTrifoldIcon,
   NotebookIcon,
   PlusIcon,
+  SparkleIcon,
   StarIcon,
   TrainIcon,
   XIcon,
@@ -127,6 +128,7 @@ export default function AttractionDetailScreen() {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [nearby, setNearby] = useState<NearbyAttraction[]>([]);
   const [nearbyLoaded, setNearbyLoaded] = useState(false);
+  const [related, setRelated] = useState<Attraction[]>([]);
   // 화면 등장 연출 단계: 0=아무것도 안보임 1=제목 2=글(소개) 3=근처 가볼 만한 곳 4=방문자 리뷰.
   // 위 순서대로 하나씩 페이드인 되도록, 데이터가 준비될 때마다 한 단계씩 올립니다.
   const [stage, setStage] = useState(0);
@@ -152,6 +154,7 @@ export default function AttractionDetailScreen() {
     if (!contentId) return;
     setLoading(true);
     setNearbyLoaded(false);
+    setRelated([]);
     setStage(0);
     Promise.all([api.getAttractionDetail(contentId), api.getReviews(contentId)])
       .then(([detail, reviewList]) => {
@@ -174,6 +177,12 @@ export default function AttractionDetailScreen() {
       .then(setNearby)
       .catch(() => setNearby([]))
       .finally(() => setNearbyLoaded(true));
+    // '함께 가볼 만한 곳'도 부가 정보라 실패하면 조용히 비워둡니다. 연관 정보가
+    // 등록되지 않은 관광지도 많아서, 없으면 섹션 자체를 그리지 않습니다.
+    api
+      .getRelatedAttractions(contentId)
+      .then(setRelated)
+      .catch(() => setRelated([]));
   }, [contentId, session]);
 
   // 제목 -> 글 -> 근처 가볼 만한 곳 -> 방문자 리뷰 순으로 한 단계씩 페이드인.
@@ -502,6 +511,52 @@ export default function AttractionDetailScreen() {
         </View>
       )}
       </FadeInView>
+      )}
+
+      {stage >= 3 && related.length > 0 && (
+        <FadeInView duration={300}>
+          <View style={styles.nearbySection}>
+            <View style={styles.nearbySectionTitleRow}>
+              <SparkleIcon size={14} color={colors.text} weight="bold" />
+              <Text style={styles.nearbySectionTitle} accessibilityRole="header">
+                함께 가볼 만한 곳
+              </Text>
+            </View>
+            <HorizontalScrollWeb contentContainerStyle={styles.nearbyRow}>
+              {related.map((r) => (
+                <Pressable
+                  key={r.content_id}
+                  style={({ pressed }) => [styles.nearbyCard, pressed && styles.pressedFeedback]}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/attraction-detail",
+                      params: { contentId: r.content_id, name: r.name },
+                    })
+                  }
+                  accessible
+                  accessibilityRole="button"
+                  accessibilityLabel={`${r.name}, ${r.category}`}
+                  accessibilityHint="두 번 탭하면 이 장소를 봅니다"
+                >
+                  {r.image_url ? (
+                    <Image source={{ uri: httpsImageUrl(r.image_url) }} style={styles.nearbyImage} />
+                  ) : (
+                    <View style={[styles.nearbyImage, styles.nearbyImagePlaceholder]}>
+                      <SparkleIcon size={24} color={colors.primary} weight="bold" />
+                    </View>
+                  )}
+                  <Text style={styles.nearbyName} numberOfLines={1}>
+                    {r.name}
+                  </Text>
+                  <Text style={styles.nearbyMeta} numberOfLines={1}>
+                    {r.category}
+                  </Text>
+                </Pressable>
+              ))}
+            </HorizontalScrollWeb>
+            <DataCreditLine style={styles.nearbyCredit} />
+          </View>
+        </FadeInView>
       )}
 
       {stage >= 3 && nearby.length > 0 && (
