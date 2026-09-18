@@ -208,8 +208,12 @@ def _rule_parse(query_text: str) -> ParsedQuery:
 
 async def _ai_parse(query_text: str) -> ParsedQuery:
     """Groq에게 질의를 읽히고 조건을 받아옵니다. 형식이 어긋난 값은 조용히 버립니다."""
+    # 질의 해석은 뒤이어 올 장소 추천을 위한 준비 단계라 짧게 끊습니다. 실패해도
+    # 규칙 기반 해석(_rule_parse)이 받아주므로 화면이 멈추지 않습니다.
     raw = await _groq_call(
-        PARSE_SYSTEM_PROMPT, json.dumps({"query_text": query_text}, ensure_ascii=False)
+        PARSE_SYSTEM_PROMPT,
+        json.dumps({"query_text": query_text}, ensure_ascii=False),
+        timeout=8.0,
     )
 
     region = raw.get("region")
@@ -267,8 +271,8 @@ async def parse_query(
         if settings.groq_api_key and text:
             try:
                 parsed = await _ai_parse(text)
-            except GroqRateLimitedError:
-                logger.warning("Groq 요청 한도 초과 — 규칙 기반으로 질의를 해석합니다.")
+            except GroqUnavailableError as e:
+                logger.warning("Groq에게 답을 받지 못해(%s) 규칙 기반으로 질의를 해석합니다.", e)
             except Exception as e:  # 파싱은 부가 기능이라 어떤 실패도 화면을 막지 않습니다
                 logger.warning("질의 해석 실패(%s) — 규칙 기반으로 대체합니다.", e)
 
@@ -590,7 +594,17 @@ def _mock_generate(
     }
 
 
-class GroqRateLimitedError(Exception):
+class GroqUnavailableError(Exception):
+    """Groq에게서 쓸 수 있는 답을 받지 못했다는 신호.
+
+    한도 초과뿐 아니라 응답 지연, 연결 실패, Groq 쪽 5xx, JSON이 아닌 응답,
+    기대한 필드가 없는 응답까지 전부 이 예외로 모읍니다. 예전에는 429/413만
+    따로 처리하고 나머지는 그대로 터뜨려서, 위 상황이 전부 500("서버에 문제가
+    생겼어요")으로 사용자에게 나갔습니다.
+    """
+
+
+class GroqRateLimitedError(GroqUnavailableError):
     """Groq API가 요청 한도에 걸렸을 때 발생시켜서, 호출한 쪽이 규칙 기반
     대체 로직으로 넘어갈 수 있게 신호를 줍니다.
 
@@ -601,7 +615,7 @@ class GroqRateLimitedError(Exception):
     """
 
 
-async def _groq_call(system_prompt: str, user_prompt: str) -> dict:
+async def _groq_call(system_prompt: str, user_prompt: str, timeout: float = 20.0) -> dict:
     payload = {
         "model": settings.groq_model,
         "messages": [
@@ -625,10 +639,18 @@ async def _groq_call(system_prompt: str, user_prompt: str) -> dict:
     # (후보가 많은 지역 — 예: 수원시 팔달구/성남시 분당구 — 을 고르면 AI
     # 플래너가 "장소 추천 실패"로 끝나던 원인). 재시도해도 같은 크기라 똑같이
     # 실패하므로 기다리지 않고 바로 넘깁니다.
+    # 제한시간은 호출하는 쪽이 정합니다. 앱은 한 요청을 30초까지만 기다리는데
+    # /recommend 하나가 Groq를 두 번(질의 해석 + 장소 추천) 부르기 때문에, 둘을
+    # 합쳐도 그 안에 끝나도록 나눠 써야 "응답이 너무 늦어요"로 끝나지 않습니다.
     max_retries = 2
     for attempt in range(max_retries + 1):
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(GROQ_ENDPOINT, headers=headers, json=payload)
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(GROQ_ENDPOINT, headers=headers, json=payload)
+        except httpx.HTTPError as e:
+            # 응답 지연·연결 실패. 이번 요청 안에서는 기다려도 풀리지 않습니다.
+            raise GroqUnavailableError(f"Groq API를 부르지 못했습니다: {e}") from e
+
         if resp.status_code == 413:
             raise GroqRateLimitedError(
                 "Groq API 요청이 분당 토큰 한도보다 큽니다(413) — 프롬프트 길이 초과"
@@ -638,10 +660,18 @@ async def _groq_call(system_prompt: str, user_prompt: str) -> dict:
                 await asyncio.sleep(1.5 * (attempt + 1))
                 continue
             raise GroqRateLimitedError("Groq API 요청 한도(429) 초과")
-        resp.raise_for_status()
-        data = resp.json()
-        text = data["choices"][0]["message"]["content"]
-        return json.loads(text)
+        if resp.status_code >= 500:
+            raise GroqUnavailableError(f"Groq API 서버 오류({resp.status_code})")
+
+        try:
+            resp.raise_for_status()
+            data = resp.json()
+            text = data["choices"][0]["message"]["content"]
+            return json.loads(text)
+        except (httpx.HTTPStatusError, KeyError, IndexError, TypeError, ValueError) as e:
+            # JSON이 아닌 답, choices가 빈 답 등 — 재시도해도 같은 프롬프트라
+            # 결과가 달라지리라는 보장이 없어 바로 실패로 알립니다.
+            raise GroqUnavailableError(f"Groq API 응답을 읽지 못했습니다: {e}") from e
 
     raise GroqRateLimitedError("Groq API 요청 한도(429) 초과")
 
@@ -707,8 +737,8 @@ async def generate_course(
     if settings.groq_api_key:
         try:
             raw = await _groq_generate(request, candidates, parsed)
-        except GroqRateLimitedError:
-            logger.warning("Groq 요청 한도 초과 — 규칙 기반 대체 로직으로 코스를 생성합니다.")
+        except GroqUnavailableError as e:
+            logger.warning("Groq에게 답을 받지 못해(%s) 규칙 기반으로 코스를 생성합니다.", e)
             raw = _mock_generate(request, candidates, parsed)
     else:
         raw = _mock_generate(request, candidates, parsed)
@@ -788,8 +818,13 @@ async def _groq_recommend(
     if conditions:
         payload["conditions"] = conditions
 
-    raw = await _groq_call(RECOMMEND_SYSTEM_PROMPT, json.dumps(payload, ensure_ascii=False))
-    return raw["selected"]
+    raw = await _groq_call(
+        RECOMMEND_SYSTEM_PROMPT, json.dumps(payload, ensure_ascii=False), timeout=15.0
+    )
+    selected = raw.get("selected")
+    if not isinstance(selected, list):
+        raise GroqUnavailableError("Groq 응답에 selected 목록이 없습니다")
+    return [item for item in selected if isinstance(item, dict)]
 
 
 async def recommend_places(
@@ -809,12 +844,13 @@ async def recommend_places(
         raise ValueError("추천할 수 있는 무장애 관광지 후보가 없습니다.")
 
     if settings.groq_api_key:
-        try:
-            selected = await _groq_recommend(request, candidates, parsed)
-        except GroqRateLimitedError:
-            logger.warning("Groq 요청 한도 초과 — 규칙 기반 대체 로직으로 장소를 추천합니다.")
-            selected = _mock_recommend(request, candidates, parsed)
+        # 여기서는 규칙 기반(_mock_recommend)으로 내려가지 않습니다. 키워드가
+        # 몇 개 겹치는지로만 고른 목록은 요청·유형과 어긋나기 쉬워서, 그럴듯한
+        # 엉뚱한 추천을 주느니 "잠시 후 다시"라고 말하는 편이 낫습니다.
+        # GroqUnavailableError는 라우터가 받아 안내 문구로 바꿉니다.
+        selected = await _groq_recommend(request, candidates, parsed)
     else:
+        # 키가 없는 개발·테스트 환경에서만 규칙 기반으로 동작합니다.
         selected = _mock_recommend(request, candidates, parsed)
 
     by_id = {a.content_id: a for a in candidates}
@@ -857,8 +893,10 @@ async def generate_course_from_selection(
                 ORDER_SYSTEM_PROMPT,
                 _build_user_prompt(course_request, selected_attractions, parsed),
             )
-        except GroqRateLimitedError:
-            logger.warning("Groq 요청 한도 초과 — 규칙 기반 대체 로직으로 순서를 정합니다.")
+        except GroqUnavailableError as e:
+            # 여기는 규칙 기반으로 내려가도 됩니다 — 사용자가 이미 고른 장소들의
+            # 방문 '순서'만 정하는 단계라, 엉뚱한 장소가 끼어들 여지가 없습니다.
+            logger.warning("Groq에게 답을 받지 못해(%s) 규칙 기반으로 순서를 정합니다.", e)
             raw = _mock_generate(course_request, selected_attractions, parsed)
     else:
         raw = _mock_generate(course_request, selected_attractions, parsed)

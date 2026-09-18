@@ -164,22 +164,27 @@ def test_후보가_없으면_오류를_알린다():
 # ---- Groq 한도 응답 처리 ----
 
 class _FakeResponse:
-    def __init__(self, status_code: int):
+    def __init__(self, status_code: int, body: dict | None = None):
         self.status_code = status_code
+        self._body = body
 
-    def raise_for_status(self):  # pragma: no cover - 여기까지 오면 테스트 실패
-        raise AssertionError("한도 응답은 raise_for_status까지 가면 안 됩니다")
+    def raise_for_status(self):
+        if self._body is None:  # pragma: no cover - 여기까지 오면 테스트 실패
+            raise AssertionError("한도 응답은 raise_for_status까지 가면 안 됩니다")
 
-    def json(self):  # pragma: no cover - 여기까지 오면 테스트 실패
-        raise AssertionError("한도 응답의 본문을 읽으려 하면 안 됩니다")
+    def json(self):
+        if self._body is None:  # pragma: no cover - 여기까지 오면 테스트 실패
+            raise AssertionError("한도 응답의 본문을 읽으려 하면 안 됩니다")
+        return self._body
 
 
 class _FakeClient:
     """httpx.AsyncClient 대신 끼워 넣어, 항상 같은 상태 코드를 돌려줍니다."""
 
-    def __init__(self, status_code: int, calls: list):
+    def __init__(self, status_code: int, calls: list, body: dict | None = None):
         self._status_code = status_code
         self._calls = calls
+        self._body = body
 
     async def __aenter__(self):
         return self
@@ -189,34 +194,34 @@ class _FakeClient:
 
     async def post(self, *args, **kwargs):
         self._calls.append(kwargs.get("json"))
-        return _FakeResponse(self._status_code)
+        return _FakeResponse(self._status_code, self._body)
 
 
-def _patch_groq(monkeypatch, status_code: int) -> list:
-    """Groq 키가 있는 상태에서 지정한 상태 코드만 돌아오게 만듭니다."""
+def _patch_groq(monkeypatch, status_code: int, body: dict | None = None) -> list:
+    """Groq 키가 있는 상태에서 지정한 상태 코드(와 본문)만 돌아오게 만듭니다."""
     calls: list = []
     monkeypatch.setattr(ai_service.settings, "groq_api_key", "test-key")
     monkeypatch.setattr(
-        ai_service.httpx, "AsyncClient", lambda *a, **kw: _FakeClient(status_code, calls)
+        ai_service.httpx, "AsyncClient", lambda *a, **kw: _FakeClient(status_code, calls, body)
     )
     return calls
 
 
-def test_요청이_토큰_한도보다_크면_재시도_없이_대체_로직을_쓴다(monkeypatch, candidates):
+def test_요청이_토큰_한도보다_크면_재시도_없이_추천을_포기한다(monkeypatch, candidates):
     """413(요청 하나가 분당 토큰 한도 초과)은 기다려도 풀리지 않으므로 바로
-    규칙 기반 추천으로 넘어가야 합니다 — 예전엔 그대로 터져서 앱에 '장소 추천
-    실패'가 떴습니다."""
+    포기합니다. 규칙 기반(키워드 매칭) 목록으로 대신 채우지 않습니다 — 요청·유형과
+    어긋난 목록을 그럴듯하게 내놓느니 '잠시 후 다시'라고 말하는 편이 낫습니다."""
     calls = _patch_groq(monkeypatch, 413)
 
-    result = asyncio.run(
-        ai_service.recommend_places(PlaceRecommendationRequest(query_text="산책로"), candidates)
-    )
+    with pytest.raises(ai_service.GroqUnavailableError):
+        asyncio.run(
+            ai_service.recommend_places(PlaceRecommendationRequest(query_text="산책로"), candidates)
+        )
 
-    assert [c.attraction.content_id for c in result] == ["1", "2", "3"]
     assert len(calls) == 1  # 재시도하지 않습니다
 
 
-def test_순간적인_한도_초과는_재시도한_뒤_대체_로직을_쓴다(monkeypatch, candidates):
+def test_순간적인_한도_초과는_재시도한_뒤_추천을_포기한다(monkeypatch, candidates):
     """429는 잠깐 기다리면 풀리는 경우가 많아 재시도합니다 (413과 다른 처리)."""
     calls = _patch_groq(monkeypatch, 429)
 
@@ -225,9 +230,45 @@ def test_순간적인_한도_초과는_재시도한_뒤_대체_로직을_쓴다(
 
     monkeypatch.setattr(ai_service.asyncio, "sleep", _no_sleep)
 
-    result = asyncio.run(
-        ai_service.recommend_places(PlaceRecommendationRequest(query_text="산책로"), candidates)
+    with pytest.raises(ai_service.GroqUnavailableError):
+        asyncio.run(
+            ai_service.recommend_places(PlaceRecommendationRequest(query_text="산책로"), candidates)
+        )
+
+    assert len(calls) == 3  # 최초 1회 + 재시도 2회
+
+
+def test_서버_오류나_깨진_응답도_같은_실패로_모은다(monkeypatch, candidates):
+    """Groq 쪽 5xx, 연결 실패, JSON이 아닌 응답 — 예전에는 전부 그대로 터져서
+    앱에 '서버에 문제가 생겼어요'(500)가 떴습니다. 이제 한도 초과와 같은 예외로
+    모여서, 라우터가 안내 문구로 바꿀 수 있습니다."""
+    request = PlaceRecommendationRequest(query_text="산책로")
+
+    _patch_groq(monkeypatch, 500)
+    with pytest.raises(ai_service.GroqUnavailableError):
+        asyncio.run(ai_service.recommend_places(request, candidates))
+
+    # selected 없이 엉뚱한 JSON만 돌아온 경우
+    _patch_groq(monkeypatch, 200, {"choices": [{"message": {"content": '{"nope": 1}'}}]})
+    with pytest.raises(ai_service.GroqUnavailableError):
+        asyncio.run(ai_service.recommend_places(request, candidates))
+
+    # JSON이 아예 아닌 경우
+    _patch_groq(monkeypatch, 200, {"choices": [{"message": {"content": "죄송합니다"}}]})
+    with pytest.raises(ai_service.GroqUnavailableError):
+        asyncio.run(ai_service.recommend_places(request, candidates))
+
+
+def test_코스_순서_정하기는_실패해도_규칙_기반으로_이어간다(monkeypatch, candidates):
+    """2단계는 사용자가 이미 고른 장소들의 '순서'만 정하는 단계라, AI가 없어도
+    엉뚱한 장소가 끼어들 여지가 없습니다. 그래서 여기서는 그대로 대체 로직을 씁니다."""
+    _patch_groq(monkeypatch, 500)
+    request = GenerateFromSelectionRequest(
+        query_text="산책로", selected_content_ids=[c.content_id for c in candidates]
     )
 
-    assert [c.attraction.content_id for c in result] == ["1", "2", "3"]
-    assert len(calls) == 3  # 최초 1회 + 재시도 2회
+    course = asyncio.run(
+        ai_service.generate_course_from_selection(request, candidates)
+    )
+
+    assert len(course.stops) == len(candidates)

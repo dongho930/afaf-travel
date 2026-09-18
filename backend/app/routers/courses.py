@@ -28,6 +28,7 @@ from app.models.schemas import (
     VisitedPlace,
 )
 from app.services.ai_service import (
+    GroqUnavailableError,
     generate_course,
     generate_course_from_selection,
     parse_query,
@@ -35,6 +36,7 @@ from app.services.ai_service import (
 )
 from app.services.auth import get_optional_user_id
 from app.services.supabase_service import (
+    CacheUnavailable,
     attach_course_to_trip,
     count_visited_places,
     create_trip,
@@ -130,15 +132,42 @@ async def recommend_course_places(request: PlaceRecommendationRequest):
     (parse_query) 지역은 후보 검색 범위로, 동행자·목적은 추천 조건으로 씁니다.
     무엇으로 이해했는지는 응답의 parsed에 담아 앱이 보여줄 수 있게 합니다.
     """
-    candidates, parsed = await _candidates_with_conditions(
-        request.query_text, request.user_type.value, request.region, request.sigungu_cd
-    )
+    try:
+        candidates, parsed = await _candidates_with_conditions(
+            request.query_text, request.user_type.value, request.region, request.sigungu_cd
+        )
+    except CacheUnavailable as e:
+        # 후보를 고르려면 편의시설 캐시를 반드시 읽어야 합니다. 못 읽었다는 건
+        # 보통 조회가 몰렸다는 뜻이라, 왜 안 되는지를 사용자 말로 알려줍니다.
+        logger.warning("편의시설 캐시를 읽지 못해 장소 추천을 중단합니다: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail="지금 요청이 많아 장소 정보를 불러오지 못했어요. 잠시 후 다시 시도해주세요.",
+        )
+
+    # 후보가 하나도 없는 건 오류가 아니라 '결과 없음'입니다. 예전에는 여기서
+    # 422가 나가 앱에 "장소 추천 실패" 팝업이 떴는데, 앱에는 이미 후보 0개를 위한
+    # 안내("조건에 맞는 장소를 찾지 못했어요")가 있어서 그쪽으로 보냅니다.
+    if not candidates:
+        logger.info("조건에 맞는 후보가 없습니다: %r", request.query_text)
+        return PlaceRecommendationResponse(
+            query_text=request.query_text, candidates=[], parsed=parsed
+        )
+
     # 방문 날짜를 알 때만 영업정보를 채웁니다 — 그날 쉬는 곳을 추천에서 빼기 위한
     # 것이라, 날짜가 없으면 굳이 조회할 이유가 없습니다.
     if request.visit_date:
         await tour_api_client.fill_extra_info(candidates)
     try:
         selected = await recommend_places(request, candidates, parsed)
+    except GroqUnavailableError as e:
+        # 한도 초과·지연·형식 오류 등 AI에게 답을 못 받은 모든 경우. 규칙 기반
+        # 목록으로 대충 채우지 않고, 다시 시도하면 된다고 알려줍니다.
+        logger.warning("AI에게 장소 추천을 받지 못했습니다: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail="AI가 지금 응답하지 않아요. 잠시 후 다시 시도해주세요.",
+        )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 

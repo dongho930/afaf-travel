@@ -69,6 +69,11 @@ function messageForStatus(status: number, detail?: string): string {
   // API 응답 원문이 섞여 있습니다("TMAP_APP_KEY가 설정되지 않았습니다",
   // "카카오모빌리티 API 오류: 429 {...}"). 원문은 ApiError.detail로 남겨 로그에서만 봅니다.
   if (status >= 500) {
+    // 503만 예외입니다. 이 백엔드에서 503은 "지금은 안 되니 잠시 후에"를 사용자에게
+    // 직접 말해주는 자리로만 쓰고(캐시를 못 읽음, AI가 응답하지 않음), detail에 이미
+    // 사람이 읽을 한국어 문장이 들어 있습니다. 그걸 버리고 "서버가 잠시 바빠요"로
+    // 뭉뚱그리면 왜 안 되는지, 다시 하면 되는지를 알 수 없었습니다.
+    if (status === 503 && detail && detail.trim() && !detail.trim().startsWith("[")) return detail.trim();
     if (status === 502 || status === 503) return "서버가 잠시 바빠요. 잠시 후 다시 시도해주세요.";
     if (status === 504) return "불러오는 데 너무 오래 걸렸어요. 잠시 후 다시 시도해주세요.";
     return "서버에 문제가 생겼어요. 잠시 후 다시 시도해주세요.";

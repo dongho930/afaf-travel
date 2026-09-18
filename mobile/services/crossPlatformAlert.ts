@@ -1,55 +1,108 @@
-import { Alert as RNAlert, Platform } from "react-native";
+/**
+ * 앱의 안내 창입니다. 화면 코드는 예전과 똑같이
+ * `import { Alert } from "../services/crossPlatformAlert"` 한 뒤
+ * `Alert.alert(제목, 내용, 버튼들)`로 부릅니다 — 부르는 쪽 코드는 하나도
+ * 바뀌지 않았고, 속만 바뀌었습니다(호출하는 곳이 113군데입니다).
+ *
+ * 예전에는 운영체제에 창 그리기를 맡겼습니다(네이티브는 RN의 Alert.alert,
+ * 웹은 브라우저의 alert()/confirm()). 그래서 앱 안에서 유일하게 브랜드 초록도,
+ * Pretendard도, 어두운 테마도 적용되지 않는 화면이었고, 웹에서는 브라우저
+ * 기본 창이 떠서 더 이질적인 데다 버튼을 두 개까지밖에 못 썼습니다.
+ *
+ * 이제는 앱이 직접 그립니다. 이 파일은 "무엇을 띄울지"만 줄 세워두고,
+ * 실제로 그리는 일은 components/AppAlert.tsx의 AppAlertHost가 맡습니다
+ * (app/_layout.tsx에 한 번만 붙여둡니다). 화면 컴포넌트 밖(서비스 코드)에서도
+ * 부를 수 있어야 해서 이렇게 나눴습니다.
+ */
 
-type AlertButton = {
+export type AlertButton = {
   text?: string;
   onPress?: () => void;
   style?: "default" | "cancel" | "destructive";
 };
 
+/** 안내 창의 성격 — 배지 색을 고르는 데 씁니다. */
+export type AlertTone = "primary" | "danger" | "warning";
+
+/** 배지 안에 들어갈 아이콘. components/AppAlert.tsx가 실제 아이콘으로 바꿉니다. */
+export type AlertIconName = "check" | "info" | "question" | "lock" | "trash" | "alert";
+
+export type AlertRequest = {
+  id: number;
+  title: string;
+  message?: string;
+  buttons: AlertButton[];
+  tone: AlertTone;
+  icon: AlertIconName;
+};
+
+// 안내 창의 성격은 부르는 쪽에서 따로 알려주지 않습니다. 113군데를 전부 고쳐
+// 성격을 붙이는 대신, 제목·내용과 버튼 구성에서 읽어냅니다. 규칙이 빗나가도
+// 아이콘만 덜 어울릴 뿐 안내 자체는 그대로 뜹니다.
+const ERROR_PATTERN = /실패|오류|에러|못했|못 불러|불러오지 못|없어요|없습니다|없음|초과|거부|잘못/;
+const SUCCESS_PATTERN = /완료|등록됐|감사|저장됐/;
+const LOCK_PATTERN = /로그인|권한/;
+
+function classify(
+  title: string,
+  message: string | undefined,
+  buttons: AlertButton[]
+): { tone: AlertTone; icon: AlertIconName } {
+  // '삭제' 같은 되돌릴 수 없는 동작은 버튼 스타일로 이미 표시돼 있습니다.
+  if (buttons.some((b) => b.style === "destructive")) return { tone: "danger", icon: "trash" };
+
+  const text = `${title} ${message ?? ""}`;
+  if (ERROR_PATTERN.test(text)) return { tone: "warning", icon: "alert" };
+  // '로그인이 필요해요', '권한이 필요해요' — 무엇을 해야 하는지가 분명한 안내입니다.
+  if (LOCK_PATTERN.test(title)) return { tone: "primary", icon: "lock" };
+  if (SUCCESS_PATTERN.test(text)) return { tone: "primary", icon: "check" };
+  // 고를 게 있으면 묻는 창, 하나뿐이면 알려주는 창입니다.
+  if (buttons.length > 1) return { tone: "primary", icon: "question" };
+  return { tone: "primary", icon: "info" };
+}
+
+let nextId = 1;
+const queue: AlertRequest[] = [];
+// 창을 그리는 쪽(AppAlertHost)은 앱 전체에 하나뿐이라 구독자도 하나만 둡니다.
+let listener: ((items: AlertRequest[]) => void) | null = null;
+
+function emit() {
+  listener?.([...queue]);
+}
+
 /**
- * React Native의 Alert.alert(취소/확인 버튼 있는 확인창)는 네이티브 전용 기능이라
- * 웹 브라우저에서는 그냥 아무 반응 없이 무시됩니다. 이 앱 여러 화면에서
- * "삭제할까요?", "방문 완료로 표시할까요?" 같은 확인창을 이 방식으로 쓰고
- * 있어서, 웹에서는 버튼을 눌러도 반응이 없는 문제가 있었습니다.
- *
- * 이 파일은 각 화면에서 `import { Alert } from "react-native"` 대신
- * `import { Alert } from "../services/crossPlatformAlert"` 로 바꿔치기해서
- * 쓰는 대체품입니다. 앱(iOS/Android)에서는 원래 Alert.alert 그대로 동작하고,
- * 웹에서만 브라우저의 confirm()/alert() 창으로 자동 대체됩니다. 호출하는
- * 쪽 코드(버튼 목록, onPress 콜백 등)는 전혀 안 바꿔도 됩니다.
+ * 안내 창을 그리는 컴포넌트가 붙을 때 부릅니다. 붙기 전에 이미 쌓인 안내가
+ * 있으면(앱을 켜자마자 뜨는 오류 등) 그것도 바로 넘겨줍니다.
  */
-function webAlert(title: string, message?: string, buttons?: AlertButton[]) {
-  const fullText = message ? `${title}\n\n${message}` : title;
-  const list = buttons && buttons.length > 0 ? buttons : [{ text: "확인" }];
+export function subscribeToAlerts(fn: (items: AlertRequest[]) => void): () => void {
+  listener = fn;
+  fn([...queue]);
+  return () => {
+    if (listener === fn) listener = null;
+  };
+}
 
-  if (list.length === 1) {
-    // 버튼이 하나뿐이면 정보 안내용 알림이라, 그냥 alert()로 보여주고 눌렀다고
-    // 취급해서 onPress를 호출합니다.
-    window.alert(fullText);
-    list[0].onPress?.();
-    return;
-  }
-
-  // 두 개 이상이면 "취소" 역할 버튼과 "확인/실행" 역할 버튼으로 나눠서
-  // window.confirm()의 확인/취소로 매핑합니다. 이 프로젝트에서는 실제로
-  // 항상 취소 1개 + 확인(또는 삭제 등 destructive) 1개 조합만 씁니다.
-  const cancelButton = list.find((b) => b.style === "cancel");
-  const confirmButton = list.find((b) => b !== cancelButton) ?? list[list.length - 1];
-
-  const confirmed = window.confirm(fullText);
-  if (confirmed) {
-    confirmButton.onPress?.();
-  } else {
-    cancelButton?.onPress?.();
-  }
+/** 창을 닫습니다. 버튼을 눌렀을 때와 뒤로 가기로 닫을 때 모두 여기로 옵니다. */
+export function dismissAlert(id: number) {
+  const index = queue.findIndex((a) => a.id === id);
+  if (index >= 0) queue.splice(index, 1);
+  emit();
 }
 
 export const Alert = {
+  /**
+   * 버튼을 안 주면 '확인' 하나짜리 알림으로 띄웁니다(RN Alert와 같은 규칙).
+   * 여러 개가 겹쳐 뜰 일이 있으면 줄을 세워 하나씩 보여줍니다.
+   */
   alert(title: string, message?: string, buttons?: AlertButton[]) {
-    if (Platform.OS === "web") {
-      webAlert(title, message, buttons);
-    } else {
-      RNAlert.alert(title, message, buttons);
-    }
+    const list = buttons && buttons.length > 0 ? buttons : [{ text: "확인" }];
+    queue.push({
+      id: nextId++,
+      title,
+      message,
+      buttons: list,
+      ...classify(title, message, list),
+    });
+    emit();
   },
 };

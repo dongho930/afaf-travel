@@ -32,6 +32,7 @@ import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
 import { radius, spacing } from "../../constants/tokens";
 import { userTypeIcon } from "../../constants/userTypeIcons";
+import { detectUserTypeFromText } from "../../constants/userTypeKeywords";
 import { api, errorMessage } from "../../services/api";
 import { useCourseContext } from "../../services/CourseContext";
 import { storage } from "../../services/storage";
@@ -194,16 +195,50 @@ export default function PlannerScreen() {
     await storage.saveUserType(type);
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     if (!queryText.trim()) {
       Alert.alert("입력이 필요해요", "원하시는 여행 코스를 텍스트나 음성으로 입력해주세요.");
       return;
     }
+
+    // 위에서 고른 유형은 후보를 통째로 걸러냅니다. 그래서 청각 장애인을 고른 채
+    // "지체 장애인도 갈 수 있는 곳"을 물으면 문장과 상관없이 청각 편의시설이 있는
+    // 곳만 나왔습니다. 문장에 다른 유형 이야기가 있으면 어느 기준으로 찾을지
+    // 먼저 여쭙고, 고르신 쪽으로 진행합니다.
+    const mentioned = detectUserTypeFromText(queryText);
+    if (mentioned && mentioned !== userType) {
+      Alert.alert(
+        "어느 기준으로 찾을까요?",
+        `요청에 '${USER_TYPE_LABELS[mentioned]}' 이야기가 있는데, 지금 고른 유형은 '${USER_TYPE_LABELS[userType]}'이에요. 고른 유형에 맞는 장소만 추천해드려요.`,
+        [
+          {
+            text: `${USER_TYPE_LABELS[userType]} 그대로`,
+            style: "cancel",
+            onPress: () => runRecommend(userType),
+          },
+          {
+            text: `${USER_TYPE_LABELS[mentioned]} 기준으로`,
+            onPress: () => {
+              // 위 유형 선택도 함께 바꿔둡니다 — 2단계(코스 생성)와 결과 화면이
+              // 같은 유형을 쓰고, 무엇으로 찾았는지가 화면에 그대로 보입니다.
+              void handleSelectType(mentioned);
+              runRecommend(mentioned);
+            },
+          },
+        ]
+      );
+      return;
+    }
+
+    runRecommend(userType);
+  };
+
+  const runRecommend = async (effectiveUserType: UserType) => {
     setIsSubmitting(true);
     try {
       const { candidates, parsed } = await api.recommendPlaces({
         queryText,
-        userType,
+        userType: effectiveUserType,
         sigunguCd,
         visitDate,
       });
