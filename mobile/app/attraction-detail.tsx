@@ -522,6 +522,9 @@ export default function AttractionDetailScreen() {
                 함께 가볼 만한 곳
               </Text>
             </View>
+            {/* 아래 '근처'와 뭐가 다른지 한 줄로 알려줍니다 — 둘 다 목록이라
+                설명이 없으면 비슷한 것이 두 개 있는 것처럼 보입니다. */}
+            <Text style={styles.nearbySectionDesc}>이곳을 찾은 분들이 같이 둘러본 곳</Text>
             <HorizontalScrollWeb contentContainerStyle={styles.nearbyRow}>
               {related.map((r) => (
                 <Pressable
@@ -548,9 +551,15 @@ export default function AttractionDetailScreen() {
                   <Text style={styles.nearbyName} numberOfLines={1}>
                     {r.name}
                   </Text>
-                  <Text style={styles.nearbyMeta} numberOfLines={1}>
-                    {r.category}
-                  </Text>
+                  <View style={styles.nearbyMetaRow}>
+                    <Text style={styles.nearbyMeta} numberOfLines={1}>
+                      {r.category}
+                    </Text>
+                    {/* 이 목록이 공사의 연관 관광지 데이터라는 표시입니다. */}
+                    <View style={styles.relatedBadge}>
+                      <Text style={styles.relatedBadgeText}>연관</Text>
+                    </View>
+                  </View>
                 </Pressable>
               ))}
             </HorizontalScrollWeb>
@@ -568,6 +577,7 @@ export default function AttractionDetailScreen() {
                 근처 가볼 만한 곳
               </Text>
             </View>
+            <Text style={styles.nearbySectionDesc}>걸어서 갈 만한 2km 이내</Text>
             <HorizontalScrollWeb contentContainerStyle={styles.nearbyRow}>
               {nearby.map((n) => (
                 <Pressable
@@ -961,6 +971,13 @@ function makeStyles(colors: ThemeColors) {
   nearbySection: { marginTop: spacing.xl - 4 },
   nearbySectionTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs + 2, marginBottom: spacing.sm + 2 },
   nearbySectionTitle: { fontSize: 15, fontFamily: fontFamily.extraBold, color: colors.text },
+  nearbySectionDesc: {
+    fontSize: 12,
+    fontFamily: fontFamily.regular,
+    color: colors.textTertiary,
+    marginTop: -spacing.xs,
+    marginBottom: spacing.sm + 2,
+  },
   nearbyRow: { gap: spacing.md, paddingRight: spacing.xs },
   nearbyCredit: { marginTop: spacing.sm, textAlign: "left" },
   nearbyCard: { width: 130 },
@@ -968,6 +985,15 @@ function makeStyles(colors: ThemeColors) {
   nearbyImagePlaceholder: { alignItems: "center", justifyContent: "center" },
   nearbyName: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.text, marginTop: spacing.sm },
   nearbyMeta: { fontSize: 11, fontFamily: fontFamily.regular, color: colors.textTertiary, marginTop: 2 },
+  nearbyMetaRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  relatedBadge: {
+    backgroundColor: colors.primaryLight,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.xs + 2,
+    paddingVertical: 1,
+    marginTop: 2,
+  },
+  relatedBadgeText: { fontSize: 10, fontFamily: fontFamily.bold, color: colors.primary },
 
   badgeGroup: { flexDirection: "row", gap: spacing.xs + 2, marginLeft: spacing.sm },
   ratingBadge: {
