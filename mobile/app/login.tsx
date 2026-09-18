@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -25,6 +25,9 @@ export default function LoginScreen() {
   const [identifier, setIdentifier] = useState(""); // 이메일 또는 아이디
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // 엔터로 다음 칸/로그인까지 이어지게 합니다 — 물리 키보드(웹)든 화면 키보드든
+  // 마지막에 버튼을 따로 눌러야 했습니다.
+  const passwordRef = useRef<TextInput>(null);
 
   const handleLogin = async () => {
     if (!identifier.trim() || !password) {
@@ -73,8 +76,12 @@ export default function LoginScreen() {
         autoCorrect={false}
         value={identifier}
         onChangeText={setIdentifier}
+        returnKeyType="next"
+        submitBehavior="submit"
+        onSubmitEditing={() => passwordRef.current?.focus()}
       />
       <TextInput
+        ref={passwordRef}
         style={styles.input}
         placeholder="비밀번호"
         placeholderTextColor={colors.textTertiary}
@@ -83,6 +90,8 @@ export default function LoginScreen() {
         autoCorrect={false}
         value={password}
         onChangeText={setPassword}
+        returnKeyType="done"
+        onSubmitEditing={handleLogin}
       />
 
       <Pressable

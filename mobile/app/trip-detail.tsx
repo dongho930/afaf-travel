@@ -17,6 +17,7 @@ import { EditDeleteButtons } from "../components/EditDeleteButtons";
 import { api, errorMessage } from "../services/api";
 import { useCourseContext } from "../services/CourseContext";
 import { useTheme } from "../services/ThemeContext";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
@@ -31,6 +32,7 @@ export default function TripDetailScreen() {
   const { tripId, tripName } = useLocalSearchParams<{ tripId: string; tripName: string }>();
   const { setCourse } = useCourseContext();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = makeStyles(colors);
   const [courses, setCourses] = useState<SavedCourseSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -176,7 +178,7 @@ export default function TripDetailScreen() {
         onRequestClose={() => setEditingCourse(null)}
       >
         <KeyboardAvoidingView style={styles.modalBackdrop} behavior="padding">
-          <View style={styles.modalSheet}>
+          <View style={[styles.modalSheet, { paddingBottom: spacing.xl - 4 + insets.bottom }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>코스 이름 수정</Text>
               <TouchableOpacity onPress={() => setEditingCourse(null)} hitSlop={10}>
@@ -189,6 +191,8 @@ export default function TripDetailScreen() {
               onChangeText={setEditingTitle}
               placeholderTextColor={colors.textTertiary}
               autoFocus
+              returnKeyType="done"
+              onSubmitEditing={handleSaveTitle}
             />
             <TouchableOpacity
               style={[styles.confirmButton, isSavingTitle && styles.confirmButtonDisabled]}

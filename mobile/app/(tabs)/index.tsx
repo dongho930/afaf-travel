@@ -73,7 +73,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const styles = makeStyles(colors);
-  const { setPendingQueryText } = useCourseContext();
+  const { sendQueryToPlanner } = useCourseContext();
   // 떠 있는 검색 버튼을 키보드가 올라온 동안 숨기려고 씁니다. selector로 isVisible만
   // 골라 받아서 키보드 높이가 바뀔 때마다 화면 전체가 다시 그려지지 않게 합니다.
   // (웹에서는 이 라이브러리가 아무 이벤트도 보내지 않아 항상 false입니다 — 브라우저는
@@ -573,7 +573,7 @@ export default function HomeScreen() {
 
   const goToPlannerWithSearch = () => {
     if (searchText.trim()) {
-      setPendingQueryText(searchText.trim());
+      sendQueryToPlanner(searchText.trim());
     }
     router.push("/(tabs)/planner");
   };
@@ -685,6 +685,7 @@ export default function HomeScreen() {
                 accessibilityHint="가고 싶은 곳을 입력하면 AI가 코스를 만들어 줍니다"
                 value={searchText}
                 onChangeText={setSearchText}
+                returnKeyType="search"
                 onSubmitEditing={goToPlannerWithSearch}
               />
               <Pressable

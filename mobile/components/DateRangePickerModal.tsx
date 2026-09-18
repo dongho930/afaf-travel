@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Calendar, DateData } from "react-native-calendars";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
@@ -21,6 +22,7 @@ interface Props {
  */
 export function DateRangePickerModal({ visible, initialStartDate, initialEndDate, onClose, onConfirm }: Props) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = makeStyles(colors);
   const [startDate, setStartDate] = useState<string | null>(initialStartDate ?? null);
   const [endDate, setEndDate] = useState<string | null>(initialEndDate ?? null);
@@ -87,7 +89,7 @@ export function DateRangePickerModal({ visible, initialStartDate, initialEndDate
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, { paddingBottom: spacing.xl - 4 + insets.bottom }]}>
           <View style={styles.header}>
             <Text style={styles.title}>여행 날짜 선택</Text>
             <TouchableOpacity onPress={onClose} hitSlop={10}>

@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -34,6 +34,10 @@ export default function SignupScreen() {
   // 아니어서 명시적 동의로 인정되지 않습니다.
   const [privacyAgreed, setPrivacyAgreed] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // 엔터를 누르면 다음 칸으로, 마지막 칸에서는 회원가입까지 이어집니다.
+  const emailRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
+  const passwordConfirmRef = useRef<TextInput>(null);
 
   // 로그인 화면으로 돌아갈 때는 replace/push 대신 dismissTo 를 씁니다 — replace 는
   // 스택에 [로그인, 로그인] 처럼 같은 화면을 두 번 쌓아서, 로그인 성공 후 뒤로 가도
@@ -122,8 +126,12 @@ export default function SignupScreen() {
         autoCorrect={false}
         value={username}
         onChangeText={setUsername}
+        returnKeyType="next"
+        submitBehavior="submit"
+        onSubmitEditing={() => emailRef.current?.focus()}
       />
       <TextInput
+        ref={emailRef}
         style={styles.input}
         placeholder="이메일"
         placeholderTextColor={colors.textTertiary}
@@ -132,8 +140,12 @@ export default function SignupScreen() {
         keyboardType="email-address"
         value={email}
         onChangeText={setEmail}
+        returnKeyType="next"
+        submitBehavior="submit"
+        onSubmitEditing={() => passwordRef.current?.focus()}
       />
       <TextInput
+        ref={passwordRef}
         style={styles.input}
         placeholder="비밀번호 (6자 이상)"
         placeholderTextColor={colors.textTertiary}
@@ -142,8 +154,12 @@ export default function SignupScreen() {
         autoCorrect={false}
         value={password}
         onChangeText={setPassword}
+        returnKeyType="next"
+        submitBehavior="submit"
+        onSubmitEditing={() => passwordConfirmRef.current?.focus()}
       />
       <TextInput
+        ref={passwordConfirmRef}
         style={styles.input}
         placeholder="비밀번호 확인"
         placeholderTextColor={colors.textTertiary}
@@ -152,6 +168,8 @@ export default function SignupScreen() {
         autoCorrect={false}
         value={passwordConfirm}
         onChangeText={setPasswordConfirm}
+        returnKeyType="done"
+        onSubmitEditing={handleSignup}
       />
 
       {/* 개인정보를 수집하기 '전에' 무엇을 왜 받는지 보여주고 동의를 받습니다.

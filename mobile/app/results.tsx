@@ -17,7 +17,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Alert } from "../services/crossPlatformAlert";
 import DraggableFlatList, { ScaleDecorator } from "react-native-draggable-flatlist";
 import { EXTRA_INFO_LABELS_BY_CATEGORY } from "../components/ExtraInfoList";
@@ -42,6 +42,7 @@ export default function ResultsScreen() {
   const { course, setCourse, dayCourses, setDayCourses, visitDate } = useCourseContext();
   const { session } = useAuth();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = makeStyles(colors);
   const [offlineNotice, setOfflineNotice] = useState(false);
   const [saveModalVisible, setSaveModalVisible] = useState(false);
@@ -500,7 +501,7 @@ export default function ResultsScreen() {
           onPress={() => setDayPickerVisible(false)}
           accessibilityLabel="닫기"
         >
-          <Pressable style={styles.pickerSheet} onPress={(e) => e.stopPropagation()}>
+          <Pressable style={[styles.pickerSheet, { paddingBottom: spacing.xl + insets.bottom }]} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.pickerTitle}>어느 날을 지도로 볼까요?</Text>
             {dayCourses.map((day, i) => (
               <TouchableOpacity

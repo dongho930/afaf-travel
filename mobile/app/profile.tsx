@@ -11,7 +11,7 @@ import {
   SignOutIcon,
   UserIcon,
 } from "phosphor-react-native";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Alert } from "../services/crossPlatformAlert";
@@ -51,6 +51,8 @@ export default function ProfileScreen() {
   const [isSavingUsername, setIsSavingUsername] = useState(false);
 
   const [passwordModalVisible, setPasswordModalVisible] = useState(false);
+  // 새 비밀번호에서 엔터를 누르면 확인 칸으로 넘어가게 합니다.
+  const newPasswordConfirmRef = useRef<TextInput>(null);
   const [newPassword, setNewPassword] = useState("");
   const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
   const [isSavingPassword, setIsSavingPassword] = useState(false);
@@ -193,6 +195,8 @@ export default function ProfileScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 placeholderTextColor={colors.textTertiary}
+                returnKeyType="done"
+                onSubmitEditing={handleSaveUsername}
               />
               <ActionButton label="저장" size="sm" onPress={handleSaveUsername} loading={isSavingUsername} />
               <ActionButton
@@ -274,8 +278,12 @@ export default function ProfileScreen() {
               autoCorrect={false}
               value={newPassword}
               onChangeText={setNewPassword}
+              returnKeyType="next"
+              submitBehavior="submit"
+              onSubmitEditing={() => newPasswordConfirmRef.current?.focus()}
             />
             <TextInput
+              ref={newPasswordConfirmRef}
               style={[styles.input, { marginTop: spacing.sm + 2 }]}
               placeholder="새 비밀번호 확인"
               placeholderTextColor={colors.textTertiary}
@@ -284,6 +292,8 @@ export default function ProfileScreen() {
               autoCorrect={false}
               value={newPasswordConfirm}
               onChangeText={setNewPasswordConfirm}
+              returnKeyType="done"
+              onSubmitEditing={handleChangePassword}
             />
             <View style={[styles.editRow, styles.modalButtonRow]}>
               <ActionButton

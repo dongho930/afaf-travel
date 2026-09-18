@@ -5,6 +5,7 @@ import React, { useCallback, useState } from "react";
 import { ActivityIndicator, FlatList, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { PostCard } from "../components/PostCard";
 import { Alert } from "../services/crossPlatformAlert";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
@@ -20,6 +21,7 @@ import { PostItem } from "../types";
 export default function PostManageScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = makeStyles(colors);
 
   const [posts, setPosts] = useState<PostItem[]>([]);
@@ -130,7 +132,7 @@ export default function PostManageScreen() {
         onRequestClose={() => setViewingPost(null)}
       >
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalSheet}>
+          <View style={[styles.modalSheet, { paddingBottom: spacing.xl - 4 + insets.bottom }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>게시물</Text>
               <View style={styles.modalHeaderActions}>

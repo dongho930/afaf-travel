@@ -18,6 +18,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Alert } from "../services/crossPlatformAlert";
 import { PhotoCarousel } from "../components/PhotoCarousel";
 import { PhotoEditor } from "../components/PhotoEditor";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
@@ -50,6 +51,7 @@ export default function PostCreateScreen() {
   const router = useRouter();
   const { session } = useAuth();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = makeStyles(colors);
 
   const [visitedPlaces, setVisitedPlaces] = useState<VisitedPlace[]>([]);
@@ -274,7 +276,7 @@ export default function PostCreateScreen() {
         onRequestClose={() => setPlaceModalVisible(false)}
       >
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalSheet}>
+          <View style={[styles.modalSheet, { paddingBottom: spacing.xl - 4 + insets.bottom }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>여행지 선택</Text>
               <TouchableOpacity onPress={() => setPlaceModalVisible(false)} hitSlop={10}>

@@ -1,13 +1,14 @@
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import {
   CalendarBlankIcon,
   CheckIcon,
   MapPinIcon,
   MicrophoneIcon,
   SparkleIcon,
+  XCircleIcon,
   type Icon,
 } from "phosphor-react-native";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -22,7 +23,7 @@ import {
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Alert } from "../../services/crossPlatformAlert";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { DateRangePickerModal } from "../../components/DateRangePickerModal";
 import { FadeInView } from "../../components/FadeInView";
 import { SelectableArea } from "../../components/SelectableArea";
@@ -116,6 +117,7 @@ function TypeTabButton({
 export default function PlannerScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = makeStyles(colors);
   const {
     userType,
@@ -126,6 +128,7 @@ export default function PlannerScreen() {
     setRecommendations,
     setPendingQueryText,
     pendingQueryText,
+    queryHandoffSeq,
     setParsedQuery,
     visitDate,
     setVisitDate,
@@ -150,9 +153,26 @@ export default function PlannerScreen() {
   }, []);
 
   useEffect(() => {
-    // 홈 탭 검색창에서 넘어온 문구가 있으면 반영
-    if (pendingQueryText) setQueryText(pendingQueryText);
-  }, [pendingQueryText]);
+    // 홈 탭 검색창에서 넘어온 문구를 반영합니다. 값이 아니라 넘긴 횟수를 보기
+    // 때문에, 지난번과 똑같은 문구를 다시 넘겨도 빠짐없이 한 번씩 반영됩니다.
+    if (queryHandoffSeq === 0) return;
+    setQueryText(pendingQueryText);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryHandoffSeq]);
+
+  // 이 탭은 다른 탭에 갔다 와도 화면이 살아있어서 쓰던 글이 그대로 남습니다.
+  // 잠깐 다른 탭을 둘러보고 온 경우에는 그게 맞지만, 추천까지 받고 결과를 보다
+  // 돌아온 경우에는 이미 처리된 문장이 남아 새 요청에 방해가 됐습니다. 그래서
+  // '추천을 받으러 떠났다'는 표시를 남겨뒀다가, 이 탭이 다시 보일 때만 비웁니다.
+  const submittedRef = useRef(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!submittedRef.current) return;
+      submittedRef.current = false;
+      setQueryText("");
+    }, [])
+  );
 
   useEffect(() => {
     if (regionModalVisible && regionOptions.length === 0 && !regionLoading) {
@@ -195,6 +215,7 @@ export default function PlannerScreen() {
       // 서버가 문장에서 읽어낸 조건(지역/동행자/목적)을 다음 화면에서 보여줍니다.
       setParsedQuery(parsed ?? null);
       setPendingQueryText(queryText);
+      submittedRef.current = true;
       router.push("/select");
     } catch (err) {
       Alert.alert("장소 추천 실패", errorMessage(err));
@@ -274,15 +295,30 @@ export default function PlannerScreen() {
                 <Text style={styles.hint}>예: "{exampleQuery}"</Text>
               </SelectableArea>
             </FadeInView>
-            <TextInput
-              style={styles.input}
-              multiline
-              placeholder="여기에 입력하거나 마이크 버튼을 눌러 말씀해주세요"
-              placeholderTextColor={colors.textTertiary}
-              value={queryText}
-              onChangeText={setQueryText}
-              accessibilityLabel="여행 요청 입력창"
-            />
+            {/* 여러 줄 입력창이라 글을 지우려면 백스페이스를 한참 눌러야 했습니다.
+                여행지 검색창과 같은 모양의 지우기 버튼을 오른쪽 위에 얹습니다. */}
+            <View style={styles.inputWrap}>
+              <TextInput
+                style={styles.input}
+                multiline
+                placeholder="여기에 입력하거나 마이크 버튼을 눌러 말씀해주세요"
+                placeholderTextColor={colors.textTertiary}
+                value={queryText}
+                onChangeText={setQueryText}
+                accessibilityLabel="여행 요청 입력창"
+              />
+              {queryText.length > 0 && (
+                <Pressable
+                  style={({ pressed }) => [styles.inputClearButton, pressed && styles.inputClearButtonPressed]}
+                  onPress={() => setQueryText("")}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="입력 내용 지우기"
+                >
+                  <XCircleIcon size={20} color={colors.textTertiary} weight="fill" />
+                </Pressable>
+              )}
+            </View>
 
             {VoiceInputButton ? (
               <VoiceInputButton
@@ -336,7 +372,7 @@ export default function PlannerScreen() {
 
       <Modal visible={regionModalVisible} animationType="slide" transparent onRequestClose={() => setRegionModalVisible(false)}>
         <KeyboardAvoidingView style={styles.modalBackdrop} behavior="padding">
-          <View style={styles.modalSheet}>
+          <View style={[styles.modalSheet, { paddingBottom: spacing.lg + insets.bottom }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>지역 선택</Text>
               <TouchableOpacity onPress={() => setRegionModalVisible(false)} hitSlop={10}>
@@ -350,6 +386,16 @@ export default function PlannerScreen() {
               placeholderTextColor={colors.textTertiary}
               value={regionSearch}
               onChangeText={setRegionSearch}
+              returnKeyType="search"
+              // 검색해서 좁혀둔 상태에서 엔터를 누르면 맨 위 지역을 누른 것과 같게
+              // 처리합니다. 검색어가 없을 때는 전체 목록의 첫 지역이 엉뚱하게
+              // 선택되므로 아무 것도 하지 않습니다.
+              onSubmitEditing={() => {
+                const first = regionSearch.trim() ? filteredRegions[0] : null;
+                if (!first) return;
+                setRegion(first.code, first.name);
+                setRegionModalVisible(false);
+              }}
             />
 
             <TouchableOpacity
@@ -437,6 +483,11 @@ function makeStyles(colors: ThemeColors) {
   typeDescText: { fontSize: 20, lineHeight: 27, fontFamily: fontFamily.regular, color: colors.textSecondary, flexShrink: 1 },
 
   hint: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textTertiary, marginBottom: spacing.md },
+  inputWrap: { position: "relative" },
+  // 지우기 버튼이 앉을 자리만큼 오른쪽을 비워둡니다 — 안 그러면 긴 문장의
+  // 첫 줄이 버튼 아래로 파고듭니다.
+  inputClearButton: { position: "absolute", top: spacing.md, right: spacing.md },
+  inputClearButtonPressed: { opacity: 0.5 },
   input: {
     minHeight: 110,
     backgroundColor: colors.surface,
@@ -444,6 +495,7 @@ function makeStyles(colors: ThemeColors) {
     borderWidth: 1,
     borderColor: colors.border,
     padding: spacing.lg,
+    paddingRight: spacing.xxl + 8,
     fontSize: 16,
     fontFamily: fontFamily.regular,
     color: colors.text,

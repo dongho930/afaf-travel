@@ -11,9 +11,11 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Alert } from "../services/crossPlatformAlert";
 import { api, errorMessage } from "../services/api";
 import { useTheme } from "../services/ThemeContext";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
@@ -48,6 +50,7 @@ interface Props {
  */
 export function SaveCourseModal({ visible, onClose, defaultNewTripName, onConfirm, initialMode = "pick" }: Props) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = makeStyles(colors);
   const [trips, setTrips] = useState<TripSummary[]>([]);
   const [loadingTrips, setLoadingTrips] = useState(false);
@@ -121,8 +124,8 @@ export function SaveCourseModal({ visible, onClose, defaultNewTripName, onConfir
   return (
     <>
       <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalSheet}>
+        <KeyboardAvoidingView style={styles.modalBackdrop} behavior="padding">
+          <View style={[styles.modalSheet, { paddingBottom: spacing.xl - 4 + insets.bottom }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>코스 저장하기</Text>
               <TouchableOpacity onPress={onClose} hitSlop={10}>
@@ -185,6 +188,8 @@ export function SaveCourseModal({ visible, onClose, defaultNewTripName, onConfir
                   placeholderTextColor={colors.textTertiary}
                   value={newTripName}
                   onChangeText={setNewTripName}
+                  returnKeyType="done"
+                  onSubmitEditing={handleSave}
                 />
 
                 <Text style={styles.fieldLabel}>분류</Text>
@@ -214,6 +219,8 @@ export function SaveCourseModal({ visible, onClose, defaultNewTripName, onConfir
                     value={customCategoryText}
                     onChangeText={setCustomCategoryText}
                     maxLength={20}
+                    returnKeyType="done"
+                    onSubmitEditing={handleSave}
                   />
                 )}
 
@@ -243,7 +250,7 @@ export function SaveCourseModal({ visible, onClose, defaultNewTripName, onConfir
               )}
             </Pressable>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <DateRangePickerModal

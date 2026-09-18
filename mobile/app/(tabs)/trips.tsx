@@ -26,7 +26,7 @@ import {
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Alert } from "../../services/crossPlatformAlert";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { AnimatedChip } from "../../components/AnimatedChip";
 import { DateRangePickerModal } from "../../components/DateRangePickerModal";
 import { EditDeleteButtons } from "../../components/EditDeleteButtons";
@@ -133,6 +133,7 @@ export default function TripsScreen() {
   const router = useRouter();
   const { session } = useAuth();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = makeStyles(colors);
   const [trips, setTrips] = useState<TripSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -715,7 +716,7 @@ export default function TripsScreen() {
 
       <Modal visible={!!editingTrip} animationType="slide" transparent onRequestClose={() => setEditingTrip(null)}>
         <KeyboardAvoidingView style={styles.modalBackdrop} behavior="padding">
-          <View style={styles.modalSheet}>
+          <View style={[styles.modalSheet, { paddingBottom: spacing.xl - 4 + insets.bottom }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>여행 수정</Text>
               <TouchableOpacity onPress={() => setEditingTrip(null)} hitSlop={10}>
@@ -729,6 +730,8 @@ export default function TripsScreen() {
               value={editName}
               onChangeText={setEditName}
               placeholderTextColor={colors.textTertiary}
+              returnKeyType="done"
+              onSubmitEditing={handleSaveEdit}
             />
 
             <Text style={styles.fieldLabel}>분류</Text>
@@ -758,6 +761,8 @@ export default function TripsScreen() {
                 value={editCustomCategoryText}
                 onChangeText={setEditCustomCategoryText}
                 maxLength={20}
+                returnKeyType="done"
+                onSubmitEditing={handleSaveEdit}
               />
             )}
 

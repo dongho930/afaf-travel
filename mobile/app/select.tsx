@@ -1,6 +1,6 @@
 import { useRouter } from "expo-router";
 import { ArrowsClockwiseIcon, CheckIcon, SparkleIcon } from "phosphor-react-native";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -61,21 +61,35 @@ export default function SelectPlacesScreen() {
   // 부가 정보까지 다 준비된 뒤에야(홈 화면과 같은 방식) 목록을 부드럽게 보여줍니다.
   const [extraInfoReady, setExtraInfoReady] = useState(false);
 
-  useEffect(() => {
-    setExtraInfoReady(false);
-    const targets = recommendations
+  // 후보 목록에 맞는 부가 정보를 한 번에 불러옵니다. 화면 첫 진입(아래 effect)과
+  // 새로고침이 같은 함수를 씁니다 — 새로고침은 목록을 바꾸기 '전에' 미리 받아두려고요.
+  const loadExtraInfo = useCallback(async (candidates: PlaceCandidate[]) => {
+    const targets = candidates
       .map((c) => c.attraction)
       .filter((a) => (a.extra_info?.length ?? 0) === 0 && EXTRA_INFO_LABELS_BY_CATEGORY[a.category]);
-    if (targets.length === 0) {
-      setExtraInfoReady(true);
-      return;
+    if (targets.length === 0) return {};
+    try {
+      return await api.getExtraInfo(targets.map((a) => ({ contentId: a.content_id, category: a.category })));
+    } catch (err) {
+      console.warn("[부가 정보] 불러오지 못했습니다:", err);
+      return {};
     }
-    api
-      .getExtraInfo(targets.map((a) => ({ contentId: a.content_id, category: a.category })))
-      .then(setExtraInfoMap)
-      .catch((err) => console.warn("[부가 정보] 불러오지 못했습니다:", err))
-      .finally(() => setExtraInfoReady(true));
-  }, [recommendations]);
+  }, []);
+
+  // 부가 정보를 이미 챙겨둔 후보 목록입니다. 새로고침이 여기에 새 목록을 미리
+  // 적어두면 아래 effect가 같은 목록을 두 번 조회하지도, 목록을 스피너 화면으로
+  // 갈아끼우지도 않습니다 — 그래서 새로고침 중에도 보던 카드가 그대로 남습니다.
+  const loadedForRef = useRef<PlaceCandidate[] | null>(null);
+
+  useEffect(() => {
+    if (loadedForRef.current === recommendations) return;
+    loadedForRef.current = recommendations;
+    setExtraInfoReady(false);
+    loadExtraInfo(recommendations).then((map) => {
+      setExtraInfoMap(map);
+      setExtraInfoReady(true);
+    });
+  }, [recommendations, loadExtraInfo]);
 
   const toggle = (contentId: string) => {
     setSelectedIds((prev) => {
@@ -122,7 +136,14 @@ export default function SelectPlacesScreen() {
         Alert.alert("새로운 장소가 없어요", "이미 고르신 곳 말고는 더 찾지 못했어요. 다른 표현으로 다시 시도해주세요.");
         return;
       }
-      setRecommendations([...keptCandidates, ...freshCandidates]);
+      // 부가 정보까지 다 받아둔 뒤에 목록을 한 번에 갈아끼웁니다. 새로고침 도중에는
+      // 지금 보고 있는 카드가 그대로 남아 있고(버튼 안 스피너만 돌고), 결과가 오는
+      // 순간 카드만 조용히 교체되면서 맨 위로 올라갑니다.
+      const merged = [...keptCandidates, ...freshCandidates];
+      const map = await loadExtraInfo(merged);
+      loadedForRef.current = merged; // 위 effect가 같은 목록을 다시 조회하지 않도록
+      setExtraInfoMap(map);
+      setRecommendations(merged);
       setParsedQuery(parsed ?? null);
       // 선택(selectedIds)은 그대로 둡니다 — 고른 카드가 목록에 남아 있으니 유효합니다.
       listRef.current?.scrollToOffset({ offset: 0, animated: true });
@@ -398,6 +419,12 @@ function makeStyles(colors: ThemeColors) {
     borderRadius: radius.xl,
     marginBottom: spacing.lg,
     overflow: "hidden",
+    // 테두리는 선택 여부와 상관없이 항상 2px로 두고 '색'만 바꿉니다. 두께를
+    // 0↔2로 껐다 켜면 overflow:hidden 카드의 잘라내기 영역이 그때마다 다시
+    // 계산되는데, 안드로이드에서는 이때 사진과 글씨가 통째로 잘려나가 빈 흰
+    // 상자만 남았습니다 — 선택을 취소해도 카드가 흰 카드로 굳던 증상입니다.
+    borderWidth: 2,
+    borderColor: "transparent",
     // 흰 배경 위에서 흰 카드의 경계가 사라지지 않도록, 짧은 접지 그림자와
     // 넓은 들어올림 그림자를 겹쳐 씁니다 (AttractionCard와 동일한 레시피).
     ...Platform.select({
@@ -411,8 +438,8 @@ function makeStyles(colors: ThemeColors) {
       },
     }),
   },
-  // 선택된 카드만 예외적으로 테두리를 둘러 "선택됨" 상태를 분명히 보여줍니다.
-  cardSelected: { borderWidth: 2, borderColor: colors.primary },
+  // 선택된 카드만 예외적으로 테두리에 색을 입혀 "선택됨" 상태를 분명히 보여줍니다.
+  cardSelected: { borderColor: colors.primary },
   checkbox: {
     width: 26,
     height: 26,

@@ -844,7 +844,7 @@ export default function AttractionDetailScreen() {
       onRequestClose={() => setPostsModalVisible(false)}
     >
       <View style={styles.postsModalBackdrop}>
-        <View style={styles.postsModalSheet}>
+        <View style={[styles.postsModalSheet, { paddingBottom: spacing.xl - 4 + insets.bottom }]}>
           <View style={styles.postsModalHeader}>
             <Text style={styles.postsModalTitle}>게시물</Text>
             <TouchableOpacity onPress={() => setPostsModalVisible(false)} hitSlop={10}>

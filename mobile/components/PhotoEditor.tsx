@@ -18,6 +18,7 @@ import Animated, { useAnimatedStyle, useSharedValue } from "react-native-reanima
 import Svg, { Defs, FeColorMatrix, Filter, Image as SvgImage } from "react-native-svg";
 import { captureRef } from "react-native-view-shot";
 import { Alert } from "../services/crossPlatformAlert";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
@@ -66,6 +67,7 @@ export function PhotoEditor({
   onConfirm: (base64: string) => void;
 }) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = makeStyles(colors);
 
   const [frameSize, setFrameSize] = useState(0);
@@ -256,7 +258,7 @@ export function PhotoEditor({
     <Modal visible animationType="slide" onRequestClose={onCancel} presentationStyle="fullScreen">
       <WebFrame colors={colors}>
       <View style={styles.container}>
-        <View style={styles.topBar}>
+        <View style={[styles.topBar, { paddingTop: spacing.xl + insets.top }]}>
           <TouchableOpacity style={styles.topBarIconButton} onPress={onCancel} hitSlop={10} disabled={processing}>
             <XIcon size={18} color={EDITOR_TEXT} weight="bold" />
           </TouchableOpacity>
@@ -315,7 +317,7 @@ export function PhotoEditor({
           )}
         </View>
 
-        <View style={styles.controlPanel}>
+        <View style={[styles.controlPanel, { paddingBottom: spacing.lg + insets.bottom }]}>
           <Text style={styles.panelLabel}>필터</Text>
           <HorizontalScrollWeb style={styles.toolbarRow}>
             {PHOTO_FILTER_PRESETS.map((preset) => (

@@ -6,7 +6,7 @@ import { ActivityIndicator, Animated, Modal, Pressable, ScrollView, StyleSheet, 
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Alert } from "../../services/crossPlatformAlert";
 import { ActionButton } from "../../components/ActionButton";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { AccessibilityIcons, accessibilityFeatureLabels } from "../../components/AccessibilityIcons";
 import { FadeInView } from "../../components/FadeInView";
 import { PhotoCardHeader } from "../../components/PhotoCardHeader";
@@ -223,6 +223,7 @@ export default function AccessibilityScreen() {
   const router = useRouter();
   const { session } = useAuth();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = makeStyles(colors);
   const [summary, setSummary] = useState<AccessibilitySummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -642,7 +643,7 @@ export default function AccessibilityScreen() {
         onRequestClose={() => setReportModalVisible(false)}
       >
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalSheet}>
+          <View style={[styles.modalSheet, { paddingBottom: spacing.xl - 4 + insets.bottom }]}>
             <KeyboardAwareScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" bottomOffset={20}>
               <Text style={styles.modalTitle}>접근성 제보하기</Text>
 
@@ -665,6 +666,14 @@ export default function AccessibilityScreen() {
                     placeholderTextColor={colors.textTertiary}
                     value={placeQuery}
                     onChangeText={setPlaceQuery}
+                    returnKeyType="search"
+                    // 결과 목록에서 맨 위 항목을 누른 것과 같게 처리합니다.
+                    onSubmitEditing={() => {
+                      const first = placeSearchResults[0];
+                      if (!first) return;
+                      setSelectedPlace(first);
+                      setPlaceSearchResults([]);
+                    }}
                   />
                   {searchingPlace && <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: 6 }} />}
                   {placeSearchResults.map((p) => (

@@ -29,6 +29,11 @@ interface CourseContextValue {
   setRecommendations: (r: PlaceCandidate[]) => void;
   pendingQueryText: string;
   setPendingQueryText: (q: string) => void;
+  // 홈 탭 검색창에서 AI 플래너 입력창으로 문구를 넘길 때 씁니다. 넘길 때마다
+  // 번호(queryHandoffSeq)가 올라가서, 지난번과 똑같은 문구를 넘겨도 플래너가
+  // "새로 넘어온 것"으로 알아봅니다.
+  queryHandoffSeq: number;
+  sendQueryToPlanner: (text: string) => void;
 
   // 서버가 질의에서 읽어낸 조건(지역/동행자/목적). 장소 선택 화면에서 "이렇게
   // 이해했어요"로 보여주기 위해 1단계 응답에서 받아 함께 넘깁니다.
@@ -51,8 +56,14 @@ export function CourseProvider({ children }: { children: React.ReactNode }) {
   const [sigunguName, setSigunguName] = useState<string | null>(null);
   const [recommendations, setRecommendations] = useState<PlaceCandidate[]>([]);
   const [pendingQueryText, setPendingQueryText] = useState("");
+  const [queryHandoffSeq, setQueryHandoffSeq] = useState(0);
   const [parsedQuery, setParsedQuery] = useState<ParsedQuery | null>(null);
   const [visitDate, setVisitDate] = useState<string | null>(null);
+
+  const sendQueryToPlanner = (text: string) => {
+    setPendingQueryText(text);
+    setQueryHandoffSeq((n) => n + 1);
+  };
 
   const setRegion = (cd: number | null, name: string | null) => {
     setSigunguCd(cd);
@@ -87,6 +98,8 @@ export function CourseProvider({ children }: { children: React.ReactNode }) {
         setRecommendations,
         pendingQueryText,
         setPendingQueryText,
+        queryHandoffSeq,
+        sendQueryToPlanner,
         parsedQuery,
         setParsedQuery,
         visitDate,

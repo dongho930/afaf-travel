@@ -17,6 +17,7 @@ import {
 import { WebView, WebViewMessageEvent } from "react-native-webview";
 import { AttractionCard } from "../components/AttractionCard";
 import { HorizontalScrollWeb } from "../components/HorizontalScrollWeb";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fontFamily } from "../constants/fonts";
 import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
@@ -181,6 +182,7 @@ export default function MapScreen() {
   const dayIndex = Math.max(0, Math.trunc(Number(day)) || 0);
   const course = dayCourses[dayIndex]?.course ?? firstDayCourse;
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = makeStyles(colors);
   // null = 아직 조회 전. 조회가 끝나면(전부 실패했더라도) 배열이 들어오고,
   // 그때 지도 페이지로 넘겨서 로딩 오버레이를 걷습니다.
@@ -519,7 +521,7 @@ export default function MapScreen() {
         onRequestClose={() => setSelectedStop(null)}
       >
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalSheet}>
+          <View style={[styles.modalSheet, { paddingBottom: spacing.lg + insets.bottom }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>상세 정보</Text>
               <TouchableOpacity onPress={() => setSelectedStop(null)} hitSlop={10}>
