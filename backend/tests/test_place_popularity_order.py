@@ -96,6 +96,49 @@ def test_인기_장소는_목록_끝에_있어도_첫_페이지에_온다(monkey
     assert names[1] == "아침고요수목원"  # 점수 0.5
 
 
+def test_점수가_높은_곳은_카테고리가_달라도_맨_앞에_온다(monkeypatch):
+    """
+    카테고리별 목록은 라운드로빈으로 이어붙입니다. 그 자체는 숙박만 잔뜩 나오는
+    걸 막아주지만, 앞의 다섯 칸이 '카테고리별 1등'으로 채워지는 탓에 전체 1위가
+    뒤쪽 카테고리(여기선 음식점)에 있으면 활동 기록이 없는 곳들 뒤로 밀렸습니다.
+    """
+
+    async def two_categories(ldong_regn_cd, content_type_id, max_age_hours=24.0):
+        if content_type_id == 12:  # 관광지 — 점수 없는 곳들
+            return [
+                {
+                    "content_id": cid,
+                    "name": name,
+                    "address": "경기도 수원시 팔달구 정조로 825",
+                    "category": "관광지",
+                    "image_url": None,
+                }
+                for cid, name in PLACES
+            ]
+        if content_type_id == 39:  # 음식점 — 전체 1위가 여기 있습니다
+            return [
+                {
+                    "content_id": "100",
+                    "name": "수원왕갈비",
+                    "address": "경기도 수원시 팔달구 정조로 825",
+                    "category": "음식점",
+                    "image_url": None,
+                }
+            ]
+        return []
+
+    monkeypatch.setattr(tour_api, "get_cached_attraction_list", two_categories)
+
+    async def scores(_self):
+        return {"100": 0.9}
+
+    monkeypatch.setattr(tour_api.TourApiClient, "_place_popularity_scores", scores)
+
+    names = [a.name for a in _search(limit=10)]
+
+    assert names[0] == "수원왕갈비"
+
+
 def test_활동_기록이_없으면_가나다순으로_남지_않는다(monkeypatch):
     async def no_scores(_self):
         return {}

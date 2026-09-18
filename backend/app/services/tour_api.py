@@ -1897,7 +1897,8 @@ class TourApiClient:
         # 카테고리별 목록을 자르기 전에 세울 순서를 준비합니다. 한 번만 읽어서
         # 다섯 갈래 조회가 같은 기준을 쓰게 하고, 못 읽으면 점수 없이(=전부 섞기)
         # 진행합니다 — 목록 자체는 이미 확보돼 있으니 화면이 멈출 이유가 없습니다.
-        order_key = _popularity_order_key(await self._place_popularity_scores(), _today_seed())
+        popularity_scores = await self._place_popularity_scores()
+        order_key = _popularity_order_key(popularity_scores, _today_seed())
 
         async with httpx.AsyncClient(timeout=15) as client:
             results_per_type = await asyncio.gather(
@@ -1926,6 +1927,15 @@ class TourApiClient:
                         if a.content_id and a.content_id not in seen_ids:
                             seen_ids.add(a.content_id)
                             attractions.append(a)
+
+            # 라운드로빈은 카테고리를 골고루 섞어주는 대신 '전체 순위'를 흩뜨립니다 —
+            # 앞의 다섯 칸이 카테고리별 1등으로 채워져서, 전체 1위가 숙박에 있으면
+            # 활동 기록이 아예 없는 곳 네 개가 그 앞에 깔립니다. '인기 여행지'인데
+            # 인기 1위가 첫 칸에 없는 셈이라, 점수가 있는 곳만 점수순으로 앞으로
+            # 당깁니다. 점수가 없는 곳들은 값이 전부 같아서(0) 정렬이 안정적인
+            # 파이썬 sort가 방금 만든 라운드로빈 순서를 그대로 지켜줍니다 —
+            # 카테고리 다양성은 목록 뒤쪽에서 그대로 유지됩니다.
+            attractions.sort(key=lambda a: -popularity_scores.get(a.content_id, 0.0))
 
             # 시/군/구 필터는 위 _fetch_by_content_type 안에서 이미 적용됐습니다.
             # 예전에는 여기서 한 번 더 거르면서 "결과가 0개면 필터를 무시하고 시/도

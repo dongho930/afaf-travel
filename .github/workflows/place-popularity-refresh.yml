@@ -1,0 +1,26 @@
+name: Place popularity refresh
+
+# 홈 화면 '인기 여행지' 목록의 순서(장소별 인기도)를 매일 다시 계산하기 위한
+# 트리거입니다. 지역 칩을 갱신하는 region-popularity-refresh와 같은 방식 —
+# Render Cron Job은 웹 서비스와 별도로 과금돼서, GitHub Actions의 무료 스케줄로
+# 백엔드의 refresh 엔드포인트만 curl로 부릅니다.
+#
+# 이 워크플로우가 없던 동안 place_popularity_daily 테이블이 한 번도 채워지지
+# 않아서, 모든 장소의 점수가 0이 됐습니다. 그러면 정렬 코드가 멀쩡해도 전부
+# '활동 기록 없음' 취급이라 날짜 해시로 섞이기만 하고, 인기 순위는 화면에
+# 전혀 반영되지 않습니다.
+on:
+  schedule:
+    # UTC 20:33 = KST 05:33. 앞서 도는 tourism-cache-refresh(KST 04:47),
+    # region-popularity-refresh(KST 05:23)와 10분씩 갈라뒀습니다 — 같은 시각이면
+    # 같은 백엔드(Render 무료 인스턴스)를 동시에 때립니다.
+    - cron: "33 20 * * *"
+  workflow_dispatch: {} # Actions 탭에서 수동 실행 버튼으로도 바로 테스트 가능
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call place-popularity refresh endpoint
+        run: |
+          curl -fsS "https://afaf-travel.onrender.com/api/tourism/place-popularity/refresh"
