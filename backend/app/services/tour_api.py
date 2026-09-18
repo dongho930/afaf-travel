@@ -20,6 +20,7 @@ USE_MOCK_DATA=true (기본값) 일 때는 경기도 지역 목업 데이터를 �
 """
 import asyncio
 import datetime
+import hashlib
 import logging
 import math
 import random
@@ -30,6 +31,7 @@ import httpx
 from app.config import get_settings
 from app.models.schemas import AccessibilityFeatures, Attraction, CongestionForecast, InfoField
 from app.services.memory_cache import TTLCache
+from app.services.place_popularity_service import read_place_popularity
 from app.services.review_service import get_average_ratings
 from app.services.sigungu_codes import (
     area_code_for_signgu,
@@ -225,6 +227,48 @@ def _filter_and_mix_by_regions(
             if i < len(group):
                 mixed.append(group[i])
     return mixed
+
+
+def _today_seed() -> str:
+    """
+    하루 단위로 바뀌는 시드. 한국 날짜(UTC+9)로 잡아야 사용자가 체감하는 '오늘'과
+    맞아떨어집니다.
+    """
+    return (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=9)).strftime(
+        "%Y-%m-%d"
+    )
+
+
+def _stable_shuffle_value(seed: str, content_id: str) -> float:
+    """
+    seed와 content_id를 0~1 사이의 값 하나로 바꿉니다. 파이썬 기본 hash()는
+    프로세스마다 값이 달라져서(PYTHONHASHSEED) 서버가 재시작하면 순서가 통째로
+    바뀌므로 쓰지 않고, 언제 어디서 계산해도 같은 값이 나오는 해시를 씁니다.
+    """
+    digest = hashlib.blake2b(f"{seed}:{content_id}".encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, "big") / float(1 << 64)
+
+
+def _popularity_order_key(scores: dict[str, float], seed: str):
+    """
+    '인기 여행지' 목록의 순서를 정하는 키를 만듭니다.
+
+    점수(리뷰·게시물·저장된 코스·평점을 하루 한 번 집계한 값)가 있는 곳이 먼저,
+    높은 순으로 옵니다. 아직 활동 기록이 없는 곳은 날짜로 섞어서 매일 다른 곳이
+    앞에 오게 합니다 — 안 그러면 관광공사 API가 주는 순서(제목순)가 그대로 남아
+    늘 이름이 ㄱ으로 시작하는 곳만 보입니다.
+
+    섞는 값은 그 날짜 안에서는 항상 같습니다. 무작위로 매번 다시 섞으면
+    '더보기'(offset)로 이어 볼 때 같은 곳이 두 번 나오거나 통째로 건너뛰어집니다.
+    """
+
+    def key(a: Attraction) -> tuple[int, float]:
+        score = scores.get(a.content_id, 0.0)
+        if score > 0:
+            return (0, -score)
+        return (1, _stable_shuffle_value(seed, a.content_id or ""))
+
+    return key
 
 
 def _accessibility_benefit_labels(features: AccessibilityFeatures) -> list[str]:
@@ -1471,7 +1515,11 @@ class TourApiClient:
         num_of_rows: int,
         offset: int = 0,
         region_token_sets: list[list[str]] | None = None,
+        order_key=None,
     ) -> list[Attraction]:
+        # order_key를 주면 목록을 '자르기 전에' 그 순서로 세웁니다. 잘라낸 뒤에
+        # 정렬하면 아무리 정렬해도 결과는 늘 목록 맨 앞(=제목순 ㄱ) 몇 개일
+        # 뿐이라, 정렬 기준을 무엇으로 바꾸든 화면이 그대로였습니다.
         # areaBasedList2(관광지 목록) 자체를 캐싱합니다 — 지금까지 이 조회에
         # 캐시가 없어서, 화면을 열 때마다(카테고리 5개 기준) 매번 새로 호출하다가
         # 하루 API 호출 한도를 순식간에 다 써버리는 문제가 있었습니다. 관광지
@@ -1495,6 +1543,8 @@ class TourApiClient:
             # 시/군/구 필터가 있으면 "자르기 전에" 먼저 거릅니다 — 앞에서 잘라낸
             # 표본만 거르면 그 지역에 있는 곳 대부분이 빠집니다.
             attractions = _filter_and_mix_by_regions(attractions, region_token_sets)
+            if order_key is not None:
+                attractions = sorted(attractions, key=order_key)
             return attractions[offset : offset + num_of_rows]
 
         try:
@@ -1521,7 +1571,10 @@ class TourApiClient:
                 await save_attraction_list_cache(
                     ldong_regn_cd, content_type_id, [self._attraction_to_cache_dict(a) for a in attractions]
                 )
-            return _filter_and_mix_by_regions(attractions, region_token_sets)[offset : offset + num_of_rows]
+            ordered = _filter_and_mix_by_regions(attractions, region_token_sets)
+            if order_key is not None:
+                ordered = sorted(ordered, key=order_key)
+            return ordered[offset : offset + num_of_rows]
         except Exception as exc:
             # 특정 카테고리 조회가 실패해도 다른 카테고리 결과는 살립니다 — 다만
             # 예전엔 원인을 그냥 삼켜버려서, 5개 카테고리가 전부 실패해 목록이
@@ -1753,6 +1806,20 @@ class TourApiClient:
         attractions = await asyncio.gather(*(self.get_attraction_detail(cid) for cid in content_ids))
         return [a for a in attractions if a is not None]
 
+    async def _place_popularity_scores(self) -> dict[str, float]:
+        """
+        하루 한 번 집계해둔 장소별 인기도({content_id: 점수})를 읽습니다.
+        이 값이 없어도 목록은 나와야 하므로(순서만 전부 '섞기'가 됩니다),
+        느리거나 실패하면 빈 값으로 넘어갑니다.
+        """
+        try:
+            return await asyncio.wait_for(read_place_popularity(), timeout=3.0)
+        except asyncio.TimeoutError:
+            logger.warning("장소 인기도 조회가 3초 안에 끝나지 않아 순서를 섞어서 보여줍니다.")
+        except Exception as e:
+            logger.warning("장소 인기도를 읽지 못해 순서를 섞어서 보여줍니다: %s", e)
+        return {}
+
     async def search_accessible_attractions(
         self,
         region: str,
@@ -1826,6 +1893,12 @@ class TourApiClient:
         # 숙박에만 치우치지 않고 관광지/음식점/문화시설/레포츠가 골고루 섞이도록 합니다.
         per_type_rows = max(6, limit // len(_DEFAULT_CONTENT_TYPE_IDS))
         per_type_offset = offset // len(_DEFAULT_CONTENT_TYPE_IDS)
+
+        # 카테고리별 목록을 자르기 전에 세울 순서를 준비합니다. 한 번만 읽어서
+        # 다섯 갈래 조회가 같은 기준을 쓰게 하고, 못 읽으면 점수 없이(=전부 섞기)
+        # 진행합니다 — 목록 자체는 이미 확보돼 있으니 화면이 멈출 이유가 없습니다.
+        order_key = _popularity_order_key(await self._place_popularity_scores(), _today_seed())
+
         async with httpx.AsyncClient(timeout=15) as client:
             results_per_type = await asyncio.gather(
                 *(
@@ -1836,6 +1909,7 @@ class TourApiClient:
                         per_type_rows,
                         per_type_offset,
                         region_token_sets,
+                        order_key,
                     )
                     for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
                 )
@@ -1940,17 +2014,11 @@ class TourApiClient:
             a.avg_rating = rating_row["avg_rating"] if rating_row else None
             a.review_count = rating_row["review_count"] if rating_row else 0
 
-        def popularity_sort_key(a: Attraction) -> tuple[int, float]:
-            # 평점이 있는 곳을 먼저(높은 순), 평점이 없는 곳들은 원래(카테고리
-            # 라운드로빈) 순서 그대로 뒤에 남습니다. 혼잡도(구 집중률)는 카드에
-            # 표시는 하지만 더 이상 정렬 기준으로 쓰지 않습니다.
-            has_rating = a.avg_rating is not None
-            return (
-                0 if has_rating else 1,
-                -(a.avg_rating or 0.0),
-            )
-
-        attractions.sort(key=popularity_sort_key)
+        # 순서는 위에서(목록을 자르기 전에) 이미 정했으므로 여기서 다시 세우지
+        # 않습니다. 예전에는 이 자리에서 평점순으로 정렬했는데, 정렬 대상이 이미
+        # '제목순 맨 앞 30개'로 잘린 뒤라 평점이 없는 대부분은 가나다순 그대로
+        # 남았습니다 — '인기 여행지'가 가나다순으로 보이던 직접적인 원인입니다.
+        # (avg_rating/congestion_rate는 카드에 숫자를 보여주려고 계속 채웁니다.)
 
         # 접근성 탭(get_accessibility_summary)의 카테고리별 판단 기준과 정확히
         # 동일하게 맞춥니다 — '접근성 탭에서 우수한 곳'과 'AI 코스 생성 1단계

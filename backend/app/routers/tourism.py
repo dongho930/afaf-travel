@@ -11,6 +11,7 @@ from app.models.schemas import (
     UserType,
 )
 from app.services.memory_cache import TTLCache
+from app.services.place_popularity_service import refresh_place_popularity
 from app.services.region_popularity_service import read_region_popularity, refresh_region_popularity
 from app.services.sigungu_codes import list_signgu_by_area
 from app.services.supabase_service import (
@@ -558,3 +559,17 @@ async def refresh_region_popularity_cache(limit: int = Query(default=5, le=20)):
     하루 한 번 정도 호출해두면(수동 또는 외부 스케줄러) 홈 화면은 항상 캐시만 읽습니다.
     """
     return await refresh_region_popularity(limit)
+
+
+@router.get("/place-popularity/refresh")
+async def refresh_place_popularity_cache():
+    """
+    홈 화면 '인기 여행지' 목록의 순서를 정하는 장소별 인기도를 다시 집계합니다.
+    지역 칩(region-popularity/refresh)과 같은 지표·같은 주기를 쓰되, 도시가 아니라
+    관광지 한 곳 단위로 점수를 냅니다. 갱신된 순위 개수와 상위 몇 곳을 돌려줍니다.
+
+    활동 기록이 아직 하나도 없으면 테이블을 건드리지 않고 빈 결과를 돌려줍니다 —
+    조회가 잠깐 실패한 경우와 구분할 수 없어서, 멀쩡한 순위를 지우지 않습니다.
+    """
+    rows = await refresh_place_popularity()
+    return {"count": len(rows), "top": rows[:10]}
