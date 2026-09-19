@@ -1,6 +1,6 @@
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import { CameraIcon, XIcon } from "phosphor-react-native";
+import { CameraIcon, CaretDownIcon, CaretRightIcon, XIcon } from "phosphor-react-native";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -48,6 +48,8 @@ interface VisitedPlaceSection {
   /** 그룹 키 = 방문 날짜(YYYY-MM-DD). 날짜가 없는 항목은 빈 문자열로 모읍니다. */
   dateKey: string;
   title: string;
+  /** 이 날짜의 여행지 수. 접었을 때 data는 비지만 헤더는 계속 이 숫자를 보여줍니다. */
+  count: number;
   data: VisitedPlace[];
 }
 
@@ -99,15 +101,16 @@ function groupVisitedPlacesByDate(places: VisitedPlace[], today: string): Visite
     }
     let section = byDateKey.get(dateKey);
     if (!section) {
-      section = { dateKey, title: formatVisitedDateLabel(dateKey, today), data: [] };
+      section = { dateKey, title: formatVisitedDateLabel(dateKey, today), count: 0, data: [] };
       byDateKey.set(dateKey, section);
       sections.push(section);
     }
     section.data.push(place);
+    section.count += 1;
   }
 
   if (undated.length > 0) {
-    sections.push({ dateKey: "", title: "날짜 미정", data: undated });
+    sections.push({ dateKey: "", title: "날짜 미정", count: undated.length, data: undated });
   }
   return sections;
 }
@@ -137,6 +140,37 @@ export default function PostCreateScreen() {
     ).padStart(2, "0")}`;
     return groupVisitedPlacesByDate(visitedPlaces, todayKey);
   }, [visitedPlaces]);
+  // 처음에 펼쳐둘 날짜 — 가장 최근 하나. 목록이 서버에서 늦게 도착하므로
+  // useState 초기값으로는 정할 수 없어서, 도착한 목록에서 그때 골라냅니다.
+  const defaultExpanded = useMemo(
+    () => new Set(visitedPlaceSections.slice(0, 1).map((s) => s.dateKey)),
+    [visitedPlaceSections]
+  );
+  // null은 '아직 사용자가 아무 날짜도 누르지 않음' = 기본값을 그대로 쓰는 상태입니다.
+  const [expandedDateKeys, setExpandedDateKeys] = useState<Set<string> | null>(null);
+  const expanded = expandedDateKeys ?? defaultExpanded;
+
+  // 날짜는 서로 독립적으로 열고 닫습니다 — 하나를 펼칠 때 다른 날짜가 닫히면
+  // 여러 날짜를 견줘보며 고를 수가 없습니다.
+  const toggleDateGroup = (dateKey: string) => {
+    setExpandedDateKeys((prev) => {
+      const next = new Set(prev ?? defaultExpanded);
+      if (next.has(dateKey)) next.delete(dateKey);
+      else next.add(dateKey);
+      return next;
+    });
+  };
+
+  // 접힌 날짜는 data를 비워서 넘깁니다. 섹션 자체는 남겨야 헤더가 계속 보입니다.
+  // (SectionList는 섹션마다 헤더·푸터를 항목 수에 넣으므로, 전부 접혀도 항목 수가
+  // 0이 아니어서 '방문 완료로 표시한 여행지가 없어요'가 잘못 뜨지 않습니다.)
+  const displayedSections = useMemo(
+    () =>
+      visitedPlaceSections.map((section) =>
+        expanded.has(section.dateKey) ? section : { ...section, data: [] }
+      ),
+    [visitedPlaceSections, expanded]
+  );
 
   const [bodyInput, setBodyInput] = useState("");
   const [photoDrafts, setPhotoDrafts] = useState<PhotoDraft[]>([]);
@@ -366,7 +400,7 @@ export default function PostCreateScreen() {
               <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: 6 }} />
             ) : (
               <SectionList
-                sections={visitedPlaceSections}
+                sections={displayedSections}
                 keyExtractor={(p) => p.id}
                 // 시트 높이(maxHeight 70%) 안에서 목록이 줄어들며 스스로 스크롤되게
                 // 합니다. 이게 없으면 목록이 내용 높이만큼 늘어나 시트를 넘칩니다.
@@ -378,12 +412,23 @@ export default function PostCreateScreen() {
                     방문 완료로 표시한 여행지가 없어요. '내 여행' 탭에서 먼저 방문 완료로 표시해주세요.
                   </Text>
                 }
-                renderSectionHeader={({ section }) => (
-                  <View style={styles.placeSectionHeader}>
-                    <Text style={styles.placeSectionHeaderText}>{section.title}</Text>
-                    <Text style={styles.placeSectionHeaderCount}>{section.data.length}곳</Text>
-                  </View>
-                )}
+                renderSectionHeader={({ section }) => {
+                  const isOpen = expanded.has(section.dateKey);
+                  const Caret = isOpen ? CaretDownIcon : CaretRightIcon;
+                  return (
+                    <TouchableOpacity
+                      style={styles.placeSectionHeader}
+                      onPress={() => toggleDateGroup(section.dateKey)}
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: isOpen }}
+                      accessibilityLabel={`${section.title}, 여행지 ${section.count}곳`}
+                    >
+                      <Caret size={14} color={colors.textSecondary} weight="bold" />
+                      <Text style={styles.placeSectionHeaderText}>{section.title}</Text>
+                      <Text style={styles.placeSectionHeaderCount}>{section.count}곳</Text>
+                    </TouchableOpacity>
+                  );
+                }}
                 renderItem={({ item }) => (
                   <TouchableOpacity
                     style={styles.placeRow}
@@ -464,14 +509,15 @@ function makeStyles(colors: ThemeColors) {
     // 깔아둬야 아래 행들이 헤더를 통과해 지나가는 게 보이지 않습니다.
     placeSectionHeader: {
       flexDirection: "row",
-      justifyContent: "space-between",
       alignItems: "center",
+      gap: spacing.xs + 2,
       backgroundColor: colors.surfaceAlt,
       paddingHorizontal: spacing.xs,
-      paddingTop: spacing.md,
-      paddingBottom: spacing.xs,
+      // 누를 수 있는 줄이라 위아래로 넉넉히 둡니다(손가락이 닿는 높이).
+      paddingVertical: spacing.sm + 2,
     },
-    placeSectionHeaderText: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.textSecondary },
+    // 제목이 남은 폭을 다 차지해서, 개수가 오른쪽 끝에 붙습니다.
+    placeSectionHeaderText: { flex: 1, fontSize: 12, fontFamily: fontFamily.bold, color: colors.textSecondary },
     placeSectionHeaderCount: { fontSize: 11, fontFamily: fontFamily.regular, color: colors.textTertiary },
 
     modalBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end", alignItems: "center" },
