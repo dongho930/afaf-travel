@@ -2,10 +2,12 @@ import { useFocusEffect, useRouter } from "expo-router";
 import {
   CalendarBlankIcon,
   CheckCircleIcon,
+  ChatCircleTextIcon,
   HeartIcon,
   type Icon,
   MapPinIcon,
   PersonSimpleWalkIcon,
+  StarIcon,
   SuitcaseIcon,
   UsersIcon,
   UsersThreeIcon,
@@ -33,6 +35,7 @@ import { ProfileButton } from "../../components/ProfileButton";
 import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
 import { radius, spacing } from "../../constants/tokens";
+import { userTypeIcon } from "../../constants/userTypeIcons";
 import { api, errorMessage } from "../../services/api";
 import { useAuth } from "../../services/AuthContext";
 import { getDataVersion } from "../../services/dataVersion";
@@ -40,6 +43,9 @@ import { useTheme } from "../../services/ThemeContext";
 import {
   COURSE_CATEGORIES,
   CourseCategory,
+  MyReportItem,
+  MyReviewItem,
+  ReportCategory,
   TripSummary,
   VisitedPlace,
 } from "../../types";
@@ -52,9 +58,19 @@ const CATEGORY_ICON: Record<string, Icon> = {
   기타: MapPinIcon,
 };
 
-type StatSection = "trips" | "visited";
+// 접근성 제보 카테고리 표시 라벨 (접근성 탭과 동일한 명칭/아이콘으로 맞춥니다).
+const REPORT_CATEGORY_META: Record<ReportCategory, { icon: Icon; label: string }> = {
+  wheelchair: { icon: userTypeIcon.wheelchair, label: "지체 장애" },
+  visual: { icon: userTypeIcon.visual, label: "시각 장애" },
+  hearing: { icon: userTypeIcon.hearing, label: "청각 장애" },
+  senior: { icon: userTypeIcon.senior, label: "고령자" },
+  family: { icon: userTypeIcon.family, label: "영유아 가족" },
+  pregnant: { icon: userTypeIcon.pregnant, label: "임산부" },
+};
 
-// 상단 통계 탭 하나(방문한 여행지/저장한 경로). 선택
+type StatSection = "trips" | "reviews" | "reports" | "visited";
+
+// 상단 통계 탭 하나(방문한 여행지/저장한 경로/리뷰 작성/접근성 제보). 선택
 // 상태가 바뀔 때 숫자/라벨 글자색과 아래 점(dot)이 즉시 뚝 바뀌지 않고
 // 짧게(200ms) 보간되도록 각 탭이 자기만의 progress 값을 갖습니다(아이콘 색은
 // 다른 탭 화면과 동일하게 즉시 전환).
@@ -106,12 +122,12 @@ function formatDateRange(start?: string | null, end?: string | null): string | n
 
 /**
  * '내 여행' 탭. 첫 화면('내가 만든 여행')은 여행별로 묶인 목록(수정/삭제
- * 가능, 각 카드에 '방문 완료' 버튼도 있음)입니다. 상단 통계 카드 2개
- * (방문한 여행지/저장한 경로) 모두 실제 값입니다.
+ * 가능, 각 카드에 '방문 완료' 버튼도 있음)입니다. 상단 통계 카드 4개
+ * (저장한 경로/리뷰 작성/접근성 제보/방문한 여행지) 모두 실제 값입니다.
  *
- * '방문한 여행지'를 누르면 별도 화면으로 이동하는 대신, 바로 아래 목록 영역이
- * 방문 기록으로 바뀝니다. 같은 카드를 다시 누르면 원래 '내가 만든 여행'
- * 목록으로 돌아갑니다.
+ * 세 카드를 누르면 별도 화면으로 이동하는 대신, 바로 아래 목록 영역이 그
+ * 카드에 맞는 내용(저장한 경로 전체 / 내가 쓴 리뷰 / 내가 쓴 접근성 제보)으로
+ * 바뀝니다. 같은 카드를 다시 누르면 원래 '내가 만든 여행' 목록으로 돌아갑니다.
  */
 export default function TripsScreen() {
   const router = useRouter();
@@ -121,12 +137,16 @@ export default function TripsScreen() {
   const styles = makeStyles(colors);
   const [trips, setTrips] = useState<TripSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [reviewCount, setReviewCount] = useState(0);
+  const [reportCount, setReportCount] = useState(0);
   const [visitedCount, setVisitedCount] = useState(0);
   const [visitingTripId, setVisitingTripId] = useState<string | null>(null);
 
   const [activeSection, setActiveSection] = useState<StatSection>("trips");
   const [loadedSections, setLoadedSections] = useState<Set<StatSection>>(new Set(["trips"]));
   const [sectionLoading, setSectionLoading] = useState(false);
+  const [reviews, setReviews] = useState<MyReviewItem[]>([]);
+  const [reports, setReports] = useState<MyReportItem[]>([]);
   const [visitedPlaces, setVisitedPlaces] = useState<VisitedPlace[]>([]);
   const [editingVisitedId, setEditingVisitedId] = useState<string | null>(null);
   const [editingVisitedDate, setEditingVisitedDate] = useState<string | null>(null);
@@ -135,7 +155,7 @@ export default function TripsScreen() {
   // FlatList는 화면 밖으로 나간 행을 가상화로 언마운트했다가 스크롤로
   // 되돌아오면 다시 마운트합니다. 한 번이라도 보여준 행은 기억해뒀다가 그
   // 다음부터는 애니메이션 없이 바로 보여줘서 스크롤할 때마다 깜빡이지 않게 하고,
-  // 다른 섹션(방문한 여행지)으로 바꿀 때만 이 기록을 비워서 그 목록이 새로
+  // 다른 섹션(리뷰/제보/방문)으로 바꿀 때만 이 기록을 비워서 그 목록이 새로
   // 페이드인되게 합니다. (탭에 다시 들어올 때도 비웠더니, 보고 있던 목록이
   // 전부 다시 페이드인돼서 '새로고침된 것처럼' 보여서 그건 하지 않습니다.)
   const animatedRowIdsRef = useRef<Set<string>>(new Set());
@@ -155,7 +175,7 @@ export default function TripsScreen() {
   // 이 탭을 한 번이라도 불러온 적이 있는지. 처음에만 로딩 화면을 보여주고,
   // 그 뒤로는 보고 있던 목록을 그대로 둔 채 조용히 갱신하기 위해 씁니다.
   const hasLoadedRef = useRef(false);
-  // 방문 개수를 마지막으로 받아왔을 때의 변경 카운터(services/dataVersion.ts).
+  // 개수 3종을 마지막으로 받아왔을 때의 변경 카운터(services/dataVersion.ts).
   const countsVersionRef = useRef(-1);
 
   const load = useCallback(() => {
@@ -178,14 +198,23 @@ export default function TripsScreen() {
       .finally(() => {
         if (isFirstLoad) setLoading(false);
       });
-    // 방문 개수는 이 화면 말고 다른 화면(관광지 상세 등)에서도 바뀌기 때문에,
+    // 개수 3종(리뷰/제보/방문)은 리뷰를 쓰거나 방문 처리를 했을 때만 바뀝니다.
+    // 그런데 그 동작은 다른 화면(관광지 상세, 접근성 탭)에서도 일어나기 때문에,
     // 이 화면에서만 갱신하면 최신 값을 놓칩니다. 그렇다고 탭에 들어올 때마다
-    // 부르면 아무것도 안 바뀌었는데 매번 조회가 나갑니다.
+    // 부르면 아무것도 안 바뀌었는데 매번 조회 3번이 나갑니다.
     // 그래서 "앱에서 무언가를 바꾼 적이 있는지"(dataVersion)를 보고, 지난번에
     // 받아온 뒤로 달라졌을 때만 다시 부릅니다.
     const version = getDataVersion();
     if (isFirstLoad || version !== countsVersionRef.current) {
       countsVersionRef.current = version;
+      api
+        .getMyReviewCount()
+        .then((res) => setReviewCount(res.count))
+        .catch(() => setReviewCount(0));
+      api
+        .getMyReportCount()
+        .then((res) => setReportCount(res.count))
+        .catch(() => setReportCount(0));
       api
         .getMyVisitedCount()
         .then((res) => setVisitedCount(res.count))
@@ -203,8 +232,8 @@ export default function TripsScreen() {
   // 있으면(같은 카드를 다시 누르면) '내가 만든 여행'으로 되돌아갑니다.
   // '저장한 경로'는 별도 목록이 아니라 '내가 만든 여행'(여행별 묶음 목록)과
   // 똑같은 내용을 보여줘서, 그냥 'trips'로 돌아가는 것과 같습니다.
-  // '방문한 여행지'는 로그인한 사용자 것만 있는 정보라, 비로그인 상태면
-  // 조회 자체를 하지 않고 로그인 안내만 띄웁니다.
+  // '리뷰 작성'/'접근성 제보'는 로그인한 사용자 것만 있는 정보라, 비로그인
+  // 상태면 조회 자체를 하지 않고 로그인 안내만 띄웁니다.
   const selectSection = (section: StatSection) => {
     if (section === "trips") {
       setActiveSection("trips");
@@ -229,7 +258,13 @@ export default function TripsScreen() {
       setSectionLoading(false);
       setLoadedSections((prev) => new Set(prev).add(section));
     };
-    api.getMyVisitedPlaces().then(setVisitedPlaces).catch(() => setVisitedPlaces([])).finally(finish);
+    if (section === "reviews") {
+      api.getMyReviews().then(setReviews).catch(() => setReviews([])).finally(finish);
+    } else if (section === "reports") {
+      api.getMyReports().then(setReports).catch(() => setReports([])).finally(finish);
+    } else if (section === "visited") {
+      api.getMyVisitedPlaces().then(setVisitedPlaces).catch(() => setVisitedPlaces([])).finally(finish);
+    }
   };
 
   const handleDelete = (tripId: string, name: string) => {
@@ -408,11 +443,15 @@ export default function TripsScreen() {
 
   const SECTION_TITLE: Record<StatSection, string> = {
     trips: "내가 만든 여행",
+    reviews: "내가 쓴 리뷰",
+    reports: "내가 쓴 접근성 제보",
     visited: "방문한 여행지",
   };
   // 카드를 선택하면 맨 위 큰 제목도 그 카드 이름에 맞게 바뀝니다.
   const TOP_TITLE: Record<StatSection, string> = {
     trips: "저장한 경로",
+    reviews: "리뷰 작성",
+    reports: "접근성 제보",
     visited: "방문한 여행지",
   };
 
@@ -430,6 +469,8 @@ export default function TripsScreen() {
           const tabs: { key: StatSection; icon: Icon; value: number; label: string }[] = [
             { key: "visited", icon: MapPinIcon, value: visitedCount, label: "방문한 여행지" },
             { key: "trips", icon: SuitcaseIcon, value: totalSavedCourses, label: "저장한 경로" },
+            { key: "reviews", icon: ChatCircleTextIcon, value: reviewCount, label: "리뷰 작성" },
+            { key: "reports", icon: userTypeIcon.wheelchair, value: reportCount, label: "접근성 제보" },
           ];
           return tabs.map((t) => (
             <StatTabButton
@@ -540,7 +581,69 @@ export default function TripsScreen() {
     );
   };
 
-  if (activeSection === "visited") {
+  if (activeSection === "reviews") {
+    listData = reviews;
+    keyExtractor = (item: MyReviewItem) => item.id;
+    emptyText = "아직 작성한 리뷰가 없어요.";
+    emptyHint = null;
+    renderItem = ({ item }: { item: MyReviewItem }) => (
+      <TouchableOpacity
+        style={styles.row}
+        onPress={() =>
+          router.push({ pathname: "/attraction-detail", params: { contentId: item.content_id, name: item.place_name } })
+        }
+      >
+        <View style={styles.rowIcon}>
+          <ChatCircleTextIcon size={16} color={colors.primary} weight="bold" />
+        </View>
+        <View style={styles.rowContent}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.name} numberOfLines={1}>
+              {item.place_name}
+            </Text>
+            <View style={styles.reviewStarsRow}>
+              {Array.from({ length: 5 }).map((_, i) => (
+                <StarIcon key={i} size={13} color="#E0A100" weight={i < item.rating ? "fill" : "regular"} />
+              ))}
+            </View>
+          </View>
+          <Text style={styles.meta}>{item.body}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  } else if (activeSection === "reports") {
+    listData = reports;
+    keyExtractor = (item: MyReportItem) => item.id;
+    emptyText = "아직 작성한 접근성 제보가 없어요.";
+    emptyHint = null;
+    renderItem = ({ item }: { item: MyReportItem }) => {
+      const meta = REPORT_CATEGORY_META[item.category];
+      const ReportIcon = meta?.icon ?? MapPinIcon;
+      return (
+        <TouchableOpacity
+          style={styles.row}
+          onPress={() =>
+            router.push({ pathname: "/attraction-detail", params: { contentId: item.content_id, name: item.place_name } })
+          }
+        >
+          <View style={styles.rowIcon}>
+            <ReportIcon size={16} color={colors.primary} weight="bold" />
+          </View>
+          <View style={styles.rowContent}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.name} numberOfLines={1}>
+                {item.place_name}
+              </Text>
+              <View style={styles.categoryBadge}>
+                <Text style={styles.categoryBadgeText}>{meta?.label ?? item.category}</Text>
+              </View>
+            </View>
+            <Text style={styles.meta}>{item.body}</Text>
+          </View>
+        </TouchableOpacity>
+      );
+    };
+  } else if (activeSection === "visited") {
     listData = visitedPlaces;
     keyExtractor = (item: VisitedPlace) => item.id;
     emptyText = "아직 방문 완료로 표시한 여행지가 없어요.";
@@ -726,6 +829,7 @@ function makeStyles(colors: ThemeColors) {
 
   sectionTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.xs },
   sectionTitle: { fontSize: 16, fontFamily: fontFamily.extraBold, color: colors.text },
+  reviewStarsRow: { flexDirection: "row", gap: 1, marginLeft: spacing.sm },
 
   emptyBox: { alignItems: "center", padding: spacing.xl },
   emptyText: { fontSize: 15, fontFamily: fontFamily.semiBold, color: colors.textSecondary, marginBottom: spacing.xs + 2 },
