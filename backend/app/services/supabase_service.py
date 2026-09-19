@@ -1109,20 +1109,65 @@ async def count_visited_places(user_id: str) -> int:
         return 0
 
 
-async def list_visited_places(user_id: str, limit: int = 50) -> list[dict]:
-    """'내 여행' 탭의 '방문한 여행지' 통계 카드를 눌렀을 때 쓰는, 이 사용자가
-    방문 완료로 표시한 여행지 전체를 최신순으로 반환합니다."""
+# 방문한 여행지 목록을 한 번에 몇 행씩 읽을지. 큰 limit 하나로 끝내지 않는
+# 이유는 PostgREST가 한 응답에 돌려주는 행 수에 서버측 상한(max-rows)을 따로
+# 둘 수 있어서입니다 — 그 상한에 걸리면 조용히 잘리고, 코드만 봐서는 어디서
+# 잘렸는지 알 수 없습니다. 무장애 정보 캐시 id를 읽을 때와 같은 방식으로
+# 넘겨 읽습니다. 보통은 첫 페이지에서 다 들어오니 왕복은 한 번뿐입니다.
+_VISITED_PLACES_PAGE_SIZE = 500
+# 안전 상한. visited_places에 (user_id, content_id) 유니크 제약이 있어서 한
+# 사용자의 행 수는 본인이 방문한 서로 다른 장소 수로 묶입니다. 현실적으로 닿지
+# 않는 값이지만, 무언가 잘못돼도 무한정 읽지 않도록 선은 그어둡니다.
+_VISITED_PLACES_MAX = 2000
+
+
+async def list_visited_places(user_id: str, limit: int = _VISITED_PLACES_MAX) -> list[dict]:
+    """'내 여행' 탭의 '방문한 여행지' 목록과 게시물 작성 화면의 여행지 선택
+    목록에 쓰는, 이 사용자가 방문 완료로 표시한 여행지 전체를 최신순으로 반환합니다.
+
+    예전에는 50행에서 끊었습니다. 그런데 같은 데이터를 세는 count_visited_places는
+    전체 개수를 정확히 세기 때문에, 방문지가 50곳을 넘으면 '내 여행' 탭 통계
+    카드의 숫자와 그 아래 목록의 길이가 어긋났습니다. 게시물 작성 화면에서는
+    더 나빠서, 오래전에 방문한 장소가 선택지에서 아예 사라졌습니다(잘렸다는
+    표시도 없이). 그래서 전부 읽습니다.
+
+    정렬에 id를 함께 넣는 건 페이지를 넘겨 읽기 때문입니다. '방문 완료' 버튼은
+    여행 하나에 담긴 관광지를 한꺼번에 기록해서(mark_trip_as_visited) 수십 개
+    행이 같은 visited_at을 공유합니다. visited_at만으로 정렬하면 동률끼리의
+    순서가 매 요청마다 달라질 수 있어, 페이지 경계에 걸친 행이 두 번 나오거나
+    빠질 수 있습니다. id까지 넣으면 순서가 하나로 정해집니다.
+
+    전체 개수(count="exact")를 목록과 같은 쿼리에서 함께 받아 "다 읽었는가"를
+    판단합니다. 받아온 행 수만으로는 판단할 수 없습니다 — 페이지가 요청보다
+    짧게 온 게 '데이터의 끝'인지 '서버측 상한에 걸린 것'인지 구분되지 않아서,
+    상한이 페이지 크기보다 작으면 거기서 멈춰 도로 조용히 잘립니다.
+    """
     if _client is None:
         return []
+    rows: list[dict] = []
     try:
-        result = await _execute(
-            _client.table("visited_places")
-            .select("*")
-            .eq("user_id", user_id)
-            .order("visited_at", desc=True)
-            .limit(limit)
-        )
-        return result.data or []
+        while len(rows) < limit:
+            page_size = min(_VISITED_PLACES_PAGE_SIZE, limit - len(rows))
+            result = await _execute(
+                _client.table("visited_places")
+                .select("*", count="exact")
+                .eq("user_id", user_id)
+                .order("visited_at", desc=True)
+                .order("id", desc=True)
+                .range(len(rows), len(rows) + page_size - 1)
+            )
+            page = result.data or []
+            if not page:
+                break
+            rows.extend(page)
+            total = getattr(result, "count", None)
+            if total is None:
+                # 개수를 못 받았으면 짧은 페이지를 끝으로 보되, 확인차 다음
+                # 페이지까지 한 번 더 요청해서 비어 있는 걸 보고 멈춥니다.
+                continue
+            if len(rows) >= min(total, limit):
+                break
+        return rows
     except Exception as e:
         print(f"[supabase] 방문한 여행지 목록 조회 실패: {e}")
         return []

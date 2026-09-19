@@ -1,13 +1,13 @@
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { CameraIcon, XIcon } from "phosphor-react-native";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
   LayoutChangeEvent,
   Modal,
-  ScrollView,
+  SectionList,
   StyleSheet,
   Text,
   TextInput,
@@ -42,6 +42,76 @@ interface PhotoDraft {
   payload: string;
 }
 
+const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
+
+interface VisitedPlaceSection {
+  /** 그룹 키 = 방문 날짜(YYYY-MM-DD). 날짜가 없는 항목은 빈 문자열로 모읍니다. */
+  dateKey: string;
+  title: string;
+  data: VisitedPlace[];
+}
+
+/**
+ * 방문 날짜(YYYY-MM-DD)를 '9월 14일 (월)' 형태로 바꿉니다. 오늘/어제는 날짜
+ * 대신 그렇게 읽어주는 편이 훨씬 빨리 눈에 들어와서 그 말을 씁니다.
+ * 날짜 문자열을 직접 쪼개서 씁니다 — new Date("2026-09-14")는 UTC 자정으로
+ * 해석되어서, 한국 시간대에서는 하루 밀린 날짜가 나옵니다.
+ */
+function formatVisitedDateLabel(dateKey: string, today: string): string {
+  if (!dateKey) return "날짜 미정";
+
+  const [y, m, d] = dateKey.split("-").map(Number);
+  if (!y || !m || !d) return dateKey;
+
+  if (dateKey === today) return "오늘";
+  if (dateKey === shiftDateKey(today, -1)) return "어제";
+
+  // 날짜 숫자를 UTC 자정으로 넣었으니 요일도 UTC 기준으로 읽어야 짝이 맞습니다.
+  const weekday = WEEKDAY_LABELS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+  // 올해가 아니면 연도를 붙입니다 — 안 붙이면 작년 12월과 올해 12월이 같은
+  // 헤더로 보입니다.
+  const yearPrefix = dateKey.slice(0, 4) === today.slice(0, 4) ? "" : `${y}년 `;
+  return `${yearPrefix}${m}월 ${d}일 (${weekday})`;
+}
+
+/** YYYY-MM-DD를 days만큼 옮긴 YYYY-MM-DD. 월/연 경계도 Date가 알아서 넘겨줍니다. */
+function shiftDateKey(dateKey: string, days: number): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const shifted = new Date(Date.UTC(y, m - 1, d + days));
+  return shifted.toISOString().slice(0, 10);
+}
+
+/**
+ * 방문한 여행지 목록을 방문 날짜별로 묶습니다. 서버가 이미 최신순으로
+ * 내려주므로(list_visited_places) 등장 순서를 그대로 따라가면 날짜 그룹도
+ * 최신 → 과거 순이 됩니다. 날짜가 비어 있는 항목은 맨 아래로 보냅니다.
+ */
+function groupVisitedPlacesByDate(places: VisitedPlace[], today: string): VisitedPlaceSection[] {
+  const sections: VisitedPlaceSection[] = [];
+  const byDateKey = new Map<string, VisitedPlaceSection>();
+  const undated: VisitedPlace[] = [];
+
+  for (const place of places) {
+    const dateKey = place.visited_at?.slice(0, 10);
+    if (!dateKey) {
+      undated.push(place);
+      continue;
+    }
+    let section = byDateKey.get(dateKey);
+    if (!section) {
+      section = { dateKey, title: formatVisitedDateLabel(dateKey, today), data: [] };
+      byDateKey.set(dateKey, section);
+      sections.push(section);
+    }
+    section.data.push(place);
+  }
+
+  if (undated.length > 0) {
+    sections.push({ dateKey: "", title: "날짜 미정", data: undated });
+  }
+  return sections;
+}
+
 /**
  * '게시물' 작성 화면. 장소는 자유 검색이 아니라 '내 여행' 탭에서 방문
  * 완료로 표시해둔 장소 중에서만 고를 수 있습니다(실제로 가본 곳에 대한
@@ -58,6 +128,15 @@ export default function PostCreateScreen() {
   const [loadingPlaces, setLoadingPlaces] = useState(true);
   const [selectedPlace, setSelectedPlace] = useState<VisitedPlace | null>(null);
   const [placeModalVisible, setPlaceModalVisible] = useState(false);
+  // 방문 날짜별로 묶어서 보여줍니다. 방문지가 쌓이면 평평한 목록에서는 같은
+  // 여행에서 다녀온 곳들을 눈으로 다시 묶어야 해서, 날짜 헤더로 대신합니다.
+  const visitedPlaceSections = useMemo(() => {
+    const today = new Date();
+    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(
+      today.getDate()
+    ).padStart(2, "0")}`;
+    return groupVisitedPlacesByDate(visitedPlaces, todayKey);
+  }, [visitedPlaces]);
 
   const [bodyInput, setBodyInput] = useState("");
   const [photoDrafts, setPhotoDrafts] = useState<PhotoDraft[]>([]);
@@ -283,31 +362,43 @@ export default function PostCreateScreen() {
                 <Text style={styles.modalClose}>닫기</Text>
               </TouchableOpacity>
             </View>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {loadingPlaces ? (
-                <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: 6 }} />
-              ) : visitedPlaces.length === 0 ? (
-                <Text style={styles.emptyPlacesText}>
-                  방문 완료로 표시한 여행지가 없어요. '내 여행' 탭에서 먼저 방문 완료로 표시해주세요.
-                </Text>
-              ) : (
-                visitedPlaces.map((p) => (
+            {loadingPlaces ? (
+              <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: 6 }} />
+            ) : (
+              <SectionList
+                sections={visitedPlaceSections}
+                keyExtractor={(p) => p.id}
+                // 시트 높이(maxHeight 70%) 안에서 목록이 줄어들며 스스로 스크롤되게
+                // 합니다. 이게 없으면 목록이 내용 높이만큼 늘어나 시트를 넘칩니다.
+                style={{ flexShrink: 1 }}
+                showsVerticalScrollIndicator={false}
+                stickySectionHeadersEnabled
+                ListEmptyComponent={
+                  <Text style={styles.emptyPlacesText}>
+                    방문 완료로 표시한 여행지가 없어요. '내 여행' 탭에서 먼저 방문 완료로 표시해주세요.
+                  </Text>
+                }
+                renderSectionHeader={({ section }) => (
+                  <View style={styles.placeSectionHeader}>
+                    <Text style={styles.placeSectionHeaderText}>{section.title}</Text>
+                    <Text style={styles.placeSectionHeaderCount}>{section.data.length}곳</Text>
+                  </View>
+                )}
+                renderItem={({ item }) => (
                   <TouchableOpacity
-                    key={p.id}
                     style={styles.placeRow}
                     onPress={() => {
-                      setSelectedPlace(p);
+                      setSelectedPlace(item);
                       setPlaceModalVisible(false);
                     }}
                   >
                     <Text style={styles.placeRowName} numberOfLines={1}>
-                      {p.place_name}
+                      {item.place_name}
                     </Text>
-                    <Text style={styles.placeRowDate}>{p.visited_at?.slice(0, 10)} 방문</Text>
                   </TouchableOpacity>
-                ))
-              )}
-            </ScrollView>
+                )}
+              />
+            )}
           </View>
         </View>
       </Modal>
@@ -369,7 +460,19 @@ function makeStyles(colors: ThemeColors) {
       borderBottomColor: colors.border,
     },
     placeRowName: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.text, flexShrink: 1, marginRight: spacing.sm },
-    placeRowDate: { fontSize: 11, fontFamily: fontFamily.regular, color: colors.textTertiary },
+    // 스크롤 중에도 위에 붙어 있는 날짜 헤더. 시트 배경(surfaceAlt)과 같은 색을
+    // 깔아둬야 아래 행들이 헤더를 통과해 지나가는 게 보이지 않습니다.
+    placeSectionHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      backgroundColor: colors.surfaceAlt,
+      paddingHorizontal: spacing.xs,
+      paddingTop: spacing.md,
+      paddingBottom: spacing.xs,
+    },
+    placeSectionHeaderText: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.textSecondary },
+    placeSectionHeaderCount: { fontSize: 11, fontFamily: fontFamily.regular, color: colors.textTertiary },
 
     modalBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end", alignItems: "center" },
     modalSheet: {

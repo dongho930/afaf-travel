@@ -48,8 +48,39 @@ export function AppAlertHost() {
   // 빈 상자가 접히는 모습이 보이지 않습니다.
   const lastRef = useRef<AlertRequest | null>(null);
   if (current) lastRef.current = current;
+  const request = current ?? lastRef.current;
 
-  return <AlertCard visible={!!current} request={current ?? lastRef.current} />;
+  return <AlertCard key={alertCardKey(request)} visible={!!current} request={request} />;
+}
+
+/**
+ * 웹에서는 안내마다 창을 새로 만들어 띄웁니다(key를 안내 id로 바꿔서). 그래야
+ * 화면이 자기 시트(Modal)를 열어둔 채 안내를 띄웠을 때 안내가 시트 위에 옵니다.
+ *
+ * react-native-web의 Modal은 document.body 끝에 div를 하나 붙여서 그 안에
+ * 내용을 그립니다(ModalPortal). 그런데 그 div에도, 안쪽의 position:fixed 요소에도
+ * z-index를 주지 않습니다 — 그래서 어느 창이 위에 보이는지가 순전히 'body에 붙은
+ * 순서'로 정해집니다. div는 Modal이 처음 그려질 때 한 번 붙고 그 자리에 머물기
+ * 때문에, 한 번이라도 안내를 띄운 뒤에 들어간 화면의 시트는 그 뒤로 뜨는 모든
+ * 안내를 덮어버립니다. 실제로 '접근성 제보하기'에서 여행지를 고르지 않고 제출을
+ * 누르면 안내가 시트 뒤에 깔려서 확인 버튼을 누를 수 없었습니다.
+ *
+ * 안내 id가 바뀔 때마다 창을 다시 만들면 div도 그때 body 맨 끝에 새로 붙으므로,
+ * 안내는 항상 그 순간 열려 있는 무엇보다 위에 옵니다.
+ *
+ * z-index로는 해결할 수 없습니다. 올려야 하는 건 position:fixed가 걸린 요소인데
+ * 그건 ModalContent가 자기 style로 덮어써서 Modal 밖에서 손댈 수 없고, 우리가
+ * 스타일을 줄 수 있는 건 그 '안쪽'뿐입니다. position:fixed는 그 자체로 쌓임
+ * 맥락(stacking context)을 만들기 때문에, 안쪽에서 z-index를 얼마로 올려도
+ * 그 맥락을 벗어나 형제 창 위로 올라가지 못합니다(브라우저에서 확인했습니다).
+ *
+ * 네이티브에서는 운영체제가 창을 직접 띄우고 나중에 띄운 것이 위로 오기 때문에
+ * 이 문제가 없습니다. 굳이 다시 만들면 창을 닫고 여는 동작이 한 번 더 생기므로
+ * 웹에서만 합니다.
+ */
+function alertCardKey(request: AlertRequest | null): number | undefined {
+  if (Platform.OS !== "web") return undefined;
+  return request?.id;
 }
 
 function AlertCard({ visible, request }: { visible: boolean; request: AlertRequest | null }) {

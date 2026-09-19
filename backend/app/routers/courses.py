@@ -577,7 +577,8 @@ async def my_visited_count(user_id: Optional[str] = Depends(get_optional_user_id
 
 @trips_router.get("/visited/me/list", response_model=list[VisitedPlace])
 async def my_visited_list(user_id: Optional[str] = Depends(get_optional_user_id)):
-    """'내 여행' 탭의 '방문한 여행지' 통계 카드를 눌렀을 때 쓰는, 내가 방문 완료로 표시한 여행지 전체."""
+    """내가 방문 완료로 표시한 여행지 전체. '내 여행' 탭의 '방문한 여행지' 목록과
+    게시물 작성 화면의 여행지 선택 목록이 함께 씁니다."""
     if not user_id:
         return []
     return await list_visited_places(user_id)
