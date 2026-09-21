@@ -11,6 +11,7 @@ from app.services.report_service import (
     list_reports_by_category,
     list_reports_by_user,
 )
+from app.services.supabase_service import has_visited_place
 from app.services.tour_api import tour_api_client
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -87,6 +88,13 @@ async def submit_report(
     """접근성 제보를 작성합니다 (로그인 필요). 같은 장소에 여러 번 남길 수 있어요."""
     if not user_id:
         raise HTTPException(status_code=401, detail="제보를 쓰려면 로그인이 필요해요.")
+
+    try:
+        visited = await has_visited_place(user_id, request.content_id)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="방문 기록을 확인하지 못했어요. 잠시 후 다시 시도해주세요.") from exc
+    if not visited:
+        raise HTTPException(status_code=403, detail="방문한 여행지에 등록된 장소만 접근성 제보를 남길 수 있어요.")
 
     ok, result = await create_report(
         user_id, request.content_id, request.place_name, request.category, request.body

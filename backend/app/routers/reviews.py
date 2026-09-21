@@ -10,6 +10,7 @@ from app.services.review_service import (
     list_reviews_by_user,
     list_reviews_for_place,
 )
+from app.services.supabase_service import has_visited_place
 from app.services.tour_api import tour_api_client
 
 router = APIRouter(prefix="/api/reviews", tags=["reviews"])
@@ -98,6 +99,13 @@ async def submit_review(
     """
     if not user_id:
         raise HTTPException(status_code=401, detail="리뷰를 쓰려면 로그인이 필요해요.")
+
+    try:
+        visited = await has_visited_place(user_id, content_id)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="방문 기록을 확인하지 못했어요. 잠시 후 다시 시도해주세요.") from exc
+    if not visited:
+        raise HTTPException(status_code=403, detail="방문한 여행지에 등록된 장소만 리뷰를 남길 수 있어요.")
 
     ok, result = await create_review(
         user_id, content_id, request.rating, request.body, request.photos

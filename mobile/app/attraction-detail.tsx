@@ -141,6 +141,7 @@ export default function AttractionDetailScreen() {
   const [photoDrafts, setPhotoDrafts] = useState<ReviewPhotoDraft[]>([]);
   const [pickingPhoto, setPickingPhoto] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [visitStatus, setVisitStatus] = useState<"loading" | "visited" | "not-visited" | "error">("loading");
   const [directionsModalVisible, setDirectionsModalVisible] = useState(false);
   const [findingRoute, setFindingRoute] = useState<KakaoTravelMode | null>(null);
   const [transitModalVisible, setTransitModalVisible] = useState(false);
@@ -211,6 +212,23 @@ export default function AttractionDetailScreen() {
     }, [load])
   );
 
+  useFocusEffect(
+    useCallback(() => {
+      if (!session || !contentId) {
+        setVisitStatus("not-visited");
+        return;
+      }
+      let active = true;
+      setVisitStatus("loading");
+      api.getMyVisitedPlaces()
+        .then((places) => {
+          if (active) setVisitStatus(places.some((place) => place.content_id === contentId) ? "visited" : "not-visited");
+        })
+        .catch(() => { if (active) setVisitStatus("error"); });
+      return () => { active = false; };
+    }, [session, contentId])
+  );
+
   const handlePickReviewPhotos = async () => {
     if (!session) {
       Alert.alert("로그인이 필요해요", "리뷰를 쓰려면 먼저 로그인해주세요.", [
@@ -263,6 +281,10 @@ export default function AttractionDetailScreen() {
         { text: "취소", style: "cancel" },
         { text: "로그인하러 가기", onPress: () => router.push("/login") },
       ]);
+      return;
+    }
+    if (visitStatus !== "visited") {
+      Alert.alert("방문 기록이 필요해요", "방문한 여행지에 등록된 장소만 리뷰를 남길 수 있어요.");
       return;
     }
     // 별점 기본값을 5에서 0(아직 안 고름)으로 바꾸면서 함께 넣은 검사입니다.
@@ -628,6 +650,11 @@ export default function AttractionDetailScreen() {
 
       {ratingSummary.count > 0 && <ReviewRatingSummary summary={ratingSummary} colors={colors} />}
 
+      {session && visitStatus === "loading" ? (
+        <ActivityIndicator color={colors.primary} />
+      ) : session && visitStatus === "error" ? (
+        <Text style={styles.emptyReviewText}>방문 기록을 확인하지 못했어요. 화면을 다시 열어주세요.</Text>
+      ) : !session || visitStatus === "visited" ? (
       <View style={styles.reviewForm}>
         <Text style={styles.reviewFormLabel}>
           {myReview ? "내 리뷰 수정하기" : "리뷰 남기기"}
@@ -719,6 +746,9 @@ export default function AttractionDetailScreen() {
           )}
         </TouchableOpacity>
       </View>
+      ) : (
+        <Text style={styles.emptyReviewText}>방문한 여행지에 등록된 장소만 리뷰를 남길 수 있어요. 내 여행에서 방문 완료로 표시해주세요.</Text>
+      )}
 
       {reviews.length === 0 ? (
         <Text style={styles.emptyReviewText}>아직 리뷰가 없어요. 첫 리뷰를 남겨보세요!</Text>

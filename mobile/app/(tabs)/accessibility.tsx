@@ -1,8 +1,8 @@
 import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
-import { NotePencilIcon, XIcon, type Icon } from "phosphor-react-native";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { CaretDownIcon, CaretRightIcon, NotePencilIcon, type Icon } from "phosphor-react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Animated, Modal, Pressable, ScrollView, SectionList, StyleSheet, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Alert } from "../../services/crossPlatformAlert";
 import { withRetry } from "../../services/retry";
@@ -25,8 +25,8 @@ import {
   AccessibilityPlaceScore,
   AccessibilityReport,
   AccessibilitySummary,
-  AttractionSearchResult,
   ReportCategory,
+  VisitedPlace,
 } from "../../types";
 
 type CategoryKey = "wheelchair_count" | "visual_count" | "hearing_count" | "senior_count" | "family_count" | "pregnant_count";
@@ -49,6 +49,50 @@ const REPORT_CATEGORY_MAP: Record<CategoryKey, ReportCategory> = {
   family_count: "family",
   pregnant_count: "pregnant",
 };
+
+interface VisitedPlaceSection {
+  dateKey: string;
+  title: string;
+  count: number;
+  data: VisitedPlace[];
+}
+
+const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
+
+function visitDateLabel(dateKey: string, today: string): string {
+  if (!dateKey) return "날짜 미정";
+  const [year, month, day] = dateKey.split("-").map(Number);
+  if (!year || !month || !day) return dateKey;
+  if (dateKey === today) return "오늘";
+  const [todayYear, todayMonth, todayDay] = today.split("-").map(Number);
+  if (dateKey === new Date(Date.UTC(todayYear, todayMonth - 1, todayDay - 1)).toISOString().slice(0, 10)) return "어제";
+  const weekday = WEEKDAY_LABELS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
+  const yearPrefix = dateKey.slice(0, 4) === today.slice(0, 4) ? "" : `${year}년 `;
+  return `${yearPrefix}${month}월 ${day}일 (${weekday})`;
+}
+
+function groupVisitedPlacesByDate(places: VisitedPlace[], today: string): VisitedPlaceSection[] {
+  const sections: VisitedPlaceSection[] = [];
+  const byDate = new Map<string, VisitedPlaceSection>();
+  const undated: VisitedPlace[] = [];
+  for (const place of places) {
+    const dateKey = place.visited_at?.slice(0, 10);
+    if (!dateKey) {
+      undated.push(place);
+      continue;
+    }
+    let section = byDate.get(dateKey);
+    if (!section) {
+      section = { dateKey, title: visitDateLabel(dateKey, today), count: 0, data: [] };
+      byDate.set(dateKey, section);
+      sections.push(section);
+    }
+    section.data.push(place);
+    section.count += 1;
+  }
+  if (undated.length) sections.push({ dateKey: "", title: "날짜 미정", count: undated.length, data: undated });
+  return sections;
+}
 
 // 화면에 한 번에 더 보여주는 개수 ('더보기' 한 번에 늘어나는 양).
 const PLACES_PAGE_SIZE = 5;
@@ -253,11 +297,32 @@ export default function AccessibilityScreen() {
   const [loadingReports, setLoadingReports] = useState(true);
 
   const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [placeModalVisible, setPlaceModalVisible] = useState(false);
   const [reportCategory, setReportCategory] = useState<CategoryKey>("wheelchair_count");
-  const [placeQuery, setPlaceQuery] = useState("");
-  const [placeSearchResults, setPlaceSearchResults] = useState<AttractionSearchResult[]>([]);
-  const [searchingPlace, setSearchingPlace] = useState(false);
-  const [selectedPlace, setSelectedPlace] = useState<AttractionSearchResult | null>(null);
+  const [visitedPlaces, setVisitedPlaces] = useState<VisitedPlace[]>([]);
+  const [loadingVisitedPlaces, setLoadingVisitedPlaces] = useState(false);
+  const [visitedPlacesError, setVisitedPlacesError] = useState(false);
+  const [selectedPlace, setSelectedPlace] = useState<VisitedPlace | null>(null);
+  const visitedPlaceSections = useMemo(() => {
+    const date = new Date();
+    const today = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    return groupVisitedPlacesByDate(visitedPlaces, today);
+  }, [visitedPlaces]);
+  const defaultExpanded = useMemo(() => new Set(visitedPlaceSections.slice(0, 1).map((s) => s.dateKey)), [visitedPlaceSections]);
+  const [expandedDateKeys, setExpandedDateKeys] = useState<Set<string> | null>(null);
+  const expanded = expandedDateKeys ?? defaultExpanded;
+  const displayedSections = useMemo(
+    () => visitedPlaceSections.map((section) => expanded.has(section.dateKey) ? section : { ...section, data: [] }),
+    [visitedPlaceSections, expanded]
+  );
+  const toggleDateGroup = (dateKey: string) => {
+    setExpandedDateKeys((current) => {
+      const next = new Set(current ?? defaultExpanded);
+      if (next.has(dateKey)) next.delete(dateKey);
+      else next.add(dateKey);
+      return next;
+    });
+  };
   const [reportBody, setReportBody] = useState("");
   const [submittingReport, setSubmittingReport] = useState(false);
 
@@ -382,25 +447,6 @@ export default function AccessibilityScreen() {
     loadReports(selectedCategory);
   }, [selectedCategory, loadReports]);
 
-  // 여행지 이름 검색은 디바운스(입력 멈추고 400ms 뒤에만 호출)해서, 타이핑할
-  // 때마다 매번 API를 부르지 않게 합니다 — 이 검색 API도 무장애 정보와 같은
-  // 일일 트래픽 한도를 공유해서 아껴 써야 합니다.
-  useEffect(() => {
-    if (!placeQuery.trim() || placeQuery.trim().length < 2) {
-      setPlaceSearchResults([]);
-      return;
-    }
-    setSearchingPlace(true);
-    const timer = setTimeout(() => {
-      api
-        .searchAttractionsByName(placeQuery.trim())
-        .then(setPlaceSearchResults)
-        .catch(() => setPlaceSearchResults([]))
-        .finally(() => setSearchingPlace(false));
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [placeQuery]);
-
   const openReportModal = () => {
     if (!session) {
       Alert.alert("로그인이 필요해요", "제보를 남기려면 먼저 로그인해주세요.", [
@@ -410,16 +456,22 @@ export default function AccessibilityScreen() {
       return;
     }
     setReportCategory(selectedCategory); // 지금 보고 있는 카테고리를 기본값으로
-    setPlaceQuery("");
-    setPlaceSearchResults([]);
     setSelectedPlace(null);
+    setExpandedDateKeys(null);
     setReportBody("");
+    setVisitedPlaces([]);
+    setVisitedPlacesError(false);
+    setLoadingVisitedPlaces(true);
     setReportModalVisible(true);
+    api.getMyVisitedPlaces()
+      .then(setVisitedPlaces)
+      .catch(() => setVisitedPlacesError(true))
+      .finally(() => setLoadingVisitedPlaces(false));
   };
 
   const handleSubmitReport = async () => {
     if (!selectedPlace) {
-      Alert.alert("여행지를 선택해주세요", "이름을 검색해서 목록에서 골라주세요.");
+      Alert.alert("여행지를 선택해주세요", "방문한 여행지 목록에서 골라주세요.");
       return;
     }
     if (!reportBody.trim()) {
@@ -430,7 +482,7 @@ export default function AccessibilityScreen() {
     try {
       await api.submitAccessibilityReport({
         contentId: selectedPlace.content_id,
-        placeName: selectedPlace.name,
+        placeName: selectedPlace.place_name,
         category: REPORT_CATEGORY_MAP[reportCategory],
         body: reportBody.trim(),
       });
@@ -714,48 +766,24 @@ export default function AccessibilityScreen() {
               <Text style={styles.fieldLabel}>어떤 여행지인가요?</Text>
               {selectedPlace ? (
                 <View style={styles.selectedPlaceChip}>
-                  <Text style={styles.selectedPlaceChipText}>{selectedPlace.name}</Text>
+                  <Text style={styles.selectedPlaceChipText}>{selectedPlace.place_name}</Text>
                   <Pressable
                     style={({ pressed }) => pressed && styles.pressedFeedback}
-                    onPress={() => setSelectedPlace(null)}
+                    onPress={() => setPlaceModalVisible(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="여행지 변경"
                   >
-                    <XIcon size={13} color={colors.primary} weight="bold" />
+                    <Text style={styles.changePlaceText}>변경</Text>
                   </Pressable>
                 </View>
               ) : (
-                <>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="여행지 이름을 검색해주세요"
-                    placeholderTextColor={colors.textTertiary}
-                    value={placeQuery}
-                    onChangeText={setPlaceQuery}
-                    returnKeyType="search"
-                    // 결과 목록에서 맨 위 항목을 누른 것과 같게 처리합니다.
-                    onSubmitEditing={() => {
-                      const first = placeSearchResults[0];
-                      if (!first) return;
-                      setSelectedPlace(first);
-                      setPlaceSearchResults([]);
-                    }}
-                  />
-                  {searchingPlace && <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: 6 }} />}
-                  {placeSearchResults.map((p) => (
-                    <Pressable
-                      key={p.content_id}
-                      style={({ pressed }) => [styles.searchResultRow, pressed && styles.pressedFeedback]}
-                      onPress={() => {
-                        setSelectedPlace(p);
-                        setPlaceSearchResults([]);
-                      }}
-                    >
-                      <Text style={styles.searchResultName}>{p.name}</Text>
-                      <Text style={styles.searchResultAddress} numberOfLines={1}>
-                        {p.address}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </>
+                <Pressable style={styles.selectPlaceButton} onPress={() => setPlaceModalVisible(true)} accessibilityRole="button">
+                  <Text style={styles.selectPlaceButtonText}>여행지 선택하기</Text>
+                </Pressable>
+              )}
+              {visitedPlacesError && <Text style={styles.placeNotice}>방문 기록을 불러오지 못했어요. 제보 창을 다시 열어주세요.</Text>}
+              {!loadingVisitedPlaces && !visitedPlacesError && visitedPlaces.length === 0 && (
+                <Text style={styles.placeNotice}>방문한 여행지에 등록된 장소만 제보할 수 있어요. 내 여행에서 방문 완료로 표시해주세요.</Text>
               )}
 
               <Text style={styles.fieldLabel}>어떤 유형인가요?</Text>
@@ -809,9 +837,76 @@ export default function AccessibilityScreen() {
                   style={styles.modalButton}
                   onPress={handleSubmitReport}
                   loading={submittingReport}
+                  disabled={!selectedPlace || visitedPlacesError}
+                  accessibilityHint={!selectedPlace ? "방문한 여행지 목록에서 장소를 선택해야 제보할 수 있습니다" : undefined}
                 />
               </View>
             </KeyboardAwareScrollView>
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        visible={placeModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setPlaceModalVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.placeModalSheet, { paddingBottom: spacing.xl - 4 + insets.bottom }]}>
+            <View style={styles.placeModalHeader}>
+              <Text style={styles.placeModalTitle}>여행지 선택</Text>
+              <Pressable onPress={() => setPlaceModalVisible(false)} hitSlop={10} accessibilityRole="button">
+                <Text style={styles.placeModalClose}>닫기</Text>
+              </Pressable>
+            </View>
+            {loadingVisitedPlaces ? (
+              <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: 6 }} />
+            ) : visitedPlacesError ? (
+              <Text style={styles.emptyPlacesText}>방문 기록을 불러오지 못했어요. 제보 창을 다시 열어주세요.</Text>
+            ) : (
+              <SectionList
+                sections={displayedSections}
+                keyExtractor={(place) => place.id}
+                style={{ flexShrink: 1 }}
+                showsVerticalScrollIndicator={false}
+                stickySectionHeadersEnabled
+                ListEmptyComponent={
+                  <Text style={styles.emptyPlacesText}>
+                    방문 완료로 표시한 여행지가 없어요. '내 여행' 탭에서 먼저 방문 완료로 표시해주세요.
+                  </Text>
+                }
+                renderSectionHeader={({ section }) => {
+                  const isOpen = expanded.has(section.dateKey);
+                  const Caret = isOpen ? CaretDownIcon : CaretRightIcon;
+                  return (
+                    <Pressable
+                      style={styles.placeSectionHeader}
+                      onPress={() => toggleDateGroup(section.dateKey)}
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: isOpen }}
+                      accessibilityLabel={`${section.title}, 여행지 ${section.count}곳`}
+                    >
+                      <Caret size={14} color={colors.textSecondary} weight="bold" />
+                      <Text style={styles.placeSectionHeaderText}>{section.title}</Text>
+                      <Text style={styles.placeSectionHeaderCount}>{section.count}곳</Text>
+                    </Pressable>
+                  );
+                }}
+                renderItem={({ item }) => (
+                  <Pressable
+                    style={styles.placeRow}
+                    onPress={() => {
+                      setSelectedPlace(item);
+                      setPlaceModalVisible(false);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={item.place_name}
+                  >
+                    <Text style={styles.placeRowName} numberOfLines={1}>{item.place_name}</Text>
+                  </Pressable>
+                )}
+              />
+            )}
           </View>
         </View>
       </Modal>
@@ -969,14 +1064,51 @@ function makeStyles(colors: ThemeColors) {
     gap: spacing.sm,
   },
   selectedPlaceChipText: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.primary },
-  searchResultRow: {
+  changePlaceText: { fontSize: 12, fontFamily: fontFamily.semiBold, color: colors.primary },
+  selectPlaceButton: {
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.md + 2,
     paddingVertical: spacing.sm + 2,
+    borderRadius: radius.pill,
+  },
+  selectPlaceButtonText: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.text },
+  placeNotice: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, lineHeight: 20, marginTop: spacing.sm },
+  emptyPlacesText: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textTertiary, lineHeight: 19, padding: spacing.sm },
+  placeRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: spacing.sm + 4,
     paddingHorizontal: spacing.xs,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  searchResultName: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.text },
-  searchResultAddress: { fontSize: 12, fontFamily: fontFamily.regular, color: colors.textTertiary, marginTop: 2 },
+  placeRowName: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.text, flexShrink: 1, marginRight: spacing.sm },
+  placeSectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs + 2,
+    backgroundColor: colors.surfaceAlt,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: spacing.sm + 2,
+  },
+  placeSectionHeaderText: { flex: 1, fontSize: 12, fontFamily: fontFamily.bold, color: colors.textSecondary },
+  placeSectionHeaderCount: { fontSize: 11, fontFamily: fontFamily.regular, color: colors.textTertiary },
+  placeModalSheet: {
+    width: "100%",
+    maxWidth: 640,
+    backgroundColor: colors.surfaceAlt,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: spacing.xl - 4,
+    maxHeight: "70%",
+  },
+  placeModalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.lg },
+  placeModalTitle: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.text },
+  placeModalClose: { fontSize: 14, color: colors.primary, fontFamily: fontFamily.semiBold },
   categoryChipsRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   reportCategoryChip: {
     flexDirection: "row",

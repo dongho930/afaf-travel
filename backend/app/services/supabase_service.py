@@ -1109,6 +1109,20 @@ async def count_visited_places(user_id: str) -> int:
         return 0
 
 
+async def has_visited_place(user_id: str, content_id: str) -> bool:
+    """작성 권한 확인용. 조회 오류는 미방문과 구분해 호출부에 전달합니다."""
+    if _client is None:
+        raise RuntimeError("방문 기록 저장소를 사용할 수 없습니다.")
+    result = await _execute(
+        _client.table("visited_places")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("content_id", content_id)
+        .limit(1)
+    )
+    return bool(result.data)
+
+
 # 방문한 여행지 목록을 한 번에 몇 행씩 읽을지. 큰 limit 하나로 끝내지 않는
 # 이유는 PostgREST가 한 응답에 돌려주는 행 수에 서버측 상한(max-rows)을 따로
 # 둘 수 있어서입니다 — 그 상한에 걸리면 조용히 잘리고, 코드만 봐서는 어디서
