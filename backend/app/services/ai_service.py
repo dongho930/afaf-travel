@@ -29,7 +29,7 @@ from app.models.schemas import (
     TravelPurpose,
 )
 from app.services.memory_cache import TTLCache
-from app.services.place_intent import query_without_excluded_venues, venue_constraint_for_query
+from app.services.place_intent import is_meal_place, query_without_excluded_venues, venue_constraint_for_query
 from app.services.schedule import arrange_for_meals, build_schedule, hours_payload, is_closed_on
 from app.services.sigungu_codes import resolve_sigungu_codes, signgu_name
 
@@ -362,6 +362,7 @@ SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동반 가
   closes_at을 함께 보고, 그 식사 시간에 실제로 문을 여는 음식점만 그 자리에 두세요
   (예: 17:00에 여는 곳은 점심이 아니라 저녁에). 음식점이 여럿이면 같은 끼니에
   몰아넣지 말고 서로 다른 식사 시간에 하나씩 배치하세요.
+- meal_candidate가 false인 디저트 카페는 식사 장소로 설명하지 마세요.
 - closed_weekdays가 방문일과 겹치는 곳은 그날 갈 수 없으므로, 그 사실을 reason에
   분명히 알려주세요 (순서를 바꿔도 해결되지 않습니다).
 - 혼잡도나 영업 정보가 없는 관광지는 그것을 근거로 들지 마세요 (추측 금지).
@@ -462,6 +463,7 @@ ORDER_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동�
   closes_at을 함께 보고, 그 식사 시간에 실제로 문을 여는 음식점만 그 자리에 두세요
   (예: 17:00에 여는 곳은 점심이 아니라 저녁에). 음식점이 여럿이면 같은 끼니에
   몰아넣지 말고 서로 다른 식사 시간에 하나씩 배치하세요.
+- meal_candidate가 false인 디저트 카페는 식사 장소로 설명하지 마세요.
 - closed_weekdays가 방문일과 겹치는 곳은 그날 갈 수 없으므로, 그 사실을 reason에
   분명히 알려주세요 (순서를 바꿔도 해결되지 않습니다).
 - 혼잡도나 영업 정보가 없는 관광지는 그것을 근거로 들지 마세요 (추측 금지).
@@ -536,6 +538,12 @@ def _build_user_prompt(
             "content_id": a.content_id,
             "name": a.name,
             "category": a.category,
+            **({
+                "representative_menu": next(
+                    (field.value for field in a.extra_info if field.label == "대표 메뉴"), None
+                ),
+                "meal_candidate": is_meal_place(a),
+            } if a.category == "음식점" else {}),
             "accessibility": _relevant_accessibility_payload(
                 a.accessibility.model_dump(), request.user_type
             ),
@@ -939,7 +947,7 @@ async def recommend_places(
     constraint = venue_constraint_for_query(request.query_text)
     broad_added: list[PlaceCandidate] = []
     if constraint:
-        candidates = [a for a in candidates if constraint.matches(a)]
+        candidates = [a for a in candidates if constraint.matches(a) and constraint.accepts_food_place(a)]
         if not candidates:
             return []
 
@@ -969,12 +977,17 @@ async def recommend_places(
             reason=_safe_recommendation_reason(item.get("reason"), attraction, request),
         ))
     if constraint:
-        for requirement in constraint.requirements:
-            if any(requirement.matches(item.attraction) for item in result):
+        for requirement in constraint.ordered_requirements():
+            if requirement.label not in constraint.missing_requirements(
+                [item.attraction for item in result]
+            ):
                 continue
-            required = next((a for a in candidates if requirement.matches(a) and not is_closed_on(a, request.visit_date)), None)
+            present_ids = {item.attraction.content_id for item in result}
+            required = next((a for a in candidates if a.content_id not in present_ids
+                             and requirement.matches(a) and not is_closed_on(a, request.visit_date)), None)
             if required is None:
-                required = next((a for a in candidates if requirement.matches(a)), None)
+                required = next((a for a in candidates if a.content_id not in present_ids
+                                 and requirement.matches(a)), None)
             if required:
                 result.append(PlaceCandidate(
                     attraction=required,
@@ -1008,11 +1021,14 @@ async def recommend_places(
                 non_venue_count += 1
                 non_venue_categories.add(other.category)
     # 필수 장소를 12개 바깥으로 밀어내지 않고 중복도 제거합니다.
-    required = [item for item in result if constraint and constraint.matches_requirement(item.attraction)]
+    coverage_ids = set(constraint.covering_place_ids([item.attraction for item in result])) if constraint else set()
+    coverage = [item for item in result if item.attraction.content_id in coverage_ids]
+    required = [item for item in result if constraint and constraint.matches_requirement(item.attraction)
+                and item.attraction.content_id not in coverage_ids]
     optional = [item for item in result if not (constraint and constraint.matches_requirement(item.attraction))]
     final: list[PlaceCandidate] = []
     final_ids: set[str] = set()
-    for item in [*required, *broad_added, *optional]:
+    for item in [*coverage, *required, *broad_added, *optional]:
         content_id = item.attraction.content_id
         if content_id not in final_ids:
             final.append(item)

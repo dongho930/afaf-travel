@@ -227,3 +227,32 @@ def test_플래너_목록_캐시는_쇼핑을_읽고_기본_목록의_카테고�
     assert 38 not in tour_api._DEFAULT_CONTENT_TYPE_IDS
     assert 38 in read_types
     assert [place.content_id for place in result] == ["market"]
+
+
+def test_식당과_카페_요청은_카페가_많아도_식당을_후보에_남긴다(monkeypatch):
+    client = tour_api.tour_api_client
+    monkeypatch.setattr(client, "use_mock", False)
+
+    async def fake_region(_region):
+        return [
+            _place(str(i), "음식점").model_copy(update={"name": f"수원 카페 {i}"})
+            for i in range(60)
+        ] + [_place("meal", "음식점").model_copy(update={"name": "수원 밥집"})]
+
+    async def fake_accessibility(_ids):
+        return {}
+
+    async def no_display_info(_candidates):
+        return None
+
+    monkeypatch.setattr(client, "_region_attractions", fake_region)
+    monkeypatch.setattr(tour_api, "get_cached_place_accessibility", fake_accessibility)
+    monkeypatch.setattr(client, "_fill_display_info", no_display_info)
+
+    result = asyncio.run(client.sample_accessible_candidates(
+        region="경기도", user_type="general", limit=12,
+        venue_constraint=venue_constraint_for_query("식당과 카페"),
+    ))
+    assert len(result) == 12
+    assert "meal" in {place.content_id for place in result}
+    assert any("카페" in place.name for place in result)

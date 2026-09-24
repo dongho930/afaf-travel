@@ -29,7 +29,7 @@ def test_과천_음식점_캐시가_비면_검색_결과도_비어_있다(monkey
     assert found == []
 
 
-def test_식당_후보가_없으면_관광지만으로_코스를_완성하지_않는다(monkeypatch):
+def test_식당_후보가_없어도_선택한_관광지로_코스를_만들고_식사_누락을_알린다(monkeypatch):
     ai_service._PARSE_CACHE._entries.clear()
     ai_service._PARSE_CACHE._locks.clear()
     monkeypatch.setattr(ai_service.settings, "groq_api_key", "")
@@ -42,8 +42,17 @@ def test_식당_후보가_없으면_관광지만으로_코스를_완성하지_�
     async def detail(cid):
         return {"museum": museum, "park": park}.get(cid)
 
+    async def no_fill(_places):
+        return 0
+
+    async def no_save(*_args, **_kwargs):
+        return None
+
     monkeypatch.setattr(courses.tour_api_client, "sample_accessible_candidates", sample)
     monkeypatch.setattr(courses.tour_api_client, "get_attraction_detail", detail)
+    monkeypatch.setattr(courses.tour_api_client, "fill_extra_info", no_fill)
+    monkeypatch.setattr(courses.tour_api_client, "fill_congestion_forecasts", no_fill)
+    monkeypatch.setattr(courses, "save_course", no_save)
 
     client = TestClient(app)
     query = "휠체어로 이동 가능한 과천 당일치기 코스와 점심 식당"
@@ -59,5 +68,6 @@ def test_식당_후보가_없으면_관광지만으로_코스를_완성하지_�
         "query_text": query, "user_type": "wheelchair",
         "selected_content_ids": ["museum", "park"],
     })
-    assert response.status_code == 422
-    assert "음식점" in response.json()["detail"]
+    assert response.status_code == 200
+    assert {stop["attraction"]["content_id"] for stop in response.json()["stops"]} == {"museum", "park"}
+    assert "식사 장소가 이 코스에 포함되지 않았어요" in response.json()["summary"]

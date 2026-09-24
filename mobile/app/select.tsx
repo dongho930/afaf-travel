@@ -215,7 +215,10 @@ export default function SelectPlacesScreen() {
       </Text>
       {unresolvedCategories.length > 0 && (
         <Text style={styles.subtitle}>
-          {unresolvedCategories.join("·")} 장소를 현재 여행지 자료에서 찾지 못했어요. 지역이나 조건을 바꿔 다시 요청해주세요.
+          {unresolvedCategories.join("·")} 장소를 현재 여행지 자료에서 찾지 못했어요.
+          {unresolvedCategories.every((category) => category === "음식점")
+            ? " 선택한 장소로 코스를 만들 수 있지만 식사 장소는 포함되지 않아요."
+            : " 지역이나 조건을 바꿔 다시 요청해주세요."}
         </Text>
       )}
       {conditionChips.length > 0 && (

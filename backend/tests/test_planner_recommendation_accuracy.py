@@ -8,9 +8,9 @@ from fastapi.testclient import TestClient
 
 import app.routers.courses as courses
 from app.main import app
-from app.models.schemas import Attraction, GenerateFromSelectionRequest, PlaceRecommendationRequest
+from app.models.schemas import Attraction, GenerateFromSelectionRequest, InfoField, PlaceRecommendationRequest
 from app.services import ai_service, tour_api
-from app.services.place_intent import venue_constraint_for_query
+from app.services.place_intent import is_meal_place, venue_constraint_for_query
 
 
 def place(cid: str, name: str, category: str = "문화시설", address: str = "경기도 과천시") -> Attraction:
@@ -42,6 +42,197 @@ def test_과학관과_미술관은_각각_한_곳씩_필요():
     assert not constraint.matches(unrelated)
     assert constraint.missing_requirements([science]) == ["미술관"]
     assert constraint.missing_requirements([science, art]) == []
+
+
+def test_관광지_요청은_박물관도_방문지로_인정한다():
+    constraint = venue_constraint_for_query("수원시 팔달구 관광지와 점심 식당")
+    museum = place("museum", "수원화성박물관")
+    assert constraint.matches(museum)
+    assert constraint.missing_requirements([museum]) == ["음식점"]
+
+
+def test_케이크_대표메뉴_카페는_점심_식당이_아니다():
+    constraint = venue_constraint_for_query("점심 식당")
+    cake_cafe = place("cafe", "수원 카페", "음식점").model_copy(update={
+        "extra_info": [InfoField(label="대표 메뉴", value="생딸기케이크")],
+    })
+    meal_cafe = place("brunch", "수원 카페", "음식점").model_copy(update={
+        "extra_info": [InfoField(label="대표 메뉴", value="브런치 샌드위치")],
+    })
+    assert not is_meal_place(cake_cafe)
+    assert is_meal_place(meal_cafe)
+    assert constraint.missing_requirements([cake_cafe]) == ["음식점"]
+    assert constraint.missing_requirements([meal_cafe]) == []
+    assert courses._required_place_gaps(constraint, [cake_cafe]) == (["음식점"], False)
+
+
+def test_가게_이름에_카페가_없어도_디저트_메뉴이면_식사로_세지_않는다():
+    dessert_shop = place("dessert", "라온", "음식점").model_copy(update={
+        "extra_info": [InfoField(label="대표 메뉴", value="생딸기케이크, 아메리카노")],
+    })
+    restaurant = place("restaurant", "라온", "음식점").model_copy(update={
+        "extra_info": [InfoField(label="대표 메뉴", value="김치찌개, 된장찌개")],
+    })
+
+    assert not is_meal_place(dessert_shop)
+    assert is_meal_place(restaurant)
+
+
+@pytest.mark.parametrize("query", [
+    "식당과 카페", "카페와 식당", "점심 먹고 카페", "식사 후 카페",
+    "식당 및 카페", "식당에서 식사하고 카페", "식당, 카페",
+])
+def test_식당과_카페를_따로_요청하면_두_장소가_필요하다(query):
+    constraint = venue_constraint_for_query(query)
+    restaurant = place("meal", "수원 밥집", "음식점")
+    cafe = place("cafe", "수원 카페", "음식점").model_copy(update={
+        "extra_info": [InfoField(label="대표 메뉴", value="생딸기케이크")],
+    })
+
+    assert {req.label for req in constraint.requirements} == {"음식점", "카페"}
+    assert constraint.accepts_food_place(cafe)
+    assert constraint.missing_requirements([cafe]) == ["음식점"]
+    assert constraint.missing_requirements([cafe, cafe]) == ["음식점"]
+    assert constraint.missing_requirements([restaurant]) == ["카페"]
+    assert constraint.missing_requirements([restaurant, cafe]) == []
+
+
+def test_점심_카페는_카페_한_곳을_요구하되_식사_메뉴가_있어야_한다():
+    constraint = venue_constraint_for_query("점심 카페")
+    cake_cafe = place("cake", "수원 카페", "음식점").model_copy(update={
+        "extra_info": [InfoField(label="대표 메뉴", value="생딸기케이크")],
+    })
+    brunch_cafe = place("brunch", "수원 카페", "음식점").model_copy(update={
+        "extra_info": [InfoField(label="대표 메뉴", value="브런치 샌드위치")],
+    })
+
+    assert [req.label for req in constraint.requirements] == ["카페"]
+    assert constraint.meal_required
+    assert not constraint.accepts_food_place(cake_cafe)
+    assert constraint.missing_requirements([cake_cafe]) == ["카페"]
+    assert constraint.missing_requirements([brunch_cafe]) == []
+
+
+def test_디저트_카페_요청에는_케이크_카페를_남긴다():
+    constraint = venue_constraint_for_query("카페에서 디저트 먹기")
+    cake_cafe = place("cake", "수원 카페", "음식점").model_copy(update={
+        "extra_info": [InfoField(label="대표 메뉴", value="생딸기케이크")],
+    })
+
+    assert not constraint.meal_required
+    assert constraint.accepts_food_place(cake_cafe)
+    assert constraint.missing_requirements([cake_cafe]) == []
+
+
+def test_관광지와_박물관을_따로_요청하면_한_곳으로_두_요구를_채우지_않는다():
+    constraint = venue_constraint_for_query("관광지와 박물관")
+    museum = place("museum", "수원화성박물관")
+    park = place("park", "중앙공원", "관광지")
+
+    assert {req.label for req in constraint.requirements} == {"관광지", "박물관"}
+    assert constraint.missing_requirements([museum]) == ["관광지"]
+    assert constraint.missing_requirements([museum, park]) == []
+    assert set(constraint.covering_place_ids([museum, park])) == {"museum", "park"}
+
+
+def test_점심_추천에서_디저트_카페를_제외한다(monkeypatch):
+    ai_service._PARSE_CACHE._entries.clear()
+    ai_service._PARSE_CACHE._locks.clear()
+    monkeypatch.setattr(ai_service.settings, "groq_api_key", "")
+    cake_cafe = place("cafe", "수원 카페", "음식점").model_copy(update={
+        "extra_info": [InfoField(label="대표 메뉴", value="생딸기케이크")],
+    })
+    restaurant = place("meal", "수원 밥집", "음식점")
+    museum = place("museum", "수원화성박물관")
+
+    async def sample(**_kwargs):
+        return [cake_cafe, restaurant, museum]
+
+    async def no_fill(_places):
+        return 0
+
+    monkeypatch.setattr(courses.tour_api_client, "sample_accessible_candidates", sample)
+    monkeypatch.setattr(courses.tour_api_client, "fill_extra_info", no_fill)
+    response = TestClient(app).post("/api/courses/recommend", json={
+        "query_text": "점심 식당과 관광지", "user_type": "general",
+    })
+    assert response.status_code == 200
+    assert {item["attraction"]["content_id"] for item in response.json()["candidates"]} == {"meal", "museum"}
+    assert response.json()["missing_categories"] == []
+
+
+def test_ai가_카페만_열두_곳_골라도_요청한_식당을_결과에_남긴다(monkeypatch):
+    monkeypatch.setattr(ai_service.settings, "groq_api_key", "test")
+    cafes = [place(f"cafe-{i}", f"수원 카페 {i}", "음식점") for i in range(12)]
+    restaurant = place("meal", "수원 밥집", "음식점")
+
+    async def cafes_only(*_args):
+        return [{"content_id": cafe.content_id, "reason": "카페"} for cafe in cafes]
+
+    monkeypatch.setattr(ai_service, "_groq_recommend", cafes_only)
+    result = asyncio.run(ai_service.recommend_places(
+        PlaceRecommendationRequest(query_text="식당과 카페"), [*cafes, restaurant],
+    ))
+
+    assert len(result) == 12
+    assert "meal" in {item.attraction.content_id for item in result}
+    assert any(item.attraction.content_id.startswith("cafe-") for item in result)
+
+
+def test_식당과_카페_추천은_디저트_카페와_식당을_각각_남긴다(monkeypatch):
+    ai_service._PARSE_CACHE._entries.clear()
+    ai_service._PARSE_CACHE._locks.clear()
+    monkeypatch.setattr(ai_service.settings, "groq_api_key", "")
+    cafe = place("cafe", "수원 카페", "음식점").model_copy(update={
+        "extra_info": [InfoField(label="대표 메뉴", value="생딸기케이크")],
+    })
+    restaurant = place("meal", "수원 밥집", "음식점")
+
+    async def sample(**_kwargs):
+        return [cafe, restaurant]
+
+    async def no_fill(_places):
+        return 0
+
+    monkeypatch.setattr(courses.tour_api_client, "sample_accessible_candidates", sample)
+    monkeypatch.setattr(courses.tour_api_client, "fill_extra_info", no_fill)
+    response = TestClient(app).post("/api/courses/recommend", json={
+        "query_text": "식당과 카페", "user_type": "general",
+    })
+    assert response.status_code == 200
+    assert {item["attraction"]["content_id"] for item in response.json()["candidates"]} == {"cafe", "meal"}
+    assert response.json()["missing_categories"] == []
+
+
+def test_수원_박물관과_디저트_카페_선택은_코스를_만들되_점심으로_세지_않는다(monkeypatch):
+    ai_service._PARSE_CACHE._entries.clear()
+    ai_service._PARSE_CACHE._locks.clear()
+    monkeypatch.setattr(ai_service.settings, "groq_api_key", "")
+    museum = place("museum", "수원화성박물관", address="경기도 수원시 팔달구")
+    cake_cafe = place("cafe", "수원 카페", "음식점", "경기도 수원시 팔달구").model_copy(update={
+        "extra_info": [InfoField(label="대표 메뉴", value="생딸기케이크")],
+    })
+
+    async def detail(cid):
+        return {"museum": museum, "cafe": cake_cafe}.get(cid)
+
+    async def no_fill(_places):
+        return 0
+
+    async def no_save(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(courses.tour_api_client, "get_attraction_detail", detail)
+    monkeypatch.setattr(courses.tour_api_client, "fill_extra_info", no_fill)
+    monkeypatch.setattr(courses.tour_api_client, "fill_congestion_forecasts", no_fill)
+    monkeypatch.setattr(courses, "save_course", no_save)
+    response = TestClient(app).post("/api/courses/generate-from-selection", json={
+        "query_text": "수원시 팔달구 관광지와 점심 식당",
+        "selected_content_ids": ["museum", "cafe"],
+    })
+    assert response.status_code == 200
+    assert {stop["attraction"]["content_id"] for stop in response.json()["stops"]} == {"museum", "cafe"}
+    assert "식사 장소가 이 코스에 포함되지 않았어요" in response.json()["summary"]
 
 
 def test_당일치기_제외_표현은_다른_장소를_허용해도_지킨다():
@@ -87,6 +278,18 @@ def test_놀이공원_요청에_일반_공원을_섞지_않는다():
     assert constraint.matches(place("theme", "과천 놀이공원", "관광지"))
     assert not constraint.matches(place("park", "중앙공원", "관광지"))
     assert [requirement.label for requirement in constraint.requirements] == ["테마파크"]
+
+
+def test_일반_공원_요청에_놀이공원을_공원으로_세지_않는다():
+    park = place("park", "중앙공원", "관광지")
+    theme_park = place("theme", "과천 놀이공원", "관광지")
+    park_only = venue_constraint_for_query("공원 산책")
+    both = venue_constraint_for_query("공원과 놀이공원")
+
+    assert park_only.matches(park)
+    assert not park_only.matches(theme_park)
+    assert both.missing_requirements([theme_park]) == ["공원"]
+    assert both.missing_requirements([park, theme_park]) == []
 
 
 def test_동물원으로_알려진_서울대공원_이름도_인정한다():

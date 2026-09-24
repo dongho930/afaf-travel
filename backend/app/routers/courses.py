@@ -34,7 +34,7 @@ from app.services.ai_service import (
     parse_query,
     recommend_places,
 )
-from app.services.place_intent import venue_constraint_for_query
+from app.services.place_intent import VenueConstraint, venue_constraint_for_query
 from app.services.auth import get_optional_user_id
 from app.services.supabase_service import (
     CacheUnavailable,
@@ -72,6 +72,23 @@ trips_router = APIRouter(prefix="/api/trips", tags=["trips"])
 # 프롬프트도 커지지만 장소당 싣는 정보(이름·카테고리·편의시설 몇 필드·혼잡도)가
 # 작아서 이 정도는 감당됩니다.
 _CANDIDATE_LIMIT = 40
+
+
+def _required_place_gaps(
+    constraint: VenueConstraint | None, places: list[Attraction]
+) -> tuple[list[str], bool]:
+    """여행 코스의 식사 누락은 안내하고, 다른 필수 장소 누락은 막습니다."""
+    missing = constraint.missing_requirements(places) if constraint else []
+    meal_gap = "음식점" in missing and any(place.category != "음식점" for place in places)
+    return [label for label in missing if label != "음식점" or not meal_gap], meal_gap
+
+
+def _note_missing_meal(course: CourseResponse, meal_gap: bool) -> None:
+    if meal_gap:
+        course.summary = (
+            f"{course.summary.rstrip()} 요청하신 식사 장소가 이 코스에 포함되지 않았어요. "
+            "식사 장소는 별도로 확인해 주세요."
+        )
 
 
 async def _candidates_with_conditions(
@@ -132,6 +149,9 @@ async def recommend_course_places(request: PlaceRecommendationRequest):
     # 422가 나가 앱에 "장소 추천 실패" 팝업이 떴는데, 앱에는 이미 후보 0개를 위한
     # 안내("조건에 맞는 장소를 찾지 못했어요")가 있어서 그쪽으로 보냅니다.
     constraint = venue_constraint_for_query(request.query_text)
+    if constraint and constraint.meal_required:
+        await tour_api_client.fill_extra_info([place for place in candidates if place.category == "음식점"])
+        candidates = [place for place in candidates if constraint.accepts_food_place(place)]
     missing_categories = constraint.missing_requirements(candidates) if constraint else []
     if not candidates:
         logger.info("조건에 맞는 후보가 없습니다: %r", request.query_text)
@@ -191,20 +211,27 @@ async def create_course_from_selection(
         *(tour_api_client.get_attraction_detail(cid) for cid in request.selected_content_ids)
     )
     selected_attractions: list[Attraction] = []
+    seen_selected_ids: set[str] = set()
     for content_id, detail in zip(request.selected_content_ids, details):
         if detail is None:
             logger.warning("선택한 관광지를 불러오지 못했습니다 (content_id=%s)", content_id)
             continue
+        if detail.content_id in seen_selected_ids:
+            continue
+        seen_selected_ids.add(detail.content_id)
         selected_attractions.append(detail)
 
     if not selected_attractions:
         raise HTTPException(status_code=422, detail="선택하신 관광지 정보를 다시 불러오지 못했습니다. 다시 시도해주세요.")
 
     constraint = venue_constraint_for_query(request.query_text)
+    if constraint and constraint.meal_required:
+        await tour_api_client.fill_extra_info(selected_attractions)
+    meal_gap = False
     if constraint:
         if any(not constraint.matches(place) for place in selected_attractions):
             raise HTTPException(status_code=422, detail="요청에서 제외하거나 요청과 다른 유형의 장소가 선택됐어요. 장소를 다시 골라주세요.")
-        missing = constraint.missing_requirements(selected_attractions)
+        missing, meal_gap = _required_place_gaps(constraint, selected_attractions)
         if missing:
             raise HTTPException(
                 status_code=422,
@@ -217,7 +244,8 @@ async def create_course_from_selection(
 
     # 방문 시각을 영업시간·휴무일에 맞춰 계산하려면 부가정보가, 붐비는 곳을 앞으로
     # 당기려면 혼잡도 예보가 필요합니다. 둘 다 캐시만 읽어서 채웁니다.
-    await tour_api_client.fill_extra_info(selected_attractions)
+    if not (constraint and constraint.meal_required):
+        await tour_api_client.fill_extra_info(selected_attractions)
     await tour_api_client.fill_congestion_forecasts(selected_attractions)
 
     try:
@@ -225,6 +253,7 @@ async def create_course_from_selection(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
+    _note_missing_meal(course, meal_gap)
     await save_course(course, query_text=request.query_text, region=request.region, user_id=user_id)
     return course
 
@@ -257,12 +286,13 @@ async def create_course(
 
     constraint = venue_constraint_for_query(request.query_text)
     if constraint:
-        missing = constraint.missing_requirements([stop.attraction for stop in course.stops])
+        missing, meal_gap = _required_place_gaps(constraint, [stop.attraction for stop in course.stops])
         if missing:
             raise HTTPException(
                 status_code=422,
                 detail=f"요청하신 {'·'.join(missing)} 장소가 없어 코스를 완성할 수 없어요.",
             )
+        _note_missing_meal(course, meal_gap)
 
     await save_course(course, query_text=request.query_text, region=request.region, user_id=user_id)
     return course

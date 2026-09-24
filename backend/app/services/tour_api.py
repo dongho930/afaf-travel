@@ -1684,7 +1684,7 @@ class TourApiClient:
                 return candidates
             matched = [a for a in candidates if venue_constraint.matches(a)]
             reserved: list[Attraction] = []
-            for requirement in venue_constraint.requirements:
+            for requirement in venue_constraint.ordered_requirements():
                 match = next((a for a in matched if requirement.matches(a)), None)
                 if match and match not in reserved:
                     reserved.append(match)
@@ -1709,7 +1709,7 @@ class TourApiClient:
             if not venue_constraint:
                 return items[:limit]
             reserved: list[Attraction] = []
-            for requirement in venue_constraint.requirements:
+            for requirement in venue_constraint.ordered_requirements():
                 match = next((a for a in items if requirement.matches(a) and venue_constraint.matches(a)), None)
                 if match and match not in reserved:
                     reserved.append(match)

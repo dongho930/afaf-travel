@@ -223,6 +223,18 @@ def test_음식점은_점심시간에_맞춰_당겨진다():
     assert "점심" in (result[1].time_note or "")
 
 
+def test_케이크_카페는_점심_식당처럼_시간을_당기지_않는다():
+    museum = _place("수원화성박물관", category="문화시설")
+    cafe = _place("수원 카페", category="음식점")
+    cafe.extra_info = [InfoField(label="대표 메뉴", value="생딸기케이크")]
+
+    result = schedule.build_schedule([museum, cafe])
+
+    assert result[1].arrival_time != "11:00"
+    assert "점심" not in (result[1].time_note or "")
+    assert schedule.arrange_for_meals([cafe, museum]) == [0, 1]
+
+
 def test_음식점이_이미_식사시간대면_그대로_둔다():
     result = schedule.build_schedule([_place("가", category="음식점")])
 

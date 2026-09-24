@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from app.models.schemas import Attraction
+from app.services.place_intent import is_meal_place
 
 # 하루 일정의 기본 시작 시각(09:00)과, 이보다 늦어지면 "하루에 다 돌기 어렵다"고
 # 알려주는 기준(20:00). 첫 장소가 더 늦게 열면 시작 시각은 그 개장 시각이 됩니다.
@@ -54,8 +55,6 @@ _DWELL_MINUTES: dict[str, int] = {
     "축제/공연/행사": 120,
 }
 _DEFAULT_DWELL_MINUTES = 90
-
-_RESTAURANT_CATEGORY = "음식점"
 
 # 음식점 방문이 걸쳐야 하는 식사 시간대. AI/대체 로직에게도 같은 문구로
 # "식사 시간에 들르라"고 요청하지만, 순서만으로는 실제 도착 시각까지 맞다고
@@ -348,7 +347,7 @@ def arrange_for_meals(attractions: list[Attraction]) -> list[int]:
     """
     hours = [place_hours(a) for a in attractions]
     assigned = _assign_meals(
-        {i: hours[i] for i, a in enumerate(attractions) if a.category == _RESTAURANT_CATEGORY}
+        {i: hours[i] for i, a in enumerate(attractions) if is_meal_place(a)}
     )
     if not assigned:
         return list(range(len(attractions)))
@@ -407,7 +406,7 @@ def arrange_for_meals(attractions: list[Attraction]) -> list[int]:
         clock = arrival_at(previous, chosen, clock)
         if hours[chosen].open_min is not None and clock < hours[chosen].open_min:
             clock = hours[chosen].open_min
-        if attractions[chosen].category == _RESTAURANT_CATEGORY:
+        if is_meal_place(attractions[chosen]):
             meal_time, _ = _meal_time_push(clock)
             if meal_time is not None and (
                 hours[chosen].close_min is None or meal_time <= hours[chosen].close_min
@@ -464,7 +463,7 @@ def build_schedule(
         # 음식점은 개장 시각을 반영한 뒤에도 식사 시간대 밖이면 당겨줍니다.
         # 당긴 시각이 영업 종료 이후가 되면(예: 15시에 닫는 곳을 저녁으로 당기는 경우)
         # 포기합니다 — 실제로 갈 수 없는 시각으로 밀어붙이는 것보다야 낫습니다.
-        if attraction.category == _RESTAURANT_CATEGORY:
+        if is_meal_place(attraction):
             meal_time, meal_note = _meal_time_push(current)
             if meal_time is not None and (hours.close_min is None or meal_time <= hours.close_min):
                 current = meal_time
