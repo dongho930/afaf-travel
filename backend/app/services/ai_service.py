@@ -35,7 +35,8 @@ from app.services.place_intent import (
 )
 from app.services.schedule import arrange_for_meals, build_schedule, hours_payload, is_closed_on
 from app.services.course_validator import (
-    clean_reason, congestion_level, facility_reason, fits_congestion, prefers_short_route, validate_course,
+    clean_reason, congestion_level, copula, describe_place, facility_reason, fits_congestion, prefers_short_route,
+    validate_course,
 )
 from app.services.sigungu_codes import resolve_sigungu_codes, signgu_name
 
@@ -115,10 +116,11 @@ _COMPANION_KEYWORDS: dict[CompanionType, tuple[str, ...]] = {
     CompanionType.FAMILY: (
         "가족", "아이", "애기", "아기", "유모차", "부모님", "어머니", "아버지",
         "엄마", "아빠", "할머니", "할아버지", "아들", "딸", "조카", "손주",
+        "애랑", "애와", "애들", "우리 애", "자녀",
     ),
     CompanionType.COUPLE: (
         "커플", "연인", "데이트", "여자친구", "남자친구", "여친", "남친",
-        "남편", "아내", "와이프", "신랑",
+        "남편", "아내", "와이프", "신랑", "부부", "배우자",
     ),
     CompanionType.FRIENDS: ("친구", "동료", "지인"),
     CompanionType.SOLO: ("혼자", "나홀로", "혼행"),
@@ -131,7 +133,7 @@ _PURPOSE_KEYWORDS: dict[TravelPurpose, tuple[str, ...]] = {
     TravelPurpose.HISTORY: ("역사", "유적", "고궁", "행궁", "성곽", "문화재", "사찰"),
     TravelPurpose.FOOD: (
         "맛집", "먹거리", "식당", "카페", "음식", "디저트", "빵집", "식도락", "먹방",
-        "식사", "점심", "저녁", "아침", "밥집", "브런치", "먹을",
+        "식사", "점심", "저녁", "아침", "밥집", "브런치", "먹을", "먹기", "먹는", "먹으러",
     ),
     TravelPurpose.ACTIVITY: ("체험", "액티비티", "놀거리", "놀이", "테마파크", "만들기"),
     TravelPurpose.SHOPPING: ("쇼핑", "시장", "아울렛", "아웃렛", "백화점", "기념품"),
@@ -286,6 +288,15 @@ async def parse_query(
             except Exception as e:  # 파싱은 부가 기능이라 어떤 실패도 화면을 막지 않습니다
                 logger.warning("질의 해석 실패(%s) — 규칙 기반으로 대체합니다.", e)
 
+        # AI가 문장에 없는 동행자를 추측해 채우는 일이 있습니다 (예: 동행자 언급이 없는데
+        # '친구'). 화면에 "이렇게 이해했어요"로 그대로 보이므로, 그 유형의 단어가 문장에
+        # 실제로 있을 때만 인정하고 아니면 규칙 기반 해석(근거 있는 단어만 봄)을 씁니다.
+        if parsed.companion != CompanionType.UNSPECIFIED and not any(
+            word in text for word in _COMPANION_KEYWORDS.get(parsed.companion, ())
+        ):
+            logger.info("질의에 근거가 없는 동행자(%s)를 버립니다: %r", parsed.companion.value, text)
+            parsed.companion = _rule_parse(text).companion
+
         parsed.prefers_short_route = prefers_short_route(text)
         # 명시적인 장소 표현은 AI가 목적을 누락해도 조건에 반영합니다.
         lexical_purposes = _rule_parse(query_without_excluded_venues(text)).purposes
@@ -381,6 +392,8 @@ SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동반 가
 - closed_weekdays가 방문일과 겹치는 곳은 그날 갈 수 없으므로, 그 사실을 reason에
   분명히 알려주세요 (순서를 바꿔도 해결되지 않습니다).
 - 혼잡도나 영업 정보가 없는 관광지는 그것을 근거로 들지 마세요 (추측 금지).
+- 좌석 수·주차·놀이방·포장·예약은 candidates에 그 값(seats, kids_room, takeout 등)이
+  있을 때만 언급하세요. 주어지지 않은 정보를 "좌석이 넉넉해"처럼 지어내지 마세요.
 - reason에서 "사람이 많이 몰리는 편"이라고 쓸 수 있는 곳은 congestion_rate가 66 이상이거나
   방문일 혼잡도가 high인 곳뿐입니다. 앱은 그 아래를 "보통"이나 "여유"로 표시합니다.
 - conditions에 동행자(companion)나 목적(purposes)이 있으면 그에 맞게 순서를 정하고
@@ -499,6 +512,8 @@ ORDER_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동�
 - closed_weekdays가 방문일과 겹치는 곳은 그날 갈 수 없으므로, 그 사실을 reason에
   분명히 알려주세요 (순서를 바꿔도 해결되지 않습니다).
 - 혼잡도나 영업 정보가 없는 관광지는 그것을 근거로 들지 마세요 (추측 금지).
+- 좌석 수·주차·놀이방·포장·예약은 candidates에 그 값(seats, kids_room, takeout 등)이
+  있을 때만 언급하세요. 주어지지 않은 정보를 "좌석이 넉넉해"처럼 지어내지 마세요.
 - reason에서 "사람이 많이 몰리는 편"이라고 쓸 수 있는 곳은 congestion_rate가 66 이상이거나
   방문일 혼잡도가 high인 곳뿐입니다. 앱은 그 아래를 "보통"이나 "여유"로 표시합니다.
 - conditions에 동행자(companion)나 목적(purposes)이 있으면 그에 맞게 순서를 정하고
@@ -565,6 +580,10 @@ def _congestion_payload(
     return payload
 
 
+# 음식점 후보에 함께 싣는 부가정보 (프롬프트 키, 부가정보 라벨).
+_FOOD_INFO_FIELDS = (("seats", "좌석 수"), ("kids_room", "어린이 놀이방 여부"), ("takeout", "포장 가능 여부"))
+
+
 def _build_user_prompt(
     request: CourseRequest,
     candidates: list[Attraction],
@@ -583,6 +602,9 @@ def _build_user_prompt(
                     (field.value for field in a.extra_info if field.label == "대표 메뉴"), None
                 ),
                 "meal_candidate": {MEAL: True, NOT_MEAL: False}.get(meal_status(a), "unknown"),
+                # 좌석·놀이방·포장 정보는 등록된 곳에만 싣습니다. 없으면 근거로 쓸 수 없습니다.
+                **{key: field.value for key, label in _FOOD_INFO_FIELDS
+                   for field in a.extra_info if field.label == label and field.value},
             } if a.category == "음식점" else {}),
             "accessibility": _relevant_accessibility_payload(
                 a.accessibility.model_dump(), request.user_type
@@ -951,13 +973,22 @@ async def _groq_recommend(
     return [item for item in selected if isinstance(item, dict)]
 
 
-def _safe_recommendation_reason(reason: object, place: Attraction, request: PlaceRecommendationRequest) -> str:
-    """등록되지 않은 편의시설·경로 안전 단정·음료 가게의 식사 설명, 화면의 혼잡도
-    표시와 어긋나는 '붐비는 곳' 같은 설명을 덜어냅니다."""
-    reason = clean_reason(reason, place, user_type=request.user_type.value)
+def _safe_recommendation_reason(
+    reason: object, place: Attraction, request: PlaceRecommendationRequest, lead: str | None = None,
+) -> str:
+    """
+    등록되지 않은 편의시설·부가정보(좌석·주차 등)·경로 안전 단정·음료 가게의 식사 설명,
+    화면의 혼잡도 표시와 어긋나는 '붐비는 곳' 같은 설명을 덜어냅니다.
+
+    남는 문장이 없으면 기본 문구 대신 등록된 데이터로 설명을 만듭니다 (describe_place).
+    lead는 그때 맨 앞에 둘 문장입니다.
+    """
+    user_type = request.user_type.value
+    described = describe_place(place, user_type, request.visit_date, lead)
+    reason = clean_reason(reason, place, fallback="", user_type=user_type)
     level = congestion_level(place, request.visit_date)
     kept = [s for s in re.split(r"(?<=[.!?])\s+", reason) if s.strip() and fits_congestion(s, level)]
-    reason = " ".join(kept) if kept else clean_reason("", place, user_type=request.user_type.value)
+    reason = " ".join(kept) if kept else described
     if is_closed_on(place, request.visit_date):
         return f"방문 예정일에 휴무로 표시된 장소예요. {reason}"
     return reason
@@ -1026,10 +1057,13 @@ async def recommend_places(
                 required = next((a for a in candidates if a.content_id not in present_ids
                                  and requirement.matches(a)), None)
             if required:
+                # AI가 고르지 않은 필수 유형을 채우는 자리라 AI가 쓴 이유가 없습니다.
+                # 기본 문구 대신 등록된 데이터로 설명합니다.
                 result.append(PlaceCandidate(
                     attraction=required,
                     reason=_safe_recommendation_reason(
-                        f"요청하신 {requirement.label} 장소예요.", required, request
+                        None, required, request,
+                        lead=f"{requirement.label} 요청에 맞는 {copula(required.category or '장소')}.",
                     ),
                 ))
         if constraint.allow_other_categories:
@@ -1049,7 +1083,8 @@ async def recommend_places(
                 added = PlaceCandidate(
                     attraction=other,
                     reason=_safe_recommendation_reason(
-                        "당일 여행 코스에 함께 둘러볼 수 있는 장소예요.", other, request
+                        None, other, request,
+                        lead=f"코스에 함께 둘러보기 좋은 {copula(other.category or '장소')}.",
                     ),
                 )
                 result.append(added)

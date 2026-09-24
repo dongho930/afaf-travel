@@ -97,6 +97,19 @@ _FACILITY_WORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("휴게공간", ("has_rest_area",)),
 )
 
+# 부가정보(detailIntro)로만 확인할 수 있는 주장 — (표현, 뒷받침하는 부가정보 라벨,
+# 뒷받침하는 편의시설 필드). AI는 이 정보를 받지 못한 채 "좌석 수가 충분해"처럼
+# 지어내곤 해서, 근거가 실제로 있을 때만 남깁니다.
+_EXTRA_INFO_CLAIMS: tuple[tuple[re.Pattern, tuple[str, ...], tuple[str, ...]], ...] = (
+    (re.compile(r"좌석"), ("좌석 수",), ()),
+    (re.compile(r"주차"), ("주차시설", "주차요금", "주차 요금"), ("has_parking",)),
+    (re.compile(r"놀이방|키즈\s*(존|룸|카페|공간)"), ("어린이 놀이방 여부",), ()),
+    (re.compile(r"포장\s*(이|도)?\s*(가능|돼|되|주문|판매)|테이크\s*아웃"), ("포장 가능 여부",), ()),
+    (re.compile(r"예약"), ("예약 안내", "예약 전화", "예약 홈페이지"), ()),
+)
+# 부가정보 값이 이렇게만 적혀 있으면 '있다'는 근거로 보지 않습니다.
+_EMPTY_INFO_VALUES = {"없음", "불가", "불가능", "x", "-", "미운영"}
+
 # 장소 '안'의 시설이 아니라 장소 '사이' 경로가 무장애라고 단정하는 표현.
 # 데이터에는 장소 사이 경로 정보가 없어서 이런 문장은 근거 없는 안전 보장이 됩니다.
 #
@@ -208,6 +221,19 @@ def _has_any(features: AccessibilityFeatures, fields: Iterable[str]) -> bool:
     return any(bool(getattr(features, name, False)) for name in fields)
 
 
+def _unbacked_extra_claim(sentence: str, place: Attraction) -> bool:
+    """좌석·주차·놀이방·포장·예약을 말하는데 그 정보가 등록돼 있지 않은지."""
+    labels = {
+        field.label for field in place.extra_info
+        if field.value and field.value.strip().lower() not in _EMPTY_INFO_VALUES
+    }
+    return any(
+        pattern.search(sentence) and not labels.intersection(info_labels)
+        and not _has_any(place.accessibility, features)
+        for pattern, info_labels, features in _EXTRA_INFO_CLAIMS
+    )
+
+
 def _is_route_claim(sentence: str) -> bool:
     if any(hint in sentence for hint in _INSIDE_PLACE_HINTS):
         return False
@@ -237,7 +263,7 @@ _FACILITY_ORDER_BY_USER_TYPE: dict[str, tuple[str, ...]] = {
 }
 
 
-def _copula(word: str) -> str:
+def copula(word: str) -> str:
     """'관광지예요' / '음식점이에요' — 받침 유무로 서술격 조사를 고릅니다."""
     last = word[-1] if word else ""
     has_final = "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 != 0
@@ -250,7 +276,41 @@ def facility_reason(place: Attraction, user_type: str) -> str | None:
     labels = [_FACILITY_LABELS[f] for f in order if getattr(place.accessibility, f, False)][:3]
     if not labels:
         return None
-    return f"{'·'.join(labels)} 정보가 등록된 {_copula(place.category or '장소')}."
+    return f"{'·'.join(labels)} 정보가 등록된 {copula(place.category or '장소')}."
+
+
+_LEVEL_LABELS = {"low": "여유", "medium": "보통", "high": "혼잡"}
+
+
+def describe_place(
+    place: Attraction, user_type: str, visit_date: str | None = None, lead: str | None = None
+) -> str:
+    """
+    AI가 쓴 이유가 없을 때 등록된 데이터만으로 만드는 설명.
+
+    "요청하신 산책로 장소예요" 같은 기본 문구 대신, 사용자 유형에 맞는 편의시설,
+    음식점이면 대표 메뉴, 화면에 표시되는 혼잡도 등급을 이어 씁니다. 모두 화면에서
+    확인할 수 있는 정보라 검증에서 지워지지 않습니다.
+    lead는 맨 앞에 둘 문장입니다 (예: "산책로 요청에 맞는 관광지예요.").
+    """
+    sentences = [lead] if lead else []
+    order = _FACILITY_ORDER_BY_USER_TYPE.get(user_type, _FACILITY_ORDER_BY_USER_TYPE["general"])
+    labels = [_FACILITY_LABELS[f] for f in order if getattr(place.accessibility, f, False)][:3]
+    if labels:
+        sentences.append(f"{'·'.join(labels)} 정보가 등록돼 있어요.")
+    if place.category == "음식점":
+        menu = next((f.value for f in place.extra_info if f.label == "대표 메뉴" and f.value), None)
+        if menu:
+            items = [item.strip() for item in re.split(r"[,/·]", menu) if item.strip()][:2]
+            if items:
+                sentences.append(f"대표 메뉴는 {copula(', '.join(items))}.")
+    level = congestion_level(place, visit_date)
+    if level:
+        label = _LEVEL_LABELS[level]
+        sentences.append(f"혼잡도는 '{label}'{'으로' if label == '혼잡' else '로'} 표시돼요.")
+    if not sentences:
+        sentences.append(f"요청하신 조건에 맞춰 고른 {copula(place.category or '장소')}.")
+    return " ".join(dict.fromkeys(sentences))
 
 
 def clean_reason(
@@ -281,6 +341,8 @@ def clean_reason(
             continue
         if any(token in sentence for token in _RAW_FIELD_TOKENS):
             continue
+        if _unbacked_extra_claim(sentence, place):
+            continue
         if _is_route_claim(sentence):
             continue
         if not meal_ok and any(word in sentence for word in _MEAL_WORDS):
@@ -298,7 +360,7 @@ def clean_reason(
         return facilities
     if status == MEAL_UNKNOWN:
         return "요청하신 조건에 맞춰 고른 음식점이에요."
-    return f"요청하신 조건에 맞춰 고른 {_copula(place.category or '장소')}."
+    return f"요청하신 조건에 맞춰 고른 {copula(place.category or '장소')}."
 
 
 def _meal_stop_indices(stops: list[CourseStop]) -> dict[str, list[int]]:

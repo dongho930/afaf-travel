@@ -200,7 +200,8 @@ def test_AI가_읽어낸_조건을_그대로_쓴다(monkeypatch):
         {"region": "가평", "companion": "커플", "purposes": ["자연", "사진"], "keywords": ["계곡"]},
     )
 
-    parsed = asyncio.run(ai_service.parse_query("이번 주말에 둘이 다녀올 곳"))
+    # 동행자는 문장에 근거 단어(여자친구)가 있을 때만 AI 값을 씁니다.
+    parsed = asyncio.run(ai_service.parse_query("이번 주말에 여자친구랑 둘이 다녀올 곳"))
 
     assert parsed.parsed_by == "ai"
     assert parsed.companion == CompanionType.COUPLE
