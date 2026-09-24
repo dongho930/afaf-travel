@@ -29,6 +29,7 @@ from app.models.schemas import (
     TravelPurpose,
 )
 from app.services.memory_cache import TTLCache
+from app.services.place_intent import venue_constraint_for_query
 from app.services.schedule import arrange_for_meals, build_schedule, hours_payload, is_closed_on
 from app.services.sigungu_codes import resolve_sigungu_codes, signgu_name
 
@@ -120,9 +121,12 @@ _COMPANION_KEYWORDS: dict[CompanionType, tuple[str, ...]] = {
 _PURPOSE_KEYWORDS: dict[TravelPurpose, tuple[str, ...]] = {
     TravelPurpose.REST: ("휴식", "쉬어", "쉴", "힐링", "여유", "조용", "산책"),
     TravelPurpose.NATURE: ("자연", "공원", "숲", "바다", "호수", "계곡", "등산", "정원", "꽃", "수목원"),
-    TravelPurpose.CULTURE: ("문화", "예술", "미술관", "박물관", "전시", "공연", "갤러리"),
+    TravelPurpose.CULTURE: ("문화", "예술", "미술관", "박물관", "과학관", "전시", "공연", "갤러리"),
     TravelPurpose.HISTORY: ("역사", "유적", "고궁", "행궁", "성곽", "문화재", "사찰"),
-    TravelPurpose.FOOD: ("맛집", "먹거리", "식당", "카페", "음식", "디저트", "빵집", "식도락", "먹방"),
+    TravelPurpose.FOOD: (
+        "맛집", "먹거리", "식당", "카페", "음식", "디저트", "빵집", "식도락", "먹방",
+        "식사", "점심", "저녁", "아침", "밥집", "브런치", "먹을",
+    ),
     TravelPurpose.ACTIVITY: ("체험", "액티비티", "놀거리", "놀이", "테마파크", "만들기"),
     TravelPurpose.SHOPPING: ("쇼핑", "시장", "아울렛", "백화점", "기념품"),
     TravelPurpose.PHOTO: ("사진", "인생샷", "포토", "야경", "뷰가"),
@@ -276,6 +280,13 @@ async def parse_query(
             except Exception as e:  # 파싱은 부가 기능이라 어떤 실패도 화면을 막지 않습니다
                 logger.warning("질의 해석 실패(%s) — 규칙 기반으로 대체합니다.", e)
 
+        # 명시적인 장소 표현은 AI가 목적을 누락해도 조건에 반영합니다.
+        lexical_purposes = _rule_parse(text).purposes
+        parsed.purposes = list(dict.fromkeys([*lexical_purposes, *parsed.purposes]))[:3]
+        constraint = venue_constraint_for_query(text)
+        if constraint and not constraint.allow_other_categories and constraint.categories == {"음식점"} and lexical_purposes == [TravelPurpose.FOOD]:
+            parsed.purposes = [TravelPurpose.FOOD]
+
         if user_selected_sigungu_cd is not None:
             parsed.sigungu_cds = [user_selected_sigungu_cd]
             parsed.region_text = signgu_name(user_selected_sigungu_cd) or parsed.region_text
@@ -379,8 +390,11 @@ RECOMMEND_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 
 
 규칙:
 - 반드시 후보 목록에 있는 관광지만 사용하세요.
-- 질의와 사용자 유형에 맞는 장소를 최대 12개까지, 다양한 카테고리(관광지/음식점/문화시설 등)가
-  골고루 섞이도록 선택하세요. 후보가 12개보다 적으면 있는 만큼만 반환하세요.
+- 질의와 사용자 유형에 맞는 장소만 최대 12개까지 선택하세요. 장소 유형이나
+  세부 유형(예: 과학관, 미술관, 공원)이 명시됐으면 그 장소만 고르세요.
+  여러 유형을 요청한 경우에만 해당 유형을 섞으세요.
+  적합한 후보가 적으면 적게 반환하고, 없으면 빈 목록을 반환하세요. 개수를 채우기
+  위해 무관한 장소를 고르지 마세요.
 - conditions에 목적(purposes)이나 동행자(companion)가 있으면 그에 맞는 장소를
   우선 고르세요 (예: 식도락이면 음식점, 가족이면 아이와 함께 가기 좋은 곳).
 - closed_on_visit_date가 true인 곳은 방문일에 문을 닫으므로 고르지 마세요.
@@ -441,6 +455,8 @@ ORDER_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동�
 - conditions에 동행자(companion)나 목적(purposes)이 있으면 그에 맞게 순서를 정하고
   reason에도 반영하세요.
 - 사용자 유형에 맞는 이동/휴식 동선을 고려해 순서를 정하세요.
+- accessibility_unverified가 true인 장소는 접근성 정보가 확인되지 않았습니다.
+  접근 가능하다고 단정하지 말고 방문 전 확인이 필요하다고 명시하세요.
 - reason은 반드시 candidates에 주어진 accessibility 필드에 실제로 있는 내용만
   근거로 쓰세요. 주어지지 않은 편의시설(예: 시각장애 사용자에게 경사로나 화장실처럼
   무관한 항목)은 절대 언급하지 마세요 — accessibility에 이미 해당 유형과
@@ -509,6 +525,7 @@ def _build_user_prompt(
             "content_id": a.content_id,
             "name": a.name,
             "category": a.category,
+            "accessibility_unverified": a.data_source == "kakao",
             "accessibility": _relevant_accessibility_payload(
                 a.accessibility.model_dump(), request.user_type
             ),
@@ -571,6 +588,8 @@ def _mock_generate(
             reason = f"{a.name}은(는) 평소 사람이 많이 몰리는 곳이라 먼저 들르도록 배치했습니다."
         elif a.congestion_rate is not None:
             reason = f"{a.name}은(는) 혼잡도가 높지 않은 편이라 여유롭게 둘러보실 수 있습니다."
+        elif a.data_source == "kakao":
+            reason = f"{a.name}의 휠체어 접근성은 확인되지 않았습니다. 방문 전에 확인해주세요."
         else:
             reason = f"{a.name}은(는) 요청하신 접근성 조건에 맞는 장소입니다."
         stops.append({"content_id": a.content_id, "order": i, "reason": reason})
@@ -843,6 +862,14 @@ async def recommend_places(
     if not candidates:
         raise ValueError("추천할 수 있는 무장애 관광지 후보가 없습니다.")
 
+    # 명시한 장소 유형은 후보와 최종 결과 모두에 강제합니다. 접근성 조건을
+    # 만족하는 유형별 장소가 없으면 무관한 유형으로 채우지 않습니다.
+    constraint = venue_constraint_for_query(request.query_text)
+    if constraint:
+        candidates = [a for a in candidates if constraint.matches(a)]
+        if not candidates:
+            return []
+
     if settings.groq_api_key:
         # 여기서는 규칙 기반(_mock_recommend)으로 내려가지 않습니다. 키워드가
         # 몇 개 겹치는지로만 고른 목록은 요청·유형과 어긋나기 쉬워서, 그럴듯한
@@ -860,6 +887,30 @@ async def recommend_places(
         if not attraction:
             continue
         result.append(PlaceCandidate(attraction=attraction, reason=item.get("reason", "")))
+    if constraint:
+        for category in constraint.categories:
+            if any(item.attraction.category == category and constraint.matches(item.attraction) for item in result):
+                continue
+            required = next((a for a in candidates if a.category == category and constraint.matches(a)), None)
+            if required:
+                result.append(PlaceCandidate(
+                    attraction=required,
+                    reason=f"요청하신 {category} 장소이며 접근성 자료에 해당 유형의 정보가 등록되어 있어요.",
+                ))
+        if constraint.allow_other_categories:
+            existing_ids = {item.attraction.content_id for item in result}
+            non_venue_count = sum(item.attraction.category not in constraint.categories for item in result)
+            for other in candidates:
+                if non_venue_count >= 2:
+                    break
+                if other.category in constraint.categories or other.content_id in existing_ids:
+                    continue
+                result.append(PlaceCandidate(
+                    attraction=other,
+                    reason="당일 여행 코스에 함께 둘러볼 수 있는 장소예요.",
+                ))
+                existing_ids.add(other.content_id)
+                non_venue_count += 1
     return result
 
 
@@ -901,10 +952,16 @@ async def generate_course_from_selection(
     else:
         raw = _mock_generate(course_request, selected_attractions, parsed)
 
-    return CourseResponse(
+    course = CourseResponse(
         course_id=str(uuid.uuid4()),
         title=raw["title"],
         summary=raw["summary"],
         stops=_stops_from_raw(raw, selected_attractions, request.visit_date),
         generated_for=request.user_type,
     )
+    if any(stop.attraction.data_source == "kakao" for stop in course.stops):
+        course.summary += " 음식점의 휠체어 접근성과 영업시간은 확인되지 않았으니 방문 전에 확인해주세요."
+        for stop in course.stops:
+            if stop.attraction.data_source == "kakao":
+                stop.reason = "접근성 및 영업시간이 확인되지 않은 음식점입니다. 방문 전에 매장에 확인해주세요."
+    return course

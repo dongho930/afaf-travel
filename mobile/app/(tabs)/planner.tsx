@@ -127,6 +127,7 @@ export default function PlannerScreen() {
     sigunguName,
     setRegion,
     setRecommendations,
+    setMissingCategories,
     setPendingQueryText,
     pendingQueryText,
     queryHandoffSeq,
@@ -236,17 +237,23 @@ export default function PlannerScreen() {
   const runRecommend = async (effectiveUserType: UserType) => {
     setIsSubmitting(true);
     try {
-      const { candidates, parsed } = await api.recommendPlaces({
+      const { candidates, parsed, missing_categories } = await api.recommendPlaces({
         queryText,
         userType: effectiveUserType,
         sigunguCd,
         visitDate,
       });
       if (candidates.length === 0) {
-        Alert.alert("추천 결과 없음", "조건에 맞는 장소를 찾지 못했어요. 다른 표현으로 다시 시도해주세요.");
+        Alert.alert(
+          "추천 결과 없음",
+          missing_categories?.length
+            ? `요청하신 ${missing_categories.join("·")} 장소를 찾지 못했어요. 지역이나 조건을 바꿔 다시 시도해주세요.`
+            : "조건에 맞는 장소를 찾지 못했어요. 다른 표현으로 다시 시도해주세요."
+        );
         return;
       }
       setRecommendations(candidates);
+      setMissingCategories(missing_categories ?? []);
       // 서버가 문장에서 읽어낸 조건(지역/동행자/목적)을 다음 화면에서 보여줍니다.
       setParsedQuery(parsed ?? null);
       setPendingQueryText(queryText);

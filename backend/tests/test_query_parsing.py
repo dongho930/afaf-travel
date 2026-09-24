@@ -18,6 +18,7 @@ import pytest
 
 from app.models.schemas import CompanionType, TravelPurpose
 from app.services import ai_service
+from app.services.place_intent import venue_constraint_for_query
 from app.services.sigungu_codes import resolve_sigungu_codes
 
 SUWON_ALL = [41111, 41113, 41115, 41117]  # 수원시 장안·권선·팔달·영통구
@@ -89,6 +90,41 @@ def test_언급이_없으면_동행자는_미지정():
 
     assert parsed.companion == CompanionType.UNSPECIFIED
     assert parsed.purposes == [TravelPurpose.REST]  # '산책'
+
+
+@pytest.mark.parametrize("query", ["점심 식사", "분당에서 저녁 먹을 식당", "휠체어로 아침 식사"])
+def test_식사_요청은_식도락으로_읽는다(query):
+    parsed = asyncio.run(ai_service.parse_query(query))
+
+    assert TravelPurpose.FOOD in parsed.purposes
+    assert venue_constraint_for_query(query).categories == {"음식점"}
+
+
+def test_식사와_다른_활동을_함께_요청하면_음식점만으로_제한하지_않는다():
+    assert venue_constraint_for_query("점심 식사하고 미술관 관람").categories == {"음식점", "문화시설"}
+    assert venue_constraint_for_query("맛집과 산책로 추천").categories == {"음식점", "관광지"}
+
+
+@pytest.mark.parametrize(
+    ("query", "categories"),
+    [
+        ("지체 장애인이 갈 수 있는 과학관", {"문화시설"}),
+        ("휠체어로 박물관 관람", {"문화시설"}),
+        ("접근 가능한 문화시설", {"문화시설"}),
+        ("유모차와 산책할 공원", {"관광지"}),
+        ("접근 가능한 관광지", {"관광지"}),
+        ("조용한 호텔에서 숙박", {"숙박"}),
+        ("자전거 타기", {"레포츠"}),
+        ("등산로 추천", {"관광지", "레포츠"}),
+        ("공원 근처 식당", {"음식점"}),
+        ("음식점 근처 과학관", {"문화시설"}),
+        ("미술관 말고 맛집", {"음식점"}),
+        ("가족과 편안한 하루 코스", None),
+    ],
+)
+def test_명시한_장소_유형만_후보_조건으로_쓴다(query, categories):
+    constraint = venue_constraint_for_query(query)
+    assert (constraint.categories if constraint else None) == categories
 
 
 # ---- 지역 결정 규칙 ----
@@ -171,6 +207,18 @@ def test_AI가_읽어낸_조건을_그대로_쓴다(monkeypatch):
     assert parsed.purposes == [TravelPurpose.NATURE, TravelPurpose.PHOTO]
     assert parsed.sigungu_cds == [41820]  # 가평군
     assert parsed.region_source == "query_text"
+
+
+def test_AI가_식사_목적을_누락해도_복원한다(monkeypatch):
+    _patch_groq(
+        monkeypatch,
+        {"region": None, "companion": "미지정", "purposes": [], "keywords": []},
+    )
+
+    parsed = asyncio.run(ai_service.parse_query("점심 식사"))
+
+    assert parsed.parsed_by == "ai"
+    assert parsed.purposes == [TravelPurpose.FOOD]
 
 
 def test_AI가_없는_지역을_지어내면_무시한다(monkeypatch):

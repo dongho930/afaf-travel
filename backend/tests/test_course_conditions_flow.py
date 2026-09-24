@@ -88,7 +88,14 @@ def test_질의에_쓴_지역으로_후보를_좁힌다(client, searches):
     assert searches == [SUWON_ALL]
 
 
-def test_무엇으로_이해했는지_응답에_담아준다(client, searches):
+def test_무엇으로_이해했는지_응답에_담아준다(client, monkeypatch):
+    restaurant = _attraction("food", "맛집")
+    restaurant.category = "음식점"
+
+    async def fake_sample(**kwargs):
+        return [restaurant]
+
+    monkeypatch.setattr(courses.tour_api_client, "sample_accessible_candidates", fake_sample)
     response = client.post(
         "/api/courses/recommend",
         json={"query_text": "수원에서 아이랑 갈 만한 맛집", "user_type": "general"},
@@ -99,6 +106,71 @@ def test_무엇으로_이해했는지_응답에_담아준다(client, searches):
     assert parsed["region_source"] == "query_text"
     assert parsed["companion"] == "가족"
     assert "식도락" in parsed["purposes"]
+
+
+def test_지체장애인_점심_식사는_음식점만_추천한다(client, monkeypatch):
+    requested_categories = []
+    restaurant = _attraction("food", "식당")
+    restaurant.category = "음식점"
+    museum = _attraction("museum", "현대미술관")
+    museum.category = "문화시설"
+
+    async def fake_sample(**kwargs):
+        requested_categories.append(kwargs["venue_constraint"].categories)
+        return [museum, restaurant]
+
+    monkeypatch.setattr(courses.tour_api_client, "sample_accessible_candidates", fake_sample)
+    response = client.post(
+        "/api/courses/recommend",
+        json={"query_text": "점심 식사", "user_type": "wheelchair"},
+    )
+
+    assert response.status_code == 200
+    assert requested_categories == [{"음식점"}]
+    assert response.json()["parsed"]["purposes"] == ["식도락"]
+    assert [item["attraction"]["category"] for item in response.json()["candidates"]] == ["음식점"]
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_categories"),
+    [
+        ("과학관 추천", {"문화시설"}),
+        ("휠체어로 산책할 공원", {"관광지"}),
+        ("편하게 쉴 호텔", {"숙박"}),
+        ("자전거 탈 곳", {"레포츠"}),
+        ("점심 먹고 과학관", {"음식점", "문화시설"}),
+    ],
+)
+def test_여러_장소_유형도_요청한_카테고리로_제한한다(
+    client, monkeypatch, query, expected_categories
+):
+    places = []
+    fixtures = (
+        ("음식점", "수원식당"),
+        ("문화시설", "과천과학관"),
+        ("관광지", "호수공원"),
+        ("숙박", "수원호텔"),
+        ("레포츠", "자전거체험장"),
+    )
+    for index, (category, name) in enumerate(fixtures):
+        place = _attraction(str(index), name)
+        place.category = category
+        places.append(place)
+    captured = []
+
+    async def fake_sample(**kwargs):
+        captured.append(kwargs["venue_constraint"].categories)
+        return places
+
+    monkeypatch.setattr(courses.tour_api_client, "sample_accessible_candidates", fake_sample)
+    response = client.post(
+        "/api/courses/recommend",
+        json={"query_text": query, "user_type": "wheelchair"},
+    )
+
+    assert response.status_code == 200
+    assert captured == [expected_categories]
+    assert {item["attraction"]["category"] for item in response.json()["candidates"]} == expected_categories
 
 
 def test_화면에서_고른_지역이_있으면_그대로_쓴다(client, searches):
@@ -153,6 +225,7 @@ def test_방문일에_쉬는_곳은_추천_뒤로_밀린다(client, monkeypatch)
     """월요일에 가겠다는 사람에게 월요일 휴관인 곳을 앞세워 추천하면 안 됩니다."""
     async def fake_search(region, user_type, limit=20, sigungu_cd=None, **kwargs):
         closed = _attraction("closed", "월요일 휴관 박물관")
+        closed.category = "문화시설"
         closed.extra_info = [InfoField(label="쉬는날", value="매주 월요일")]
         open_place = _attraction("open", "연중무휴 공원")
         open_place.extra_info = [InfoField(label="쉬는날", value="연중무휴")]

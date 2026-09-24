@@ -135,6 +135,52 @@ def test_1단계_추천은_후보에서만_고른다(candidates):
     assert all(c.attraction.content_id in {"1", "2", "3"} for c in result)
 
 
+def test_AI_추천에서도_식사만_요청하면_음식점만_넘긴다(monkeypatch):
+    museum = _attraction("museum", "현대미술관")
+    museum.category = "문화시설"
+    restaurant = _attraction("food", "식당")
+    restaurant.category = "음식점"
+    seen_candidates = []
+
+    async def fake_recommend(request, candidates, parsed):
+        seen_candidates.extend(candidates)
+        return [{"content_id": "museum"}, {"content_id": "food"}]
+
+    monkeypatch.setattr(ai_service.settings, "groq_api_key", "test-key")
+    monkeypatch.setattr(ai_service, "_groq_recommend", fake_recommend)
+
+    result = asyncio.run(ai_service.recommend_places(
+        PlaceRecommendationRequest(query_text="점심 식사", user_type=UserType.WHEELCHAIR),
+        [museum, restaurant],
+    ))
+
+    assert [a.content_id for a in seen_candidates] == ["food"]
+    assert [item.attraction.content_id for item in result] == ["food"]
+
+
+def test_AI_추천에서도_과학관_요청에_미술관을_섞지_않는다(monkeypatch):
+    museum = _attraction("art", "현대미술관")
+    museum.category = "문화시설"
+    science = _attraction("science", "과천과학관")
+    science.category = "문화시설"
+    seen_candidates = []
+
+    async def fake_recommend(request, candidates, parsed):
+        seen_candidates.extend(candidates)
+        return [{"content_id": "art"}, {"content_id": "science"}]
+
+    monkeypatch.setattr(ai_service.settings, "groq_api_key", "test-key")
+    monkeypatch.setattr(ai_service, "_groq_recommend", fake_recommend)
+
+    result = asyncio.run(ai_service.recommend_places(
+        PlaceRecommendationRequest(query_text="지체 장애인이 갈 수 있는 과학관"),
+        [museum, science],
+    ))
+
+    assert [a.content_id for a in seen_candidates] == ["science"]
+    assert [item.attraction.content_id for item in result] == ["science"]
+
+
 def test_2단계는_고른_장소만으로_코스를_만든다(candidates):
     selected = candidates[:2]
     request = GenerateFromSelectionRequest(

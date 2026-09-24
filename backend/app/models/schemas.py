@@ -163,6 +163,8 @@ class Attraction(HttpsImageUrl):
     latitude: float
     longitude: float
     category: str
+    data_source: str = "tour_api"
+    external_url: Optional[str] = None
     image_url: Optional[str] = None
     accessibility: AccessibilityFeatures = AccessibilityFeatures()
     congestion_forecast: list[CongestionForecast] = Field(default_factory=list)
@@ -223,6 +225,7 @@ class PlaceCandidate(BaseModel):
 class PlaceRecommendationResponse(BaseModel):
     query_text: str
     candidates: list[PlaceCandidate]
+    missing_categories: list[str] = Field(default_factory=list)
     # 질의에서 읽어낸 조건(지역/동행자/목적). 앱이 "무엇으로 이해했는지"를 그대로
     # 보여줄 수 있게 함께 내려보냅니다 — 특히 지역은 질의에서 추출한 경우
     # 결과 범위가 달라지므로, 사용자가 확인할 수 있어야 합니다.
@@ -240,6 +243,8 @@ class GenerateFromSelectionRequest(BaseModel):
         description="방문 예정일 (YYYY-MM-DD). 방문 시각 계산과 휴무일 확인에 씁니다.",
     )
     selected_content_ids: list[str] = Field(..., min_length=1, description="사용자가 선택한 관광지 content_id 목록")
+    selected_external_places: list[Attraction] = Field(default_factory=list)
+    allow_unverified_accessibility: bool = False
 
 
 class CourseStop(BaseModel):

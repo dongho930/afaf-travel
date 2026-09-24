@@ -31,12 +31,15 @@ import httpx
 from app.config import get_settings
 from app.models.schemas import AccessibilityFeatures, Attraction, CongestionForecast, InfoField
 from app.services.memory_cache import TTLCache
+from app.services.place_intent import VenueConstraint
+from app.services.kakao_places import search_kakao_restaurants
 from app.services.place_popularity_service import read_place_popularity
 from app.services.review_service import get_average_ratings
 from app.services.sigungu_codes import (
     area_code_for_signgu,
     find_area_signgu,
     list_area_signgu_by_area,
+    resolve_sigungu_codes,
     signgu_name,
 )
 from app.services.supabase_service import (
@@ -317,7 +320,7 @@ _MOCK_ATTRACTIONS: list[Attraction] = [
         address="경기도 수원시 팔달구 정조로 825",
         latitude=37.2836,
         longitude=127.0170,
-        category="역사/문화",
+        category="관광지",
         image_url="https://picsum.photos/seed/suwon/400/300",
         accessibility=AccessibilityFeatures(
             has_ramp=True, has_elevator=False, has_accessible_restroom=True,
@@ -343,7 +346,7 @@ _MOCK_ATTRACTIONS: list[Attraction] = [
         address="경기도 수원시 영통구 광교호수공원로 100",
         latitude=37.2860,
         longitude=127.0550,
-        category="자연/공원",
+        category="관광지",
         image_url="https://picsum.photos/seed/gwanggyo/400/300",
         accessibility=AccessibilityFeatures(
             has_ramp=True, has_elevator=False, has_accessible_restroom=True,
@@ -368,7 +371,7 @@ _MOCK_ATTRACTIONS: list[Attraction] = [
         address="경기도 용인시 처인구 포곡읍 에버랜드로 199",
         latitude=37.2941,
         longitude=127.2026,
-        category="테마파크",
+        category="관광지",
         image_url="https://picsum.photos/seed/everland/400/300",
         accessibility=AccessibilityFeatures(
             has_ramp=True, has_elevator=True, has_accessible_restroom=True,
@@ -397,7 +400,7 @@ _MOCK_ATTRACTIONS: list[Attraction] = [
         address="경기도 용인시 기흥구 민속촌로 90",
         latitude=37.2537,
         longitude=127.1228,
-        category="역사/문화",
+        category="관광지",
         image_url="https://picsum.photos/seed/folk/400/300",
         accessibility=AccessibilityFeatures(
             has_ramp=False, has_elevator=False, has_accessible_restroom=True,
@@ -1654,6 +1657,7 @@ class TourApiClient:
         sigungu_cd: int | list[int] | None = None,
         purposes: list[str] | None = None,
         keywords: list[str] | None = None,
+        venue_constraint: VenueConstraint | None = None,
     ) -> list[Attraction]:
         """
         AI 장소 추천(1단계)에 넘길 후보를 지역 전체에서 표본으로 뽑습니다.
@@ -1667,17 +1671,52 @@ class TourApiClient:
 
         목록 캐시(경기도 전체)에서 뽑기 때문에 공공데이터 API를 부르지 않습니다.
         편의시설·혼잡도·평점은 전부 DB 캐시에서 채웁니다.
+        venue_constraint가 있으면 명시한 장소 종류와 이름 조건을 먼저 적용합니다.
         """
         if self.use_mock:
-            return await self.search_accessible_attractions(
-                region=region, user_type=user_type, limit=limit, sigungu_cd=sigungu_cd
+            candidates = await self.search_accessible_attractions(
+                region=region,
+                user_type=user_type,
+                limit=1000 if venue_constraint else limit,
+                sigungu_cd=sigungu_cd,
             )
+            if not venue_constraint:
+                return candidates
+            matched = [a for a in candidates if venue_constraint.matches(a)]
+            if venue_constraint.allow_other_categories:
+                matched.sort(key=lambda a: a.category not in venue_constraint.categories)
+            return matched[:limit]
 
         ldong_regn_map = {"경기도": "41", "서울": "11"}
         pool = await self._region_attractions(ldong_regn_map.get(region, "41"))
         pool = _filter_and_mix_by_regions(pool, _region_token_sets(sigungu_cd))
+        if venue_constraint and venue_constraint.allow_other_categories:
+            required_pool = [a for a in pool if a.category in venue_constraint.categories and venue_constraint.matches(a)]
+            required_ids = {a.content_id for a in required_pool}
+            remaining_pool = [a for a in pool if a.content_id not in required_ids]
+            picked = _stratified_sample(required_pool, len(required_pool))
+            picked += _stratified_sample(remaining_pool, limit * 3)
+        elif venue_constraint:
+            pool = [a for a in pool if venue_constraint.matches(a)]
         if not pool:
             return []
+
+        def prioritize_required(items: list[Attraction]) -> list[Attraction]:
+            if not (venue_constraint and venue_constraint.allow_other_categories):
+                return items[:limit]
+            reserved: list[Attraction] = []
+            for category in sorted(venue_constraint.categories):
+                match = next((a for a in items if a.category == category and venue_constraint.matches(a)), None)
+                if match:
+                    reserved.append(match)
+            reserved_ids = {a.content_id for a in reserved}
+            for a in items:
+                if len(reserved) >= max(3, limit // 4):
+                    break
+                if a.category in venue_constraint.categories and a.content_id not in reserved_ids and venue_constraint.matches(a):
+                    reserved.append(a)
+                    reserved_ids.add(a.content_id)
+            return (reserved + [a for a in items if a.content_id not in reserved_ids])[:limit]
 
         # 1) 질의 조건에 맞는 곳과 나머지로 가릅니다.
         wanted_categories: set[str] = set()
@@ -1694,10 +1733,17 @@ class TourApiClient:
         others = [a for a in pool if not matches_conditions(a)]
 
         # 2) 편의시설 필터에서 상당수가 걸러지므로 넉넉히(3배) 뽑아둡니다.
-        target = limit * 3
-        preferred_quota = int(target * _PREFERRED_CANDIDATE_RATIO) if preferred else 0
-        picked = _stratified_sample(preferred, preferred_quota)
-        picked += _stratified_sample(others, target - len(picked))
+        if venue_constraint and venue_constraint.allow_other_categories:
+            pass  # 위에서 필수 유형 전체와 일반 장소 표본을 이미 뽑았습니다.
+        elif venue_constraint:
+            # 특정 장소 종류를 원하는 요청에서는 접근 가능한 곳이 드물 수 있습니다.
+            # 일부만 무작위로 뽑으면 실제 음식점이 있는데도 결과가 0개가 됩니다.
+            picked = _stratified_sample(pool, len(pool))
+        else:
+            target = limit * 3
+            preferred_quota = int(target * _PREFERRED_CANDIDATE_RATIO) if preferred else 0
+            picked = _stratified_sample(preferred, preferred_quota)
+            picked += _stratified_sample(others, target - len(picked))
         # 조건에 맞는 곳을 앞에 몰아둔 채로 두면, 아래에서 limit만큼 자를 때 앞쪽만
         # 살아남아 후보가 그 카테고리 하나로 도배됩니다('맛집' 질의에 음식점 40곳).
         # 섞어야 의도한 비율(7:3)이 최종 후보까지 유지됩니다.
@@ -1716,8 +1762,12 @@ class TourApiClient:
             if not _matches_user_type(copied, user_type):
                 continue
             candidates.append(copied)
-            if len(candidates) >= limit:
+            if len(candidates) >= limit and not (venue_constraint and venue_constraint.allow_other_categories):
                 break
+
+        if venue_constraint and venue_constraint.allow_other_categories:
+            # 드문 필수 유형(음식점 등)을 일반 관광지 표본이 밀어내지 않도록 합니다.
+            candidates = prioritize_required(candidates)
 
         # 4) 유형에 맞는 곳이 워낙 드문 경우(예: 청각장애 편의시설은 경기도에 몇 곳
         #    뿐이라 표본에 하나도 안 걸릴 수 있음) 기존 방식으로 보완합니다.
@@ -1732,11 +1782,15 @@ class TourApiClient:
             for a in await self.search_accessible_attractions(
                 region=region, user_type=user_type, limit=limit, sigungu_cd=sigungu_cd
             ):
+                if venue_constraint and not venue_constraint.matches(a):
+                    continue
                 if a.content_id not in known:
                     candidates.append(a)
                     known.add(a.content_id)
-                if len(candidates) >= limit:
+                if len(candidates) >= limit and not (venue_constraint and venue_constraint.allow_other_categories):
                     break
+            if venue_constraint and venue_constraint.allow_other_categories:
+                candidates = prioritize_required(candidates)
             return candidates
 
         await self._fill_display_info(candidates)
@@ -2285,6 +2339,17 @@ class TourApiClient:
         # 캐시에 들어있는 객체를 그대로 돌려주고 아래에서 평점을 채우면, 그 값이
         # 캐시에 눌러앉아 다음 요청까지 오염됩니다. 복사본에만 채웁니다.
         results = [a.model_copy(deep=True) for a in (by_name + by_address)[:limit]]
+
+        if not results and category == "음식점":
+            # 관광공사 음식점 목록이 비어 있는 지역도 검색할 수 있게 합니다.
+            # 카카오에는 접근성 데이터가 없으므로 data_source로 반드시 구분합니다.
+            is_region_query = bool(resolve_sigungu_codes(query, "경기도"))
+            kakao_query = f"{query} 음식점" if is_region_query else query
+            found = await search_kakao_restaurants(kakao_query, limit)
+            if is_region_query and " " not in query:
+                region_needle = query.rstrip("시군구")
+                found = [a for a in found if region_needle in a.address]
+            return found
 
         # 평점은 목록 캐시에 없어서 한 번에 모아 옵니다(DB 한 번). 느리거나
         # 실패하면 평점 없이 보여주는 편이 낫습니다 — 검색 자체는 살아야 합니다.

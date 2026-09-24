@@ -27,6 +27,8 @@ interface CourseContextValue {
   // 1단계(장소 추천)와 2단계(선택 기반 코스 생성) 화면 사이에서 공유하는 상태
   recommendations: PlaceCandidate[];
   setRecommendations: (r: PlaceCandidate[]) => void;
+  missingCategories: string[];
+  setMissingCategories: (categories: string[]) => void;
   pendingQueryText: string;
   setPendingQueryText: (q: string) => void;
   // 홈 탭 검색창에서 AI 플래너 입력창으로 문구를 넘길 때 씁니다. 넘길 때마다
@@ -55,6 +57,7 @@ export function CourseProvider({ children }: { children: React.ReactNode }) {
   const [sigunguCd, setSigunguCd] = useState<number | null>(null);
   const [sigunguName, setSigunguName] = useState<string | null>(null);
   const [recommendations, setRecommendations] = useState<PlaceCandidate[]>([]);
+  const [missingCategories, setMissingCategories] = useState<string[]>([]);
   const [pendingQueryText, setPendingQueryText] = useState("");
   const [queryHandoffSeq, setQueryHandoffSeq] = useState(0);
   const [parsedQuery, setParsedQuery] = useState<ParsedQuery | null>(null);
@@ -96,6 +99,8 @@ export function CourseProvider({ children }: { children: React.ReactNode }) {
         setRegion,
         recommendations,
         setRecommendations,
+        missingCategories,
+        setMissingCategories,
         pendingQueryText,
         setPendingQueryText,
         queryHandoffSeq,
