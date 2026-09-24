@@ -47,8 +47,6 @@ export interface Attraction {
   latitude: number;
   longitude: number;
   category: string;
-  data_source?: "tour_api" | "kakao";
-  external_url?: string | null;
   image_url?: string | null;
   accessibility: AccessibilityFeatures;
   congestion_forecast: CongestionForecast[];

@@ -4,7 +4,6 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -90,10 +89,6 @@ export default function SearchScreen() {
   }, [query, category]);
 
   const openDetail = (place: Attraction) => {
-    if (place.data_source === "kakao" && place.external_url) {
-      void Linking.openURL(place.external_url);
-      return;
-    }
     router.push({
       pathname: "/attraction-detail",
       params: { contentId: place.content_id, name: place.name },
@@ -109,10 +104,9 @@ export default function SearchScreen() {
       accessibilityLabel={
         `${item.name}, ${item.category}` +
         (item.avg_rating != null ? `, 평점 ${item.avg_rating.toFixed(1)} 리뷰 ${item.review_count}개` : "") +
-        (item.address ? `, ${item.address}` : "") +
-        (item.data_source === "kakao" ? ", 접근성 미확인" : "")
+        (item.address ? `, ${item.address}` : "")
       }
-      accessibilityHint={item.data_source === "kakao" ? "두 번 탭하면 카카오맵에서 장소 정보를 봅니다" : "두 번 탭하면 상세 정보를 봅니다"}
+      accessibilityHint="두 번 탭하면 상세 정보를 봅니다"
     >
       {item.image_url ? (
         <FadeImage source={{ uri: item.image_url }} style={styles.thumb} />
@@ -129,9 +123,6 @@ export default function SearchScreen() {
         <Text style={styles.cardAddress} numberOfLines={1}>
           {item.address}
         </Text>
-        {item.data_source === "kakao" && (
-          <Text style={styles.cardAddress}>외부 검색 결과 · 휠체어 접근성 미확인</Text>
-        )}
         <View style={styles.cardMetaRow}>
           <Text style={styles.cardCategory}>{item.category}</Text>
           {item.avg_rating != null && (

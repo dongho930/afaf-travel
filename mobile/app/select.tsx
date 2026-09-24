@@ -4,7 +4,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  Linking,
   Platform,
   Pressable,
   StyleSheet,
@@ -69,7 +68,7 @@ export default function SelectPlacesScreen() {
   const loadExtraInfo = useCallback(async (candidates: PlaceCandidate[]) => {
     const targets = candidates
       .map((c) => c.attraction)
-      .filter((a) => a.data_source !== "kakao" && (a.extra_info?.length ?? 0) === 0 && EXTRA_INFO_LABELS_BY_CATEGORY[a.category]);
+      .filter((a) => (a.extra_info?.length ?? 0) === 0 && EXTRA_INFO_LABELS_BY_CATEGORY[a.category]);
     if (targets.length === 0) return {};
     try {
       return await api.getExtraInfo(targets.map((a) => ({ contentId: a.content_id, category: a.category })));
@@ -107,12 +106,7 @@ export default function SelectPlacesScreen() {
   // 그대로 두고(흐리게 하지 않고) 글자로 안내합니다 — 누르면 무엇을 해야 하는지
   // 알려주는 편이, 눌리지 않는 흐린 버튼보다 낫습니다.
   const isBusy = isSubmitting || isRefreshing;
-  const unresolvedCategories = missingCategories.filter(
-    (category) => !recommendations.some((item) =>
-      item.attraction.category === category && item.attraction.data_source !== "kakao"
-    )
-  );
-  const hasExternalOptions = recommendations.some((item) => item.attraction.data_source === "kakao");
+  const unresolvedCategories = missingCategories;
 
   // 마음에 드는 곳이 없을 때 같은 질의로 후보를 다시 받아옵니다. 서버가 매번
   // 다른 표본을 뽑아주므로 누를 때마다 새로운 장소가 나옵니다.
@@ -169,40 +163,23 @@ export default function SelectPlacesScreen() {
       Alert.alert("장소를 선택해주세요", "코스에 포함할 장소를 하나 이상 골라주세요.");
       return;
     }
-    const selectedPlaces = recommendations
-      .map((item) => item.attraction)
-      .filter((place) => selectedIds.has(place.content_id));
-    const externalPlaces = selectedPlaces.filter((place) => place.data_source === "kakao");
-    const submit = async () => {
-      setIsSubmitting(true);
-      try {
-        const course = await api.generateCourseFromSelection({
-          queryText: pendingQueryText,
-          userType,
-          sigunguCd,
-          visitDate,
-          selectedContentIds: Array.from(selectedIds),
-          selectedExternalPlaces: externalPlaces,
-          allowUnverifiedAccessibility: externalPlaces.length > 0,
-        });
-        setCourse(course);
-        await storage.saveCourse(course);
-        router.push("/results");
-      } catch (err) {
-        Alert.alert("코스 생성 실패", errorMessage(err));
-      } finally {
-        setIsSubmitting(false);
-      }
-    };
-    if (externalPlaces.length > 0) {
-      Alert.alert(
-        "접근성 확인이 필요해요",
-        "선택한 음식점은 외부 검색 결과로, 휠체어 접근성과 영업시간이 확인되지 않았어요. 방문 전에 매장에 확인해주세요. 이 조건으로 코스를 만들까요?",
-        [{ text: "취소", style: "cancel" }, { text: "코스 만들기", onPress: () => void submit() }]
-      );
-      return;
+    setIsSubmitting(true);
+    try {
+      const course = await api.generateCourseFromSelection({
+        queryText: pendingQueryText,
+        userType,
+        sigunguCd,
+        visitDate,
+        selectedContentIds: Array.from(selectedIds),
+      });
+      setCourse(course);
+      await storage.saveCourse(course);
+      router.push("/results");
+    } catch (err) {
+      Alert.alert("코스 생성 실패", errorMessage(err));
+    } finally {
+      setIsSubmitting(false);
     }
-    await submit();
   };
 
   if (recommendations.length === 0) {
@@ -238,9 +215,7 @@ export default function SelectPlacesScreen() {
       </Text>
       {unresolvedCategories.length > 0 && (
         <Text style={styles.subtitle}>
-          {unresolvedCategories.join("·")}의 접근성 확인 장소를 찾지 못했어요. {hasExternalOptions
-            ? "아래 외부 검색 결과는 접근성을 확인한 뒤 선택해주세요."
-            : "지역이나 조건을 바꿔 다시 요청해주세요."}
+          {unresolvedCategories.join("·")} 장소를 현재 여행지 자료에서 찾지 못했어요. 지역이나 조건을 바꿔 다시 요청해주세요.
         </Text>
       )}
       {conditionChips.length > 0 && (
@@ -399,26 +374,21 @@ function PlaceOptionCard({
             <>
               {extraInfoNode}
               <View style={extraInfoNode ? styles.accessibilityDivider : undefined}>
-                {attraction.data_source === "kakao" ? (
-                  <Text style={styles.reason}>접근성 미확인 · 방문 전 확인 필요</Text>
-                ) : (
-                  <AccessibilityIcons features={attraction.accessibility} userType={userType} />
-                )}
+                <AccessibilityIcons features={attraction.accessibility} userType={userType} />
               </View>
             </>
           );
         })()}
         <Pressable
           style={styles.detailButton}
-          onPress={() => attraction.data_source === "kakao" && attraction.external_url
-            ? void Linking.openURL(attraction.external_url)
-            : router.push({
+          onPress={() =>
+            router.push({
               pathname: "/attraction-detail",
               params: { contentId: attraction.content_id, name: attraction.name },
             })
           }
         >
-          <Text style={styles.detailButtonText}>{attraction.data_source === "kakao" ? "카카오맵에서 확인 →" : "상세 페이지 보기 →"}</Text>
+          <Text style={styles.detailButtonText}>상세 페이지 보기 →</Text>
         </Pressable>
       </View>
     </Pressable>

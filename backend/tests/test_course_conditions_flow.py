@@ -183,8 +183,8 @@ def test_화면에서_고른_지역이_있으면_그대로_쓴다(client, search
     assert response.json()["parsed"]["region_source"] == "user_selected"
 
 
-def test_추측한_지역으로_후보가_없으면_지역_제한을_푼다(client, monkeypatch):
-    """문장에서 넘겨짚은 지역이 틀렸을 때 빈 화면을 주는 대신 넓게 다시 찾습니다."""
+def test_질의에_명시한_지역에_후보가_없으면_다른_도시를_추천하지_않는다(client, monkeypatch):
+    """조건에 맞는 장소가 없는 지역을 다른 도시의 장소로 채우지 않습니다."""
     calls: list = []
 
     async def fake_search(region, user_type, limit=20, sigungu_cd=None, **kwargs):
@@ -197,10 +197,10 @@ def test_추측한_지역으로_후보가_없으면_지역_제한을_푼다(clie
         "/api/courses/recommend", json={"query_text": "가평에서 놀 곳", "user_type": "general"}
     )
 
-    assert calls == [[41820], None]  # 가평으로 한 번, 실패 후 지역 없이 한 번
+    assert calls == [[41820]]
     assert response.status_code == 200
-    assert response.json()["parsed"]["region_source"] == "none"
-    assert response.json()["candidates"]
+    assert response.json()["parsed"]["region_source"] == "query_text"
+    assert response.json()["candidates"] == []
 
 
 def test_2단계에서_예보를_채운_뒤_코스를_만든다(client, details, monkeypatch):

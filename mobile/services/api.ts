@@ -293,8 +293,6 @@ export const api = {
     sigunguCd?: number | null;
     visitDate?: string | null;
     selectedContentIds: string[];
-    selectedExternalPlaces?: Attraction[];
-    allowUnverifiedAccessibility?: boolean;
   }) =>
     request<CourseResponse>("/api/courses/generate-from-selection", {
       method: "POST",
@@ -305,8 +303,6 @@ export const api = {
         sigungu_cd: params.sigunguCd ?? null,
         visit_date: params.visitDate ?? null,
         selected_content_ids: params.selectedContentIds,
-        selected_external_places: params.selectedExternalPlaces ?? [],
-        allow_unverified_accessibility: params.allowUnverifiedAccessibility ?? false,
       }),
     }),
 

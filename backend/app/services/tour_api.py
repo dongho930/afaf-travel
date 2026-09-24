@@ -32,14 +32,12 @@ from app.config import get_settings
 from app.models.schemas import AccessibilityFeatures, Attraction, CongestionForecast, InfoField
 from app.services.memory_cache import TTLCache
 from app.services.place_intent import VenueConstraint
-from app.services.kakao_places import search_kakao_restaurants
 from app.services.place_popularity_service import read_place_popularity
 from app.services.review_service import get_average_ratings
 from app.services.sigungu_codes import (
     area_code_for_signgu,
     find_area_signgu,
     list_area_signgu_by_area,
-    resolve_sigungu_codes,
     signgu_name,
 )
 from app.services.supabase_service import (
@@ -1683,37 +1681,41 @@ class TourApiClient:
             if not venue_constraint:
                 return candidates
             matched = [a for a in candidates if venue_constraint.matches(a)]
-            if venue_constraint.allow_other_categories:
-                matched.sort(key=lambda a: a.category not in venue_constraint.categories)
-            return matched[:limit]
+            reserved: list[Attraction] = []
+            for requirement in venue_constraint.requirements:
+                match = next((a for a in matched if requirement.matches(a)), None)
+                if match and match not in reserved:
+                    reserved.append(match)
+            ids = {a.content_id for a in reserved}
+            return (reserved + [a for a in matched if a.content_id not in ids])[:limit]
 
         ldong_regn_map = {"경기도": "41", "서울": "11"}
         pool = await self._region_attractions(ldong_regn_map.get(region, "41"))
         pool = _filter_and_mix_by_regions(pool, _region_token_sets(sigungu_cd))
+        if venue_constraint:
+            pool = [a for a in pool if venue_constraint.matches(a)]
         if venue_constraint and venue_constraint.allow_other_categories:
-            required_pool = [a for a in pool if a.category in venue_constraint.categories and venue_constraint.matches(a)]
+            required_pool = [a for a in pool if venue_constraint.matches_requirement(a)]
             required_ids = {a.content_id for a in required_pool}
             remaining_pool = [a for a in pool if a.content_id not in required_ids]
             picked = _stratified_sample(required_pool, len(required_pool))
             picked += _stratified_sample(remaining_pool, limit * 3)
-        elif venue_constraint:
-            pool = [a for a in pool if venue_constraint.matches(a)]
         if not pool:
             return []
 
         def prioritize_required(items: list[Attraction]) -> list[Attraction]:
-            if not (venue_constraint and venue_constraint.allow_other_categories):
+            if not venue_constraint:
                 return items[:limit]
             reserved: list[Attraction] = []
-            for category in sorted(venue_constraint.categories):
-                match = next((a for a in items if a.category == category and venue_constraint.matches(a)), None)
-                if match:
+            for requirement in venue_constraint.requirements:
+                match = next((a for a in items if requirement.matches(a) and venue_constraint.matches(a)), None)
+                if match and match not in reserved:
                     reserved.append(match)
             reserved_ids = {a.content_id for a in reserved}
             for a in items:
                 if len(reserved) >= max(3, limit // 4):
                     break
-                if a.category in venue_constraint.categories and a.content_id not in reserved_ids and venue_constraint.matches(a):
+                if venue_constraint.matches_requirement(a) and a.content_id not in reserved_ids and venue_constraint.matches(a):
                     reserved.append(a)
                     reserved_ids.add(a.content_id)
             return (reserved + [a for a in items if a.content_id not in reserved_ids])[:limit]
@@ -1762,10 +1764,10 @@ class TourApiClient:
             if not _matches_user_type(copied, user_type):
                 continue
             candidates.append(copied)
-            if len(candidates) >= limit and not (venue_constraint and venue_constraint.allow_other_categories):
+            if len(candidates) >= limit and not venue_constraint:
                 break
 
-        if venue_constraint and venue_constraint.allow_other_categories:
+        if venue_constraint:
             # 드문 필수 유형(음식점 등)을 일반 관광지 표본이 밀어내지 않도록 합니다.
             candidates = prioritize_required(candidates)
 
@@ -1787,9 +1789,9 @@ class TourApiClient:
                 if a.content_id not in known:
                     candidates.append(a)
                     known.add(a.content_id)
-                if len(candidates) >= limit and not (venue_constraint and venue_constraint.allow_other_categories):
+                if len(candidates) >= limit and not venue_constraint:
                     break
-            if venue_constraint and venue_constraint.allow_other_categories:
+            if venue_constraint:
                 candidates = prioritize_required(candidates)
             return candidates
 
@@ -2339,17 +2341,6 @@ class TourApiClient:
         # 캐시에 들어있는 객체를 그대로 돌려주고 아래에서 평점을 채우면, 그 값이
         # 캐시에 눌러앉아 다음 요청까지 오염됩니다. 복사본에만 채웁니다.
         results = [a.model_copy(deep=True) for a in (by_name + by_address)[:limit]]
-
-        if not results and category == "음식점":
-            # 관광공사 음식점 목록이 비어 있는 지역도 검색할 수 있게 합니다.
-            # 카카오에는 접근성 데이터가 없으므로 data_source로 반드시 구분합니다.
-            is_region_query = bool(resolve_sigungu_codes(query, "경기도"))
-            kakao_query = f"{query} 음식점" if is_region_query else query
-            found = await search_kakao_restaurants(kakao_query, limit)
-            if is_region_query and " " not in query:
-                region_needle = query.rstrip("시군구")
-                found = [a for a in found if region_needle in a.address]
-            return found
 
         # 평점은 목록 캐시에 없어서 한 번에 모아 옵니다(DB 한 번). 느리거나
         # 실패하면 평점 없이 보여주는 편이 낫습니다 — 검색 자체는 살아야 합니다.

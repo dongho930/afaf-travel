@@ -455,8 +455,6 @@ ORDER_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동�
 - conditions에 동행자(companion)나 목적(purposes)이 있으면 그에 맞게 순서를 정하고
   reason에도 반영하세요.
 - 사용자 유형에 맞는 이동/휴식 동선을 고려해 순서를 정하세요.
-- accessibility_unverified가 true인 장소는 접근성 정보가 확인되지 않았습니다.
-  접근 가능하다고 단정하지 말고 방문 전 확인이 필요하다고 명시하세요.
 - reason은 반드시 candidates에 주어진 accessibility 필드에 실제로 있는 내용만
   근거로 쓰세요. 주어지지 않은 편의시설(예: 시각장애 사용자에게 경사로나 화장실처럼
   무관한 항목)은 절대 언급하지 마세요 — accessibility에 이미 해당 유형과
@@ -525,7 +523,6 @@ def _build_user_prompt(
             "content_id": a.content_id,
             "name": a.name,
             "category": a.category,
-            "accessibility_unverified": a.data_source == "kakao",
             "accessibility": _relevant_accessibility_payload(
                 a.accessibility.model_dump(), request.user_type
             ),
@@ -588,8 +585,6 @@ def _mock_generate(
             reason = f"{a.name}은(는) 평소 사람이 많이 몰리는 곳이라 먼저 들르도록 배치했습니다."
         elif a.congestion_rate is not None:
             reason = f"{a.name}은(는) 혼잡도가 높지 않은 편이라 여유롭게 둘러보실 수 있습니다."
-        elif a.data_source == "kakao":
-            reason = f"{a.name}의 휠체어 접근성은 확인되지 않았습니다. 방문 전에 확인해주세요."
         else:
             reason = f"{a.name}은(는) 요청하신 접근성 조건에 맞는 장소입니다."
         stops.append({"content_id": a.content_id, "order": i, "reason": reason})
@@ -784,11 +779,27 @@ def _mock_recommend(
     """
     keywords = [w for w in request.query_text.replace(",", " ").split() if len(w) >= 2]
     if parsed:
-        keywords += [p.value for p in parsed.purposes] + list(parsed.keywords)
+        keywords += list(parsed.keywords)
+
+    purpose_categories = {
+        TravelPurpose.FOOD: {"음식점"},
+        TravelPurpose.CULTURE: {"문화시설"},
+        TravelPurpose.HISTORY: {"문화시설", "관광지"},
+        TravelPurpose.NATURE: {"관광지"},
+        TravelPurpose.REST: {"관광지", "숙박"},
+        TravelPurpose.ACTIVITY: {"레포츠", "관광지"},
+        TravelPurpose.SHOPPING: {"쇼핑"},
+        TravelPurpose.PHOTO: {"관광지"},
+    }
+    wanted = set().union(*(purpose_categories.get(p, set()) for p in (parsed.purposes if parsed else [])))
 
     def score(a: Attraction) -> int:
         haystack = f"{a.name} {a.category} {a.address}"
-        return sum(1 for k in keywords if k in haystack)
+        name = a.name.replace(" ", "").lower()
+        return (4 if a.category in wanted else 0) + sum(
+            3 if k.replace(" ", "").lower() in name else 1
+            for k in keywords if k.replace(" ", "").lower() in haystack.replace(" ", "").lower()
+        )
 
     # 방문일에 쉬는 곳은 맨 뒤로 미룹니다. 아예 빼지 않는 이유는, 그날 쉬는 곳만
     # 남는 상황에서 "추천 결과 없음"이 되는 것보다 보여주는 편이 낫기 때문입니다.
@@ -846,6 +857,28 @@ async def _groq_recommend(
     return [item for item in selected if isinstance(item, dict)]
 
 
+def _safe_recommendation_reason(reason: object, place: Attraction, request: PlaceRecommendationRequest) -> str:
+    """AI가 등록되지 않은 편의시설을 근거로 들면 검증 가능한 문구로 바꿉니다."""
+    features = place.accessibility
+    unsupported = (
+        ("경사로", not features.has_ramp),
+        ("엘리베이터", not features.has_elevator),
+        ("휠체어 대여", not features.has_wheelchair_rental),
+        ("장애인 화장실", not features.has_accessible_restroom),
+        ("점자블록", not features.has_braille_block),
+        ("수어", not features.has_sign_guide),
+    )
+    safe = isinstance(reason, str) and bool(reason.strip())
+    if safe:
+        safe = not any(word in reason and invalid for word, invalid in unsupported)
+        safe = safe and not any(token in reason for token in ("has_", "_count", "true", "false"))
+    if not safe:
+        reason = f"요청하신 여행 조건과 관련된 {place.category} 장소예요."
+    if is_closed_on(place, request.visit_date):
+        return f"방문 예정일에 휴무로 표시된 장소예요. {reason}"
+    return reason.strip()[:200]
+
+
 async def recommend_places(
     request: PlaceRecommendationRequest,
     candidates: list[Attraction],
@@ -865,6 +898,7 @@ async def recommend_places(
     # 명시한 장소 유형은 후보와 최종 결과 모두에 강제합니다. 접근성 조건을
     # 만족하는 유형별 장소가 없으면 무관한 유형으로 채우지 않습니다.
     constraint = venue_constraint_for_query(request.query_text)
+    broad_added: list[PlaceCandidate] = []
     if constraint:
         candidates = [a for a in candidates if constraint.matches(a)]
         if not candidates:
@@ -881,37 +915,72 @@ async def recommend_places(
         selected = _mock_recommend(request, candidates, parsed)
 
     by_id = {a.content_id: a for a in candidates}
-    result = []
+    result: list[PlaceCandidate] = []
+    seen: set[str] = set()
     for item in selected:
-        attraction = by_id.get(item.get("content_id"))
+        content_id = item.get("content_id")
+        if not isinstance(content_id, str) or content_id in seen:
+            continue
+        attraction = by_id.get(content_id)
         if not attraction:
             continue
-        result.append(PlaceCandidate(attraction=attraction, reason=item.get("reason", "")))
+        seen.add(content_id)
+        result.append(PlaceCandidate(
+            attraction=attraction,
+            reason=_safe_recommendation_reason(item.get("reason"), attraction, request),
+        ))
     if constraint:
-        for category in constraint.categories:
-            if any(item.attraction.category == category and constraint.matches(item.attraction) for item in result):
+        for requirement in constraint.requirements:
+            if any(requirement.matches(item.attraction) for item in result):
                 continue
-            required = next((a for a in candidates if a.category == category and constraint.matches(a)), None)
+            required = next((a for a in candidates if requirement.matches(a) and not is_closed_on(a, request.visit_date)), None)
+            if required is None:
+                required = next((a for a in candidates if requirement.matches(a)), None)
             if required:
                 result.append(PlaceCandidate(
                     attraction=required,
-                    reason=f"요청하신 {category} 장소이며 접근성 자료에 해당 유형의 정보가 등록되어 있어요.",
+                    reason=_safe_recommendation_reason(
+                        f"요청하신 {requirement.label} 장소예요.", required, request
+                    ),
                 ))
         if constraint.allow_other_categories:
             existing_ids = {item.attraction.content_id for item in result}
-            non_venue_count = sum(item.attraction.category not in constraint.categories for item in result)
+            non_venue_count = sum(not constraint.matches_requirement(item.attraction) for item in result)
+            non_venue_categories = {
+                item.attraction.category for item in result
+                if not constraint.matches_requirement(item.attraction)
+            }
             for other in candidates:
-                if non_venue_count >= 2:
+                if non_venue_count >= 2 and len(non_venue_categories) >= 2:
                     break
-                if other.category in constraint.categories or other.content_id in existing_ids:
+                if constraint.matches_requirement(other) or other.content_id in existing_ids:
                     continue
-                result.append(PlaceCandidate(
+                if non_venue_count >= 2 and other.category in non_venue_categories:
+                    continue
+                added = PlaceCandidate(
                     attraction=other,
-                    reason="당일 여행 코스에 함께 둘러볼 수 있는 장소예요.",
-                ))
+                    reason=_safe_recommendation_reason(
+                        "당일 여행 코스에 함께 둘러볼 수 있는 장소예요.", other, request
+                    ),
+                )
+                result.append(added)
+                broad_added.append(added)
                 existing_ids.add(other.content_id)
                 non_venue_count += 1
-    return result
+                non_venue_categories.add(other.category)
+    # 필수 장소를 12개 바깥으로 밀어내지 않고 중복도 제거합니다.
+    required = [item for item in result if constraint and constraint.matches_requirement(item.attraction)]
+    optional = [item for item in result if not (constraint and constraint.matches_requirement(item.attraction))]
+    final: list[PlaceCandidate] = []
+    final_ids: set[str] = set()
+    for item in [*required, *broad_added, *optional]:
+        content_id = item.attraction.content_id
+        if content_id not in final_ids:
+            final.append(item)
+            final_ids.add(content_id)
+        if len(final) >= 12:
+            break
+    return final
 
 
 async def generate_course_from_selection(
@@ -952,16 +1021,10 @@ async def generate_course_from_selection(
     else:
         raw = _mock_generate(course_request, selected_attractions, parsed)
 
-    course = CourseResponse(
+    return CourseResponse(
         course_id=str(uuid.uuid4()),
         title=raw["title"],
         summary=raw["summary"],
         stops=_stops_from_raw(raw, selected_attractions, request.visit_date),
         generated_for=request.user_type,
     )
-    if any(stop.attraction.data_source == "kakao" for stop in course.stops):
-        course.summary += " 음식점의 휠체어 접근성과 영업시간은 확인되지 않았으니 방문 전에 확인해주세요."
-        for stop in course.stops:
-            if stop.attraction.data_source == "kakao":
-                stop.reason = "접근성 및 영업시간이 확인되지 않은 음식점입니다. 방문 전에 매장에 확인해주세요."
-    return course

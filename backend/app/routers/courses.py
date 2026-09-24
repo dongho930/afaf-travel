@@ -13,7 +13,6 @@ from app.models.schemas import (
     CourseStop,
     GenerateFromSelectionRequest,
     ParsedQuery,
-    PlaceCandidate,
     PlaceRecommendationRequest,
     PlaceRecommendationResponse,
     SaveCourseRequest,
@@ -36,7 +35,6 @@ from app.services.ai_service import (
     recommend_places,
 )
 from app.services.place_intent import venue_constraint_for_query
-from app.services.kakao_places import search_kakao_restaurants
 from app.services.auth import get_optional_user_id
 from app.services.supabase_service import (
     CacheUnavailable,
@@ -88,9 +86,8 @@ async def _candidates_with_conditions(
     2단계(코스 생성)는 이제 후보 목록을 다시 만들지 않고 고른 장소만 직접
     불러오므로, 후보가 매번 달라져도 문제가 없습니다.
 
-    질의에서 읽어낸 지역으로 좁혔는데 후보가 하나도 없으면 지역 제한을 풀고 다시
-    찾습니다 — 사용자가 직접 고른 지역이 아니라 문장에서 넘겨짚은 지역이라,
-    잘못 읽었을 때 빈 화면을 주는 것보다 넓게 찾아주는 편이 낫습니다.
+    질의에서 읽어낸 지역은 결과에도 그대로 적용합니다. 해당 지역에 조건에 맞는
+    장소가 없다면 다른 도시의 장소를 같은 지역인 듯 추천하지 않습니다.
     """
     parsed = await parse_query(query_text, sigungu_cd, region)
     venue_constraint = venue_constraint_for_query(query_text)
@@ -104,28 +101,6 @@ async def _candidates_with_conditions(
         keywords=parsed.keywords,
         venue_constraint=venue_constraint,
     )
-
-    if not candidates and parsed.region_source == "query_text" and not (
-        venue_constraint and "음식점" in venue_constraint.categories
-    ):
-        logger.info(
-            "질의에서 읽어낸 지역(%s)으로는 후보가 없어 지역 제한 없이 다시 찾습니다: %r",
-            parsed.region_text,
-            query_text,
-        )
-        candidates = await tour_api_client.sample_accessible_candidates(
-            region=region,
-            user_type=user_type,
-            limit=_CANDIDATE_LIMIT,
-            sigungu_cd=None,
-            purposes=[p.value for p in parsed.purposes],
-            keywords=parsed.keywords,
-            venue_constraint=venue_constraint,
-        )
-        # 캐시에 들어있는 원본을 그대로 고치면 다른 단계까지 오염되므로 복사본을 만듭니다.
-        parsed = parsed.model_copy(
-            update={"sigungu_cds": [], "region_source": "none", "region_text": None}
-        )
 
     return candidates, parsed
 
@@ -157,19 +132,8 @@ async def recommend_course_places(request: PlaceRecommendationRequest):
     # 422가 나가 앱에 "장소 추천 실패" 팝업이 떴는데, 앱에는 이미 후보 0개를 위한
     # 안내("조건에 맞는 장소를 찾지 못했어요")가 있어서 그쪽으로 보냅니다.
     constraint = venue_constraint_for_query(request.query_text)
-    verified_categories = {
-        category for category in (constraint.categories if constraint else set())
-        if any(a.category == category and constraint.matches(a) for a in candidates)
-    }
-    missing_categories = sorted((constraint.categories if constraint else set()) - verified_categories)
-    external_restaurants: list[Attraction] = []
-    if "음식점" in missing_categories and parsed.region_text:
-        region_word = parsed.region_text.split()[0]
-        external_restaurants = await search_kakao_restaurants(f"{region_word} 음식점", 8)
-        region_needle = region_word.rstrip("시군구")
-        external_restaurants = [a for a in external_restaurants if region_needle in a.address]
-
-    if not candidates and not external_restaurants:
+    missing_categories = constraint.missing_requirements(candidates) if constraint else []
+    if not candidates:
         logger.info("조건에 맞는 후보가 없습니다: %r", request.query_text)
         return PlaceRecommendationResponse(
             query_text=request.query_text, candidates=[], parsed=parsed,
@@ -193,10 +157,6 @@ async def recommend_course_places(request: PlaceRecommendationRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    selected.extend(PlaceCandidate(
-        attraction=place,
-        reason="식당 검색 결과입니다. 휠체어 접근성과 영업시간은 확인되지 않았으니 방문 전에 확인해주세요.",
-    ) for place in external_restaurants)
     return PlaceRecommendationResponse(
         query_text=request.query_text, candidates=selected, parsed=parsed,
         missing_categories=missing_categories,
@@ -227,55 +187,38 @@ async def create_course_from_selection(
     # AI를 다시 부르지 않습니다.
     parsed = await parse_query(request.query_text, request.sigungu_cd, request.region)
 
-    tour_ids = [cid for cid in request.selected_content_ids if not cid.startswith("kakao:")]
-    details = await asyncio.gather(*(tour_api_client.get_attraction_detail(cid) for cid in tour_ids))
+    details = await asyncio.gather(
+        *(tour_api_client.get_attraction_detail(cid) for cid in request.selected_content_ids)
+    )
     selected_attractions: list[Attraction] = []
-    for content_id, detail in zip(tour_ids, details):
+    for content_id, detail in zip(request.selected_content_ids, details):
         if detail is None:
             logger.warning("선택한 관광지를 불러오지 못했습니다 (content_id=%s)", content_id)
             continue
         selected_attractions.append(detail)
-
-    external_by_id = {a.content_id: a for a in request.selected_external_places}
-    for content_id in request.selected_content_ids:
-        if not content_id.startswith("kakao:"):
-            continue
-        place = external_by_id.get(content_id)
-        if (
-            place is None or place.data_source != "kakao" or place.category != "음식점"
-            or not content_id.removeprefix("kakao:").isdigit()
-            or place.external_url != f"https://place.map.kakao.com/{content_id.removeprefix('kakao:')}"
-            or not (33 <= place.latitude <= 39 and 124 <= place.longitude <= 132)
-        ):
-            raise HTTPException(status_code=422, detail="선택한 외부 음식점 정보가 올바르지 않아요.")
-        if not request.allow_unverified_accessibility:
-            raise HTTPException(status_code=422, detail="이 음식점의 휠체어 접근성은 확인되지 않았어요. 확인 안내에 동의한 뒤 다시 시도해주세요.")
-        # 클라이언트가 임의로 편의시설을 채워 보내도 확인된 정보처럼 보이지 않게 합니다.
-        selected_attractions.append(Attraction(
-            content_id=place.content_id, name=place.name, address=place.address,
-            latitude=place.latitude, longitude=place.longitude, category="음식점",
-            data_source="kakao", external_url=place.external_url,
-        ))
 
     if not selected_attractions:
         raise HTTPException(status_code=422, detail="선택하신 관광지 정보를 다시 불러오지 못했습니다. 다시 시도해주세요.")
 
     constraint = venue_constraint_for_query(request.query_text)
     if constraint:
-        missing = [category for category in constraint.categories if not any(
-            a.category == category and constraint.matches(a) for a in selected_attractions
-        )]
+        if any(not constraint.matches(place) for place in selected_attractions):
+            raise HTTPException(status_code=422, detail="요청에서 제외하거나 요청과 다른 유형의 장소가 선택됐어요. 장소를 다시 골라주세요.")
+        missing = constraint.missing_requirements(selected_attractions)
         if missing:
             raise HTTPException(
                 status_code=422,
                 detail=f"요청하신 {'·'.join(sorted(missing))} 장소를 선택해야 코스를 만들 수 있어요.",
             )
+    if parsed.region_text and "외" not in parsed.region_text:
+        region_tokens = parsed.region_text.split()
+        if any(not all(token in place.address for token in region_tokens) for place in selected_attractions):
+            raise HTTPException(status_code=422, detail="선택한 장소 중 요청하신 지역 밖에 있는 곳이 있어요. 장소를 다시 골라주세요.")
 
     # 방문 시각을 영업시간·휴무일에 맞춰 계산하려면 부가정보가, 붐비는 곳을 앞으로
     # 당기려면 혼잡도 예보가 필요합니다. 둘 다 캐시만 읽어서 채웁니다.
-    tour_attractions = [a for a in selected_attractions if a.data_source != "kakao"]
-    await tour_api_client.fill_extra_info(tour_attractions)
-    await tour_api_client.fill_congestion_forecasts(tour_attractions)
+    await tour_api_client.fill_extra_info(selected_attractions)
+    await tour_api_client.fill_congestion_forecasts(selected_attractions)
 
     try:
         course = await generate_course_from_selection(request, selected_attractions, parsed)

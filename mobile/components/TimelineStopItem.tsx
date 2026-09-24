@@ -9,7 +9,7 @@ import {
   WarningCircleIcon,
 } from "phosphor-react-native";
 import React, { useEffect, useRef, useState } from "react";
-import { Animated, Linking, Platform, Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
+import { Animated, Platform, Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
 import Svg, { Line } from "react-native-svg";
 import { getCongestionDisplay } from "../constants/congestion";
 import { fontFamily } from "../constants/fonts";
@@ -152,9 +152,8 @@ export function TimelineStopItem({
 
       <Animated.View style={[styles.card, { borderColor }, isDragging && styles.cardDragging]}>
         <Pressable
-          onPress={() => attraction.data_source === "kakao" && attraction.external_url
-            ? void Linking.openURL(attraction.external_url)
-            : router.push({
+          onPress={() =>
+            router.push({
               pathname: "/attraction-detail",
               params: { contentId: attraction.content_id, name: attraction.name },
             })
@@ -162,7 +161,7 @@ export function TimelineStopItem({
           onLongPress={onLongPress}
           disabled={isDragging}
           accessibilityRole="button"
-          accessibilityLabel={`${attraction.name}, ${attraction.data_source === "kakao" ? "접근성 미확인, 카카오맵에서 확인" : "상세 페이지 보기"}`}
+          accessibilityLabel={`${attraction.name}, 상세 페이지 보기`}
           accessibilityHint={onLongPress ? "길게 누르면 끌어서 순서를 바꿀 수 있습니다" : undefined}
         >
           <View style={[styles.body, hasMore && styles.bodyWithFooter]}>

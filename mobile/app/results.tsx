@@ -91,7 +91,7 @@ export default function ResultsScreen() {
     setExtraInfoReady(false);
     const targets = allStops
       .map((s) => s.attraction)
-      .filter((a) => a.data_source !== "kakao" && (a.extra_info?.length ?? 0) === 0 && EXTRA_INFO_LABELS_BY_CATEGORY[a.category]);
+      .filter((a) => (a.extra_info?.length ?? 0) === 0 && EXTRA_INFO_LABELS_BY_CATEGORY[a.category]);
     if (targets.length === 0) {
       setExtraInfoReady(true);
       return;

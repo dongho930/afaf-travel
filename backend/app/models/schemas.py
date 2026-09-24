@@ -163,8 +163,6 @@ class Attraction(HttpsImageUrl):
     latitude: float
     longitude: float
     category: str
-    data_source: str = "tour_api"
-    external_url: Optional[str] = None
     image_url: Optional[str] = None
     accessibility: AccessibilityFeatures = AccessibilityFeatures()
     congestion_forecast: list[CongestionForecast] = Field(default_factory=list)
@@ -243,8 +241,6 @@ class GenerateFromSelectionRequest(BaseModel):
         description="방문 예정일 (YYYY-MM-DD). 방문 시각 계산과 휴무일 확인에 씁니다.",
     )
     selected_content_ids: list[str] = Field(..., min_length=1, description="사용자가 선택한 관광지 content_id 목록")
-    selected_external_places: list[Attraction] = Field(default_factory=list)
-    allow_unverified_accessibility: bool = False
 
 
 class CourseStop(BaseModel):
