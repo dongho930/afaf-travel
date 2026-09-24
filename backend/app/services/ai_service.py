@@ -29,7 +29,9 @@ from app.models.schemas import (
     TravelPurpose,
 )
 from app.services.memory_cache import TTLCache
-from app.services.place_intent import is_meal_place, query_without_excluded_venues, venue_constraint_for_query
+from app.services.place_intent import (
+    MEAL, NOT_MEAL, meal_status, query_without_excluded_venues, venue_constraint_for_query,
+)
 from app.services.schedule import arrange_for_meals, build_schedule, hours_payload, is_closed_on
 from app.services.course_validator import clean_reason, prefers_short_route, validate_course
 from app.services.sigungu_codes import resolve_sigungu_codes, signgu_name
@@ -358,6 +360,9 @@ SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동반 가
   계산해서 붙이므로, 당신은 "어떤 순서로 도는지"만 정하면 됩니다.
 - 그래서 reason에 "오전 9시에" 같은 구체적인 시각을 쓰지 마세요. 시스템이 계산한
   시각과 어긋납니다. 대신 "붐비기 전에 먼저" 같은 표현을 쓰세요.
+- reason에 "점심 후에", "식사하고 나서", "마지막으로"처럼 다른 장소와의 순서를
+  전제한 표현도 쓰지 마세요. 시스템이 식사 시간에 맞춰 순서를 옮길 수 있어서, 그런
+  표현은 실제 순서와 어긋납니다. 그 장소 자체의 장점만 설명하세요.
 - congestion_rate가 66 이상이거나 혼잡도가 high인 곳은 사람이 덜 몰리도록 코스
   앞쪽(이른 시간)에 배치하세요.
 - opens_at이 늦은 곳(예: 11:00)은 코스 앞쪽에 두지 마세요 — 문을 열 때까지
@@ -366,7 +371,8 @@ SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동반 가
   closes_at을 함께 보고, 그 식사 시간에 실제로 문을 여는 음식점만 그 자리에 두세요
   (예: 17:00에 여는 곳은 점심이 아니라 저녁에). 음식점이 여럿이면 같은 끼니에
   몰아넣지 말고 서로 다른 식사 시간에 하나씩 배치하세요.
-- meal_candidate가 false인 디저트 카페는 식사 장소로 설명하지 마세요.
+- meal_candidate가 true가 아닌 음식점(false: 카페·음료 위주, "unknown": 식사 여부 미확인)은
+  식사 장소로 설명하지 마세요. 식사 시간에는 meal_candidate가 true인 곳을 우선 두세요.
 - closed_weekdays가 방문일과 겹치는 곳은 그날 갈 수 없으므로, 그 사실을 reason에
   분명히 알려주세요 (순서를 바꿔도 해결되지 않습니다).
 - 혼잡도나 영업 정보가 없는 관광지는 그것을 근거로 들지 마세요 (추측 금지).
@@ -468,6 +474,9 @@ ORDER_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동�
   계산해서 붙이므로, 당신은 "어떤 순서로 도는지"만 정하면 됩니다.
 - 그래서 reason에 "오전 9시에" 같은 구체적인 시각을 쓰지 마세요. 시스템이 계산한
   시각과 어긋납니다. 대신 "붐비기 전에 먼저" 같은 표현을 쓰세요.
+- reason에 "점심 후에", "식사하고 나서", "마지막으로"처럼 다른 장소와의 순서를
+  전제한 표현도 쓰지 마세요. 시스템이 식사 시간에 맞춰 순서를 옮길 수 있어서, 그런
+  표현은 실제 순서와 어긋납니다. 그 장소 자체의 장점만 설명하세요.
 - congestion_rate가 66 이상이거나 혼잡도가 high인 곳은 사람이 덜 몰리도록 코스
   앞쪽(이른 시간)에 배치하세요.
 - opens_at이 늦은 곳(예: 11:00)은 코스 앞쪽에 두지 마세요 — 문을 열 때까지
@@ -476,7 +485,8 @@ ORDER_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동�
   closes_at을 함께 보고, 그 식사 시간에 실제로 문을 여는 음식점만 그 자리에 두세요
   (예: 17:00에 여는 곳은 점심이 아니라 저녁에). 음식점이 여럿이면 같은 끼니에
   몰아넣지 말고 서로 다른 식사 시간에 하나씩 배치하세요.
-- meal_candidate가 false인 디저트 카페는 식사 장소로 설명하지 마세요.
+- meal_candidate가 true가 아닌 음식점(false: 카페·음료 위주, "unknown": 식사 여부 미확인)은
+  식사 장소로 설명하지 마세요. 식사 시간에는 meal_candidate가 true인 곳을 우선 두세요.
 - closed_weekdays가 방문일과 겹치는 곳은 그날 갈 수 없으므로, 그 사실을 reason에
   분명히 알려주세요 (순서를 바꿔도 해결되지 않습니다).
 - 혼잡도나 영업 정보가 없는 관광지는 그것을 근거로 들지 마세요 (추측 금지).
@@ -561,7 +571,7 @@ def _build_user_prompt(
                 "representative_menu": next(
                     (field.value for field in a.extra_info if field.label == "대표 메뉴"), None
                 ),
-                "meal_candidate": is_meal_place(a),
+                "meal_candidate": {MEAL: True, NOT_MEAL: False}.get(meal_status(a), "unknown"),
             } if a.category == "음식점" else {}),
             "accessibility": _relevant_accessibility_payload(
                 a.accessibility.model_dump(), request.user_type

@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from app.models.schemas import Attraction
-from app.services.place_intent import is_meal_place
+from app.services.place_intent import meal_slot_indices
 
 # 하루 일정의 기본 시작 시각(09:00)과, 이보다 늦어지면 "하루에 다 돌기 어렵다"고
 # 알려주는 기준(20:00). 첫 장소가 더 늦게 열면 시작 시각은 그 개장 시각이 됩니다.
@@ -257,12 +257,12 @@ def travel_minutes(origin: Attraction, destination: Attraction) -> int:
     return max(_MIN_TRAVEL_MIN, min(_MAX_TRAVEL_MIN, round(minutes)))
 
 
-def route_distance_km(origin: Attraction, destination: Attraction) -> Optional[float]:
+def straight_distance_km(origin: Attraction, destination: Attraction) -> Optional[float]:
     """
-    두 장소 사이 이동 거리 추정치(km) — 직선거리에 도로 우회 계수를 곱한 값입니다.
+    두 장소 사이 직선거리(km). 좌표가 없으면 None입니다.
 
-    좌표가 없으면 None입니다. 실제 길찾기 거리와는 다를 수 있어서, 코스 검증은
-    이 값을 '대략 이 정도 떨어져 있다'는 경고 근거로만 씁니다.
+    사용자에게 보여주는 거리는 이 값을 '직선거리'라고 밝혀서 씁니다 — 도로 우회를
+    추정해 곱한 값을 보여주면 지도 화면의 실제 길찾기 거리와 또 다른 숫자가 됩니다.
     """
     if not all([origin.latitude, origin.longitude, destination.latitude, destination.longitude]):
         return None
@@ -271,7 +271,13 @@ def route_distance_km(origin: Attraction, destination: Attraction) -> Optional[f
     lat2, lon2 = math.radians(destination.latitude), math.radians(destination.longitude)
     dlat, dlon = lat2 - lat1, lon2 - lon1
     a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-    return 6371.0 * 2 * math.asin(math.sqrt(a)) * _ROAD_DETOUR_FACTOR
+    return 6371.0 * 2 * math.asin(math.sqrt(a))
+
+
+def route_distance_km(origin: Attraction, destination: Attraction) -> Optional[float]:
+    """이동 시간 계산용 거리 추정치(km) — 직선거리에 도로 우회 계수를 곱한 값입니다."""
+    distance = straight_distance_km(origin, destination)
+    return distance * _ROAD_DETOUR_FACTOR if distance is not None else None
 
 
 def meal_window_at(arrival_time: str) -> Optional[str]:
@@ -368,9 +374,8 @@ def arrange_for_meals(attractions: list[Attraction]) -> list[int]:
     음식점이 아닌 장소들끼리의 순서(혼잡도 순 등)는 그대로 지킵니다.
     """
     hours = [place_hours(a) for a in attractions]
-    assigned = _assign_meals(
-        {i: hours[i] for i, a in enumerate(attractions) if is_meal_place(a)}
-    )
+    meal_slots = meal_slot_indices(attractions)
+    assigned = _assign_meals({i: hours[i] for i in meal_slots})
     if not assigned:
         return list(range(len(attractions)))
 
@@ -428,7 +433,7 @@ def arrange_for_meals(attractions: list[Attraction]) -> list[int]:
         clock = arrival_at(previous, chosen, clock)
         if hours[chosen].open_min is not None and clock < hours[chosen].open_min:
             clock = hours[chosen].open_min
-        if is_meal_place(attractions[chosen]):
+        if chosen in meal_slots:
             meal_time, _ = _meal_time_push(clock)
             if meal_time is not None and (
                 hours[chosen].close_min is None or meal_time <= hours[chosen].close_min
@@ -468,6 +473,7 @@ def build_schedule(
     안내가 대신 상황을 설명합니다.
     """
     day = _parse_visit_date(visit_date)
+    meal_slots = meal_slot_indices(attractions)
     schedules: list[StopSchedule] = []
     current = _DAY_START_MIN
 
@@ -485,7 +491,7 @@ def build_schedule(
         # 음식점은 개장 시각을 반영한 뒤에도 식사 시간대 밖이면 당겨줍니다.
         # 당긴 시각이 영업 종료 이후가 되면(예: 15시에 닫는 곳을 저녁으로 당기는 경우)
         # 포기합니다 — 실제로 갈 수 없는 시각으로 밀어붙이는 것보다야 낫습니다.
-        if is_meal_place(attraction):
+        if index in meal_slots:
             meal_time, meal_note = _meal_time_push(current)
             if meal_time is not None and (hours.close_min is None or meal_time <= hours.close_min):
                 current = meal_time

@@ -28,7 +28,7 @@ import {
   openKakaoDirections,
 } from "../services/kakaoDirections";
 import { useTheme } from "../services/ThemeContext";
-import { CourseStop, UserType } from "../types";
+import { CourseStop, USER_TYPE_LABELS, UserType } from "../types";
 
 const API_BASE_URL: string =
   (Constants.expoConfig?.extra?.apiBaseUrl as string | undefined) ?? "http://localhost:8000";
@@ -105,8 +105,12 @@ interface LegSummary {
   mode: RouteMode | null;
   durationSec: number | null;
   distanceM: number | null;
-  // 추천한 것 말고 다른 수단으로 갔을 때의 소요 시간(카드 아래에 같이 보여줍니다).
-  alternatives: { mode: RouteMode; durationSec: number }[];
+  // 추천한 것 말고 다른 수단으로 갔을 때의 소요 시간·거리(카드 아래에 같이 보여줍니다).
+  // 거리를 빼고 시간만 보여주면 '자동차 7.4km 14분 vs 도보 21분'처럼 서로 맞지
+  // 않는 숫자로 보입니다 — 수단마다 실제 경로 길이가 다르다는 걸 같이 보여줘야 합니다.
+  alternatives: { mode: RouteMode; durationSec: number; distanceM: number | null }[];
+  // 추천 수단을 고른 이유 (예: 도보가 권장 거리를 넘음, 자동차는 도로를 돌아감).
+  choiceNote: string | null;
   // 조회 자체가 실패한 수단. 조용히 빼지 않고 '정보 없음'으로 밝힙니다.
   failedModes: RouteMode[];
 }
@@ -147,6 +151,30 @@ function formatDuration(sec: number | null): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return m > 0 ? `${h}시간 ${m}분` : `${h}시간`;
+}
+
+/**
+ * 추천 수단이 왜 그것인지 한 줄로 설명합니다. 도보가 더 짧은데 자동차가 추천되면
+ * 데이터가 틀린 것처럼 보이기 때문에, 그 이유(권장 도보 거리 초과, 도로 우회)를 밝힙니다.
+ */
+function legChoiceNote(
+  chosen: { mode: RouteMode; info: RouteFetchResult } | null,
+  walk: { mode: RouteMode; info: RouteFetchResult } | null,
+  walkLimit: number,
+  userType: UserType,
+): string | null {
+  if (!chosen || chosen.mode === "walk" || !walk || walk.info.distance_m == null) return null;
+  const walkM = walk.info.distance_m;
+  const notes: string[] = [];
+  if (walkM > walkLimit) {
+    notes.push(
+      `도보 경로가 ${formatDistance(walkM)}로 ${USER_TYPE_LABELS[userType]} 권장 도보 거리(${formatDistance(walkLimit)})를 넘어요`,
+    );
+  }
+  if (chosen.mode === "car" && chosen.info.distance_m != null && chosen.info.distance_m > walkM * 1.5) {
+    notes.push("자동차는 도로를 돌아가서 도보보다 거리가 길어요");
+  }
+  return notes.length ? notes.join(" · ") : null;
 }
 
 function formatDistance(m: number | null): string {
@@ -294,7 +322,12 @@ export default function MapScreen() {
             distanceM: chosen?.info.distance_m ?? null,
             alternatives: ([walkOption, transitOption, carOption].filter(
               (o): o is { mode: RouteMode; info: RouteFetchResult } => !!o && o.mode !== chosen?.mode
-            )).map((o) => ({ mode: o.mode, durationSec: o.info.duration_sec as number })),
+            )).map((o) => ({
+              mode: o.mode,
+              durationSec: o.info.duration_sec as number,
+              distanceM: o.info.distance_m,
+            })),
+            choiceNote: legChoiceNote(chosen, walkOption, walkLimit, course.generated_for),
             // 키가 없거나 API가 실패한 수단은 후보에서 조용히 빠지는 대신
             // 카드에 그대로 밝혀서, '왜 항상 자동차만 나오지'를 알 수 있게 합니다.
             failedModes: (["walk", "transit", "car"] as RouteMode[]).filter((m) => found[m] === null),
@@ -467,8 +500,17 @@ export default function MapScreen() {
                   {leg.alternatives.length > 0 && (
                     <Text style={styles.legAlt} numberOfLines={2}>
                       {leg.alternatives
-                        .map((alt) => `${MODE_LABEL[alt.mode]} ${formatDuration(alt.durationSec)}`)
+                        .map(
+                          (alt) =>
+                            `${MODE_LABEL[alt.mode]} ${formatDuration(alt.durationSec)}` +
+                            (alt.distanceM != null ? `(${formatDistance(alt.distanceM)})` : ""),
+                        )
                         .join(" · ")}
+                    </Text>
+                  )}
+                  {leg.choiceNote && (
+                    <Text style={styles.legAlt} numberOfLines={3}>
+                      {leg.choiceNote}
                     </Text>
                   )}
                   {leg.failedModes.length > 0 && (

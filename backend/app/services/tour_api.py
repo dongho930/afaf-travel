@@ -690,6 +690,8 @@ class TourApiClient:
             latitude=float(item.get("mapy") or 0),
             category=category,
             image_url=item.get("firstimage") or item.get("firstimage2") or None,
+            lcls_systm=item.get("lclsSystm3") or item.get("lclsSystm2") or None,
+            cat3=item.get("cat3") or None,
             # 무장애(편의시설) 세부 정보는 별도 엔드포인트에서 채워집니다. 아래 _fetch_accessibility 참고.
             accessibility=AccessibilityFeatures(),
         )
@@ -1603,6 +1605,9 @@ class TourApiClient:
             "longitude": a.longitude,
             "category": a.category,
             "image_url": a.image_url,
+            # 목록 캐시는 JSON으로 통째로 저장돼서 열을 추가하지 않아도 담깁니다.
+            "lcls_systm": a.lcls_systm,
+            "cat3": a.cat3,
         }
 
     @staticmethod
@@ -1615,6 +1620,8 @@ class TourApiClient:
             longitude=d.get("longitude") or 0,
             category=d.get("category", ""),
             image_url=d.get("image_url"),
+            lcls_systm=d.get("lcls_systm") or None,
+            cat3=d.get("cat3") or None,
             accessibility=AccessibilityFeatures(),
         )
 
@@ -2431,6 +2438,16 @@ class TourApiClient:
                     image_url=cached_basic.get("image_url") or None,
                     overview=cached_basic.get("overview") or None,
                 )
+                # 기본정보 캐시 테이블에는 분류 코드 열이 없습니다. 음식점은 식사 가능
+                # 여부(카페인지)를 가리는 데 코드가 필요해서 목록 캐시에서 찾아 붙입니다.
+                if attraction.category == "음식점":
+                    listed = next(
+                        (a for a in await self._region_attractions() if a.content_id == content_id),
+                        None,
+                    )
+                    if listed is not None:
+                        attraction.lcls_systm = listed.lcls_systm
+                        attraction.cat3 = listed.cat3
             else:
                 max_retries = 3
                 items: list[dict] = []

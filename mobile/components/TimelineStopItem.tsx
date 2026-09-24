@@ -196,7 +196,7 @@ export function TimelineStopItem({
             {stop.time_note ? <Text style={styles.timeNote}>{stop.time_note}</Text> : null}
             {/* 순서를 바꾼 뒤 저장 전에는 구간 거리가 달라지므로 감춥니다. */}
             {stop.distance_from_prev_km != null && !timeStale ? (
-              <Text style={styles.timeNote}>앞 장소에서 약 {stop.distance_from_prev_km}km (직선거리 기준 추정)</Text>
+              <Text style={styles.timeNote}>앞 장소와 직선거리 약 {stop.distance_from_prev_km}km</Text>
             ) : null}
             {stop.closed_note ? (
               <View style={styles.closedRow}>

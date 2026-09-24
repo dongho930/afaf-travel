@@ -167,6 +167,11 @@ class Attraction(HttpsImageUrl):
     longitude: float
     category: str
     image_url: Optional[str] = None
+    # TourAPI 분류 코드. 음식점과 카페는 contentTypeId(39)가 같아서, 식사 가능 여부를
+    # 가리려면 이 값이 필요합니다. lclsSystm은 신분류(예: FD050100 = 카페/전통찻집),
+    # cat3는 구분류(예: A05020900 = 카페/전통찻집)입니다. 없으면 None.
+    lcls_systm: Optional[str] = None
+    cat3: Optional[str] = None
     accessibility: AccessibilityFeatures = AccessibilityFeatures()
     congestion_forecast: list[CongestionForecast] = Field(default_factory=list)
     related_attraction_ids: list[str] = Field(default_factory=list)

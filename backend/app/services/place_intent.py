@@ -13,7 +13,18 @@ _MEAL_MENU_TERMS = (
     "돈까스", "돈가스", "스테이크", "불고기", "갈비", "삼겹살", "초밥",
     "삼계탕", "보쌈", "족발", "치킨", "탕수육", "제육", "순두부", "곰탕",
     "샤브", "뷔페", "분식", "도시락", "브런치",
+    # 메뉴가 적혀 있는데 식사 메뉴가 안 보이면 식사 장소로 보지 않으므로, 흔한
+    # 식당 메뉴를 넓게 담아 멀쩡한 식당이 빠지지 않게 합니다.
+    "한정식", "한우", "소고기", "돼지고기", "고기", "구이", "전골", "해장국", "설렁탕",
+    "순대", "만두", "짜장", "자장", "짬뽕", "쌈밥", "닭갈비", "막국수", "오리", "장어",
+    "회덮밥", "생선", "매운탕", "아구", "쭈꾸미", "낙지", "오징어", "추어탕", "갈비탕",
+    "부대찌개", "감자탕", "닭볶음", "찜닭", "훠궈", "마라", "쌀밥", "솥밥", "죽",
+    "오므라이스", "카레", "커리", "리조또", "스파게티", "타코", "부리또", "쌈", "비빔",
+    "코스요리", "정찬", "주먹밥", "누룽지", "떡갈비", "육회", "전복", "해물", "파전",
+    "빈대떡", "쌀국", "라면", "먹거리", "밀면", "소바", "텐동", "규동", "돈부리", "사시미",
 )
+# 메뉴 이름이 이렇게 끝나면 식사로 봅니다 (예: 들깨칼국수, 도토리묵밥, 아귀찜).
+_MEAL_MENU_SUFFIXES = ("탕", "국", "밥", "면", "찜", "구이", "전골", "볶음", "정식", "찌개")
 _DESSERT_MENU_TERMS = (
     "케이크", "커피", "라떼", "에이드", "주스", "스무디", "아이스크림",
     "마카롱", "도넛", "쿠키", "와플", "타르트", "디저트", "베이커리",
@@ -22,12 +33,15 @@ _DESSERT_MENU_TERMS = (
     "음료", "아메리카노", "에스프레소", "카푸치노", "밀크티", "버블티", "전통차",
     "대추차", "쌍화차", "유자차", "생강차", "녹차", "홍차", "허브티", "식혜",
     "수정과", "요거트", "쉐이크", "셰이크", "젤라또", "스콘", "마들렌",
+    "바닐라", "초코", "크림", "콜드브루", "플랫화이트", "아인슈페너", "모카", "푸딩",
 )
 _CAFE_NAME_TERMS = (
     "카페", "커피", "디저트", "베이커리", "제과", "coffee", "cafe",
     "찻집", "다방", "티하우스", "티룸", "로스터리", "로스터스", "젤라또",
 )
+_MENU_LABELS = ("대표 메뉴", "취급 메뉴")
 _MENU_ITEM_SEPARATOR = re.compile(r"[,/·|\n]+")
+_MENU_WORD = re.compile(r"[가-힣a-z]+")
 
 
 def _matches_name_term(name: str, term: str) -> bool:
@@ -38,28 +52,103 @@ def _matches_name_term(name: str, term: str) -> bool:
     return normalized_term in normalized_name
 
 
-def is_meal_place(place: Attraction) -> bool:
-    """대표 메뉴와 이름으로 디저트 전문점을 식사 후보에서 제외합니다.
+def _is_meal_item(item: str) -> bool:
+    if any(term in item for term in _MEAL_MENU_TERMS):
+        return True
+    return any(
+        len(word) >= 2 and word.endswith(_MEAL_MENU_SUFFIXES) for word in _MENU_WORD.findall(item)
+    )
 
-    메뉴 정보가 비어 있으면 음식점 분류를 유지합니다. 확인할 근거가 없는 장소를
-    임의로 카페라고 단정하지 않기 위해서입니다.
+
+# 식사 가능 여부의 세 가지 상태. '확인 불가'를 따로 두는 이유는, 메뉴가 'OO 스페셜'처럼
+# 이름만 적힌 식당을 '식사 불가'로 몰면 식사 배치에서 빠지고, '식사 가능'으로 두면
+# 확인되지 않은 곳을 점심 장소라고 단정하게 되기 때문입니다.
+MEAL = "meal"
+NOT_MEAL = "not_meal"
+MEAL_UNKNOWN = "unknown"
+
+# TourAPI 분류 코드. 신분류 FD01 한식 / FD02 외국식 / FD03 간이음식 / FD04 주점 /
+# FD05 카페·전통찻집, 구분류 A0502xxxx 중 A05020900이 카페·전통찻집입니다.
+# 주점(FD04)은 안주 위주라 식사로 단정하지 않고 메뉴로 넘깁니다.
+_MEAL_LCLS_PREFIXES = ("FD01", "FD02", "FD03")
+_CAFE_LCLS_PREFIXES = ("FD05",)
+_CAFE_CAT3 = ("A05020900",)
+_BAR_CAT3 = ("A05021000",)
+# 메뉴가 없을 때 이름으로 식당이라고 볼 수 있는 표현.
+_RESTAURANT_NAME_TERMS = (
+    "식당", "밥집", "밥상", "한식", "한정식", "국밥", "해장국", "칼국수", "냉면", "면옥",
+    "갈비", "숯불", "가든", "회관", "반점", "순대", "곰탕", "설렁탕", "쌈밥", "보리밥",
+    "기사식당", "뷔페", "분식", "김밥", "돈까스", "돈가스", "스시", "초밥", "횟집", "막국수",
+)
+
+
+def meal_status(place: Attraction) -> str:
+    """
+    음식점에서 식사를 할 수 있는지 — MEAL / NOT_MEAL / MEAL_UNKNOWN.
+
+    1. TourAPI 분류 코드가 있으면 그것을 먼저 믿습니다 (카페·전통찻집이면 식사 불가,
+       한식·외국식·간이음식이면 식사 가능). 메뉴 단어 목록보다 훨씬 확실합니다.
+    2. 코드가 없거나 주점이면 메뉴(대표·취급)를 봅니다. 식사 메뉴가 음료·디저트보다
+       많으면 식사 가능, 음료·디저트가 더 많으면 식사 불가, 아무것도 알아볼 수 없으면
+       (예: '시그니처 바닐라', 'OO 스페셜') 확인 불가입니다.
+    3. 메뉴도 없으면 이름을 봅니다 — 카페류면 식사 불가, 식당류면 식사 가능, 아니면 확인 불가.
     """
     if place.category != "음식점":
-        return False
-    menu = " , ".join(field.value for field in place.extra_info if field.label == "대표 메뉴").lower()
-    # 메뉴 항목마다 식사/음료·디저트를 가려 셉니다. '브런치'가 한 번 있다고 커피·라떼가
-    # 대부분인 곳을 식당으로 보면 음료 위주 가게가 점심 장소로 설명됩니다.
-    meal_items = dessert_items = 0
-    for item in _MENU_ITEM_SEPARATOR.split(menu):
-        if any(term in item for term in _MEAL_MENU_TERMS):
-            meal_items += 1
-        elif any(term in item for term in _DESSERT_MENU_TERMS):
-            dessert_items += 1
-    if meal_items:
-        return meal_items >= dessert_items
-    if dessert_items:
-        return False
-    return not any(term in place.name.lower() for term in _CAFE_NAME_TERMS)
+        return NOT_MEAL
+
+    code = (place.lcls_systm or "").upper()
+    cat3 = (place.cat3 or "").upper()
+    if code.startswith(_CAFE_LCLS_PREFIXES) or cat3 in _CAFE_CAT3:
+        return NOT_MEAL
+    if code.startswith(_MEAL_LCLS_PREFIXES):
+        return MEAL
+    if not code and cat3.startswith("A0502") and cat3 not in _BAR_CAT3:
+        return MEAL
+
+    menu = " , ".join(
+        field.value for field in place.extra_info if field.label in _MENU_LABELS and field.value
+    ).lower()
+    items = [item.strip() for item in _MENU_ITEM_SEPARATOR.split(menu) if item.strip()]
+    if items:
+        meal_items = sum(1 for item in items if _is_meal_item(item))
+        dessert_items = sum(
+            1 for item in items
+            if not _is_meal_item(item) and any(term in item for term in _DESSERT_MENU_TERMS)
+        )
+        if meal_items and meal_items >= dessert_items:
+            return MEAL
+        if dessert_items:
+            return NOT_MEAL
+        return MEAL_UNKNOWN
+
+    name = place.name.lower()
+    if any(term in name for term in _CAFE_NAME_TERMS):
+        return NOT_MEAL
+    if any(term in name for term in _RESTAURANT_NAME_TERMS):
+        return MEAL
+    return MEAL_UNKNOWN
+
+
+def is_meal_place(place: Attraction) -> bool:
+    """식사할 수 있다고 확인된 음식점인지 (확인 불가는 False)."""
+    return meal_status(place) == MEAL
+
+
+def may_serve_meal(place: Attraction) -> bool:
+    """식사 불가로 확인된 곳만 뺍니다 — 요청 조건(예: '점심 식당')을 채울 때 씁니다."""
+    return place.category == "음식점" and meal_status(place) != NOT_MEAL
+
+
+def meal_slot_indices(places: list[Attraction]) -> set[int]:
+    """
+    식사 시간대에 배치할 음식점의 위치. 식사가 확인된 곳을 우선하고, 하나도 없을
+    때만 확인 불가인 곳을 씁니다 (그때는 코스 검증이 '방문 전 확인' 경고를 붙입니다).
+    """
+    statuses = [meal_status(place) for place in places]
+    confirmed = {i for i, status in enumerate(statuses) if status == MEAL}
+    if confirmed:
+        return confirmed
+    return {i for i, status in enumerate(statuses) if status == MEAL_UNKNOWN}
 
 
 @dataclass(frozen=True)
@@ -70,7 +159,7 @@ class VenueRequirement:
     meal_only: bool = False
 
     def matches(self, place: Attraction) -> bool:
-        if (self.label == "음식점" or self.meal_only) and not is_meal_place(place):
+        if (self.label == "음식점" or self.meal_only) and not may_serve_meal(place):
             return False
         return any(
             place.category == category and (
@@ -104,7 +193,7 @@ class VenueConstraint:
         )
 
     def accepts_food_place(self, place: Attraction) -> bool:
-        if place.category != "음식점" or not self.meal_required or is_meal_place(place):
+        if place.category != "음식점" or not self.meal_required or may_serve_meal(place):
             return True
         # 식당과 카페를 따로 요청했다면 디저트 카페는 카페 후보로 남깁니다.
         return any(req.label in ("카페", "빵집") and not req.meal_only and req.matches(place)
