@@ -80,6 +80,9 @@ class ParsedQuery(BaseModel):
     companion: CompanionType = CompanionType.UNSPECIFIED
     purposes: list[TravelPurpose] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list, description="지역·동행자·목적 외에 남는 핵심 표현 (예: '산책로')")
+    prefers_short_route: bool = Field(
+        default=False, description="'짧은 동선', '이동 적게'처럼 장소 사이 이동을 줄여 달라고 했는지"
+    )
     parsed_by: Literal["ai", "rule"] = Field(
         default="rule", description="AI가 파싱했는지, 규칙 기반 대체 로직이 파싱했는지"
     )
@@ -257,6 +260,12 @@ class CourseStop(BaseModel):
     # 그날 안에 실제로 방문할 수 있는지. False인 첫 지점부터 뒤쪽은 시간이 계속
     # 밀리므로, 앱이 "여기부터 다음 날 코스로 나누기"를 제안합니다.
     fits_today: bool = True
+    # 앞 장소에서 이 장소까지의 대략적인 이동 거리(km, 직선거리 × 도로 우회 계수).
+    # 첫 장소이거나 좌표가 없으면 None입니다. 순서를 바꾸면 다시 계산됩니다.
+    distance_from_prev_km: Optional[float] = None
+    # 코스 검증(course_validator)에서 나온 이 장소의 경고 — 요청과 어긋나는 이동
+    # 거리, 식사 시간대의 음료 위주 가게, 확인되지 않은 필수 편의시설 등.
+    warnings: list[str] = Field(default_factory=list)
 
 
 class CourseResponse(BaseModel):
@@ -265,6 +274,8 @@ class CourseResponse(BaseModel):
     summary: str
     stops: list[CourseStop]
     generated_for: UserType
+    # 특정 장소가 아니라 코스 전체에 대한 경고 (예: 장소 사이 경로의 무장애 여부 미확인).
+    warnings: list[str] = Field(default_factory=list)
 
 
 # 사용자가 여행을 만들 때 고를 수 있는 분류. 기존 5개 중 하나이거나("기타" 포함),

@@ -85,6 +85,10 @@ export interface CourseStop {
   // 그날 안에 실제로 갈 수 있는지. false인 첫 지점부터는 다음 날 코스로
   // 나누자고 제안합니다(문 닫은 뒤 도착 / 하루 초과 / 그날 휴무).
   fits_today?: boolean;
+  // 앞 장소에서의 대략적인 이동 거리(km). 첫 장소나 좌표가 없으면 null.
+  distance_from_prev_km?: number | null;
+  // 서버 코스 검증 경고 (짧은 동선과 맞지 않는 거리, 식사 시간대의 음료 위주 가게 등).
+  warnings?: string[];
 }
 
 /** 코스를 그날/다음 날로 나눈 결과. */
@@ -137,6 +141,8 @@ export interface CourseResponse {
   summary: string;
   stops: CourseStop[];
   generated_for: UserType;
+  // 코스 전체에 대한 경고 (예: 장소 사이 경로의 무장애 여부 미확인).
+  warnings?: string[];
 }
 
 export const USER_TYPE_LABELS: Record<UserType, string> = {

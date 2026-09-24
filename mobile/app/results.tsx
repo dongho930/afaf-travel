@@ -3,6 +3,7 @@ import {
   ClockCounterClockwiseIcon,
   HandTapIcon,
   MapTrifoldIcon,
+  WarningCircleIcon,
   WifiSlashIcon,
 } from "phosphor-react-native";
 import React, { useEffect, useState } from "react";
@@ -322,6 +323,12 @@ export default function ResultsScreen() {
       <View style={styles.titleRow}>
         <Text style={styles.title}>{course.title}</Text>
         <Text style={styles.summary}>{course.summary}</Text>
+        {course.warnings?.map((warning) => (
+          <View key={warning} style={styles.courseWarning}>
+            <WarningCircleIcon size={13} color={colors.warningText} weight="bold" />
+            <Text style={styles.courseWarningText}>{warning}</Text>
+          </View>
+        ))}
       </View>
 
       {splitBannerFor(0)}
@@ -569,6 +576,17 @@ function makeStyles(colors: ThemeColors) {
     borderRadius: radius.sm,
     marginBottom: spacing.md,
   },
+  courseWarning: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+    paddingVertical: 6,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+    backgroundColor: colors.warningLight,
+  },
+  courseWarningText: { flex: 1, fontSize: 12, lineHeight: 17, fontFamily: fontFamily.semiBold, color: colors.warningText },
   offlineBannerText: { color: colors.warningText, fontSize: 12, fontFamily: fontFamily.regular, textAlign: "center" },
   // '이날 방문이 어려워요' 안내와 다음 날로 나누기 버튼
   splitBanner: {

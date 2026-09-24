@@ -18,8 +18,16 @@ _DESSERT_MENU_TERMS = (
     "케이크", "커피", "라떼", "에이드", "주스", "스무디", "아이스크림",
     "마카롱", "도넛", "쿠키", "와플", "타르트", "디저트", "베이커리",
     "크루아상", "빵", "티라미수", "빙수",
+    # 음료 위주 가게(찻집·티하우스 등)도 점심 장소로 설명되지 않도록 음료를 함께 봅니다.
+    "음료", "아메리카노", "에스프레소", "카푸치노", "밀크티", "버블티", "전통차",
+    "대추차", "쌍화차", "유자차", "생강차", "녹차", "홍차", "허브티", "식혜",
+    "수정과", "요거트", "쉐이크", "셰이크", "젤라또", "스콘", "마들렌",
 )
-_CAFE_NAME_TERMS = ("카페", "커피", "디저트", "베이커리", "제과", "coffee", "cafe")
+_CAFE_NAME_TERMS = (
+    "카페", "커피", "디저트", "베이커리", "제과", "coffee", "cafe",
+    "찻집", "다방", "티하우스", "티룸", "로스터리", "로스터스", "젤라또",
+)
+_MENU_ITEM_SEPARATOR = re.compile(r"[,/·|\n]+")
 
 
 def _matches_name_term(name: str, term: str) -> bool:
@@ -38,10 +46,18 @@ def is_meal_place(place: Attraction) -> bool:
     """
     if place.category != "음식점":
         return False
-    menu = " ".join(field.value for field in place.extra_info if field.label == "대표 메뉴").lower()
-    if any(term in menu for term in _MEAL_MENU_TERMS):
-        return True
-    if any(term in menu for term in _DESSERT_MENU_TERMS):
+    menu = " , ".join(field.value for field in place.extra_info if field.label == "대표 메뉴").lower()
+    # 메뉴 항목마다 식사/음료·디저트를 가려 셉니다. '브런치'가 한 번 있다고 커피·라떼가
+    # 대부분인 곳을 식당으로 보면 음료 위주 가게가 점심 장소로 설명됩니다.
+    meal_items = dessert_items = 0
+    for item in _MENU_ITEM_SEPARATOR.split(menu):
+        if any(term in item for term in _MEAL_MENU_TERMS):
+            meal_items += 1
+        elif any(term in item for term in _DESSERT_MENU_TERMS):
+            dessert_items += 1
+    if meal_items:
+        return meal_items >= dessert_items
+    if dessert_items:
         return False
     return not any(term in place.name.lower() for term in _CAFE_NAME_TERMS)
 

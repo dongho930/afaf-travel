@@ -194,12 +194,22 @@ export function TimelineStopItem({
             )}
 
             {stop.time_note ? <Text style={styles.timeNote}>{stop.time_note}</Text> : null}
+            {/* 순서를 바꾼 뒤 저장 전에는 구간 거리가 달라지므로 감춥니다. */}
+            {stop.distance_from_prev_km != null && !timeStale ? (
+              <Text style={styles.timeNote}>앞 장소에서 약 {stop.distance_from_prev_km}km (직선거리 기준 추정)</Text>
+            ) : null}
             {stop.closed_note ? (
               <View style={styles.closedRow}>
                 <WarningCircleIcon size={13} color={colors.warningText} weight="bold" />
                 <Text style={styles.closedText}>{stop.closed_note}</Text>
               </View>
             ) : null}
+            {stop.warnings?.map((warning) => (
+              <View key={warning} style={styles.closedRow}>
+                <WarningCircleIcon size={13} color={colors.warningText} weight="bold" />
+                <Text style={styles.closedText}>{warning}</Text>
+              </View>
+            ))}
 
             <Text style={styles.reason} numberOfLines={expanded ? undefined : 3}>
               {stop.reason}

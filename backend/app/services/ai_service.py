@@ -31,6 +31,7 @@ from app.models.schemas import (
 from app.services.memory_cache import TTLCache
 from app.services.place_intent import is_meal_place, query_without_excluded_venues, venue_constraint_for_query
 from app.services.schedule import arrange_for_meals, build_schedule, hours_payload, is_closed_on
+from app.services.course_validator import clean_reason, prefers_short_route, validate_course
 from app.services.sigungu_codes import resolve_sigungu_codes, signgu_name
 
 settings = get_settings()
@@ -280,6 +281,7 @@ async def parse_query(
             except Exception as e:  # 파싱은 부가 기능이라 어떤 실패도 화면을 막지 않습니다
                 logger.warning("질의 해석 실패(%s) — 규칙 기반으로 대체합니다.", e)
 
+        parsed.prefers_short_route = prefers_short_route(text)
         # 명시적인 장소 표현은 AI가 목적을 누락해도 조건에 반영합니다.
         lexical_purposes = _rule_parse(query_without_excluded_venues(text)).purposes
         parsed.purposes = list(dict.fromkeys([*lexical_purposes, *parsed.purposes]))[:3]
@@ -331,6 +333,8 @@ def _conditions_payload(parsed: ParsedQuery | None) -> dict:
         conditions["purposes"] = [p.value for p in parsed.purposes]
     if parsed.keywords:
         conditions["keywords"] = parsed.keywords
+    if parsed.prefers_short_route:
+        conditions["prefers_short_route"] = True
     return conditions
 
 
@@ -369,6 +373,12 @@ SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동반 가
 - conditions에 동행자(companion)나 목적(purposes)이 있으면 그에 맞게 순서를 정하고
   reason에도 반영하세요 (예: 가족 동반이면 이동을 짧게).
 - 사용자 유형에 맞는 이동/휴식 동선을 고려하세요 (예: 고령자/임산부는 휴게 공간이 있는 곳 우선).
+- conditions.prefers_short_route가 true이면 사용자가 짧은 동선을 원한 것입니다.
+  candidates의 lat/lng를 보고 서로 가까운 장소끼리 고르고, 가까운 순서로 이어지게
+  배치하세요. 멀리 떨어진 곳을 끼워 넣지 마세요.
+- accessibility는 각 장소 "안"의 편의시설 정보입니다. 장소와 장소 사이 이동 경로
+  (보도·횡단보도·경사)가 무장애라는 정보는 없으므로, "휠체어로 편하게 이동할 수 있어",
+  "무장애 동선으로 이어져"처럼 이동 경로가 안전하다고 단정하지 마세요.
 - reason은 반드시 candidates에 주어진 accessibility 필드에 실제로 있는 내용만
   근거로 쓰세요. 주어지지 않은 편의시설(예: 시각장애 사용자에게 경사로나 화장실처럼
   무관한 항목)은 절대 언급하지 마세요 — accessibility에 이미 해당 유형과
@@ -415,6 +425,9 @@ RECOMMEND_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 
 - 질의에 "한적한", "붐비지 않는" 같은 표현이 있으면 congestion_rate가 낮은 곳을
   우선하세요. 그런 표현이 없으면 혼잡도는 참고만 하세요.
 - 순서는 중요하지 않습니다 (사용자가 나중에 직접 고릅니다).
+- accessibility는 각 장소 "안"의 편의시설 정보입니다. 장소와 장소 사이 이동 경로
+  (보도·횡단보도·경사)가 무장애라는 정보는 없으므로, "휠체어로 편하게 이동할 수 있어",
+  "무장애 동선으로 이어져"처럼 이동 경로가 안전하다고 단정하지 마세요.
 - reason은 반드시 candidates에 주어진 accessibility 필드에 실제로 있는 내용만
   근거로 쓰세요. 주어지지 않은 편의시설(예: 시각장애 사용자에게 경사로나 화장실처럼
   무관한 항목)은 절대 언급하지 마세요 — accessibility에 이미 해당 유형과
@@ -470,6 +483,11 @@ ORDER_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동�
 - conditions에 동행자(companion)나 목적(purposes)이 있으면 그에 맞게 순서를 정하고
   reason에도 반영하세요.
 - 사용자 유형에 맞는 이동/휴식 동선을 고려해 순서를 정하세요.
+- conditions.prefers_short_route가 true이면 사용자가 짧은 동선을 원한 것입니다.
+  candidates의 lat/lng를 보고 되돌아가는 구간 없이 가까운 순서로 이어지게 정하세요.
+- accessibility는 각 장소 "안"의 편의시설 정보입니다. 장소와 장소 사이 이동 경로
+  (보도·횡단보도·경사)가 무장애라는 정보는 없으므로, "휠체어로 편하게 이동할 수 있어",
+  "무장애 동선으로 이어져"처럼 이동 경로가 안전하다고 단정하지 마세요.
 - reason은 반드시 candidates에 주어진 accessibility 필드에 실제로 있는 내용만
   근거로 쓰세요. 주어지지 않은 편의시설(예: 시각장애 사용자에게 경사로나 화장실처럼
   무관한 항목)은 절대 언급하지 마세요 — accessibility에 이미 해당 유형과
@@ -533,6 +551,7 @@ def _build_user_prompt(
     include_forecast: bool = True,
 ) -> str:
     visit_date = request.preferred_date
+    short_route = bool(parsed and parsed.prefers_short_route)
     candidate_payload = [
         {
             "content_id": a.content_id,
@@ -550,6 +569,9 @@ def _build_user_prompt(
             **_congestion_payload(a, include_forecast, visit_date),
             # 영업시간·휴무일은 순서를 정할 때만 씁니다 (시각 자체는 시스템 계산).
             **(hours_payload(a) if include_forecast else {}),
+            # 짧은 동선을 원할 때만 좌표를 싣습니다 (그 외엔 토큰만 늘어납니다).
+            **({"lat": round(a.latitude, 4), "lng": round(a.longitude, 4)}
+               if short_route and a.latitude and a.longitude else {}),
         }
         for a in candidates
     ]
@@ -798,13 +820,13 @@ async def generate_course(
     else:
         raw = _mock_generate(request, candidates, parsed)
 
-    return CourseResponse(
+    return validate_course(CourseResponse(
         course_id=str(uuid.uuid4()),
         title=raw.get("title") if isinstance(raw.get("title"), str) else "무장애 여행 코스",
         summary=raw.get("summary") if isinstance(raw.get("summary"), str) else "선택한 장소로 구성한 코스입니다.",
         stops=_stops_from_raw(raw, candidates, request.preferred_date),
         generated_for=request.user_type,
-    )
+    ), request.query_text)
 
 
 def _mock_recommend(
@@ -905,25 +927,11 @@ async def _groq_recommend(
 
 
 def _safe_recommendation_reason(reason: object, place: Attraction, request: PlaceRecommendationRequest) -> str:
-    """AI가 등록되지 않은 편의시설을 근거로 들면 검증 가능한 문구로 바꿉니다."""
-    features = place.accessibility
-    unsupported = (
-        ("경사로", not features.has_ramp),
-        ("엘리베이터", not features.has_elevator),
-        ("휠체어 대여", not features.has_wheelchair_rental),
-        ("장애인 화장실", not features.has_accessible_restroom),
-        ("점자블록", not features.has_braille_block),
-        ("수어", not features.has_sign_guide),
-    )
-    safe = isinstance(reason, str) and bool(reason.strip())
-    if safe:
-        safe = not any(word in reason and invalid for word, invalid in unsupported)
-        safe = safe and not any(token in reason for token in ("has_", "_count", "true", "false"))
-    if not safe:
-        reason = f"요청하신 여행 조건과 관련된 {place.category} 장소예요."
+    """등록되지 않은 편의시설·경로 안전 단정·음료 가게의 식사 설명을 덜어냅니다."""
+    reason = clean_reason(reason, place, fallback=f"요청하신 여행 조건과 관련된 {place.category} 장소예요.")
     if is_closed_on(place, request.visit_date):
         return f"방문 예정일에 휴무로 표시된 장소예요. {reason}"
-    return reason.strip()[:200]
+    return reason
 
 
 async def recommend_places(
@@ -1076,10 +1084,10 @@ async def generate_course_from_selection(
     else:
         raw = _mock_generate(course_request, selected_attractions, parsed)
 
-    return CourseResponse(
+    return validate_course(CourseResponse(
         course_id=str(uuid.uuid4()),
         title=raw.get("title") if isinstance(raw.get("title"), str) else "무장애 여행 코스",
         summary=raw.get("summary") if isinstance(raw.get("summary"), str) else "선택한 장소로 구성한 코스입니다.",
         stops=_stops_from_raw(raw, selected_attractions, request.visit_date, include_all=True),
         generated_for=request.user_type,
-    )
+    ), request.query_text)

@@ -73,6 +73,12 @@ export function AttractionCard({
             <Text style={styles.closedNotice}>{stop.closed_note}</Text>
           </View>
         ) : null}
+        {stop.warnings?.map((warning) => (
+          <View key={warning} style={styles.closedNoticeRow}>
+            <WarningCircleIcon size={13} color={colors.warningText} weight="bold" />
+            <Text style={styles.closedNotice}>{warning}</Text>
+          </View>
+        ))}
         <Text style={styles.reason}>{stop.reason}</Text>
         {(() => {
           const extraInfoNode = renderExtraInfo(placeWithExtraInfo, colors);

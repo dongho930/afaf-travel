@@ -32,6 +32,7 @@ from app.models.schemas import Attraction, CourseResponse, CourseStop
 from app.services.db import execute as _execute
 from app.services.memory_cache import TTLCache
 from app.services.schedule import build_schedule, next_day_of
+from app.services.course_validator import validate_course
 
 settings = get_settings()
 
@@ -367,12 +368,17 @@ async def update_course(
 
 
 def row_to_course_response(row: dict) -> CourseResponse:
-    return CourseResponse(
-        course_id=row["id"],
-        title=row["title"],
-        summary=row["summary"],
-        stops=[CourseStop(**s) for s in row.get("stops") or []],
-        generated_for=row["user_type"],
+    # 검증은 읽을 때마다 다시 돌립니다 — 순서를 바꾸거나 코스를 나누면 구간 거리와
+    # 식사 시간대가 달라지고, 이 기능 전에 저장된 코스에도 경고가 붙어야 하기 때문입니다.
+    return validate_course(
+        CourseResponse(
+            course_id=row["id"],
+            title=row["title"],
+            summary=row["summary"],
+            stops=[CourseStop(**s) for s in row.get("stops") or []],
+            generated_for=row["user_type"],
+        ),
+        row.get("query_text"),
     )
 
 

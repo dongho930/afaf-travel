@@ -249,17 +249,39 @@ def travel_minutes(origin: Attraction, destination: Attraction) -> int:
     화면에서 이동수단을 고른 뒤 따로 보여줍니다. 여기서는 "두 시간 간격 고정"보다
     현실에 가까운 간격을 잡는 것이 목적입니다.
     """
-    if not all([origin.latitude, origin.longitude, destination.latitude, destination.longitude]):
+    distance_km = route_distance_km(origin, destination)
+    if distance_km is None:
         return _MIN_TRAVEL_MIN
+
+    minutes = distance_km / _AVERAGE_SPEED_KMH * 60
+    return max(_MIN_TRAVEL_MIN, min(_MAX_TRAVEL_MIN, round(minutes)))
+
+
+def route_distance_km(origin: Attraction, destination: Attraction) -> Optional[float]:
+    """
+    두 장소 사이 이동 거리 추정치(km) — 직선거리에 도로 우회 계수를 곱한 값입니다.
+
+    좌표가 없으면 None입니다. 실제 길찾기 거리와는 다를 수 있어서, 코스 검증은
+    이 값을 '대략 이 정도 떨어져 있다'는 경고 근거로만 씁니다.
+    """
+    if not all([origin.latitude, origin.longitude, destination.latitude, destination.longitude]):
+        return None
 
     lat1, lon1 = math.radians(origin.latitude), math.radians(origin.longitude)
     lat2, lon2 = math.radians(destination.latitude), math.radians(destination.longitude)
     dlat, dlon = lat2 - lat1, lon2 - lon1
     a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-    distance_km = 6371.0 * 2 * math.asin(math.sqrt(a))
+    return 6371.0 * 2 * math.asin(math.sqrt(a)) * _ROAD_DETOUR_FACTOR
 
-    minutes = distance_km * _ROAD_DETOUR_FACTOR / _AVERAGE_SPEED_KMH * 60
-    return max(_MIN_TRAVEL_MIN, min(_MAX_TRAVEL_MIN, round(minutes)))
+
+def meal_window_at(arrival_time: str) -> Optional[str]:
+    """"HH:MM" 도착 시각이 걸치는 식사 시간대 이름(아침/점심/저녁). 아니면 None."""
+    try:
+        hour, minute = (int(part) for part in arrival_time.split(":"))
+    except (ValueError, AttributeError):
+        return None
+    current = hour * 60 + minute
+    return next((label for label, start, end in _MEAL_WINDOWS if start <= current <= end), None)
 
 
 def _format(minutes: int) -> str:
