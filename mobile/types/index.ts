@@ -89,6 +89,9 @@ export interface CourseStop {
   distance_from_prev_km?: number | null;
   // 서버 코스 검증 경고 (짧은 동선과 맞지 않는 거리, 식사 시간대의 음료 위주 가게 등).
   warnings?: string[];
+  // 서버가 방문일 기준으로 매긴 혼잡도 등급. 추천 이유의 '붐비는 곳' 같은 표현도
+  // 이 값으로 검사하므로, 화면 표시는 이 값을 우선합니다.
+  congestion_level?: CongestionForecast["congestion_level"] | null;
 }
 
 /** 코스를 그날/다음 날로 나눈 결과. */

@@ -34,7 +34,9 @@ from app.services.ai_service import (
     parse_query,
     recommend_places,
 )
+from app.services.course_validator import prefers_short_route, strip_meal_from_title
 from app.services.place_intent import VenueConstraint, venue_constraint_for_query
+from app.services.route_cluster import narrow_for_short_route, prefer_confirmed_meals
 from app.services.auth import get_optional_user_id
 from app.services.supabase_service import (
     CacheUnavailable,
@@ -72,6 +74,11 @@ trips_router = APIRouter(prefix="/api/trips", tags=["trips"])
 # 프롬프트도 커지지만 장소당 싣는 정보(이름·카테고리·편의시설 몇 필드·혼잡도)가
 # 작아서 이 정도는 감당됩니다.
 _CANDIDATE_LIMIT = 40
+# 짧은 동선 요청은 가까이 모인 곳만 남기므로 표본을 넉넉히 뽑습니다. 40곳을 지역
+# 전체에 흩어 뽑으면 서로 1.5km 안에 모인 곳이 두세 곳밖에 안 남습니다.
+_SHORT_ROUTE_CANDIDATE_LIMIT = 100
+# 식사 가능이 확인된 식당이 없을 때 missing_categories에 싣는 이름.
+_MEAL_UNCONFIRMED_LABEL = "식사 가능 음식점"
 
 
 def _required_place_gaps(
@@ -85,6 +92,7 @@ def _required_place_gaps(
 
 def _note_missing_meal(course: CourseResponse, meal_gap: bool) -> None:
     if meal_gap:
+        course.title = strip_meal_from_title(course.title)
         course.summary = (
             f"{course.summary.rstrip()} 요청하신 식사 장소가 이 코스에 포함되지 않았어요. "
             "식사 장소는 별도로 확인해 주세요."
@@ -108,11 +116,12 @@ async def _candidates_with_conditions(
     """
     parsed = await parse_query(query_text, sigungu_cd, region)
     venue_constraint = venue_constraint_for_query(query_text)
+    short_route = parsed.prefers_short_route or prefers_short_route(query_text)
 
     candidates = await tour_api_client.sample_accessible_candidates(
         region=region,
         user_type=user_type,
-        limit=_CANDIDATE_LIMIT,
+        limit=_SHORT_ROUTE_CANDIDATE_LIMIT if short_route else _CANDIDATE_LIMIT,
         sigungu_cd=parsed.sigungu_cds or None,
         purposes=[p.value for p in parsed.purposes],
         keywords=parsed.keywords,
@@ -148,11 +157,22 @@ async def recommend_course_places(request: PlaceRecommendationRequest):
     # 후보가 하나도 없는 건 오류가 아니라 '결과 없음'입니다. 예전에는 여기서
     # 422가 나가 앱에 "장소 추천 실패" 팝업이 떴는데, 앱에는 이미 후보 0개를 위한
     # 안내("조건에 맞는 장소를 찾지 못했어요")가 있어서 그쪽으로 보냅니다.
+    #
+    # 식사·짧은 동선 요청은 여기서 먼저 맞춥니다. 코스를 만든 뒤 경고만 붙이면
+    # 사용자가 무엇을 고르든 요청을 만족하는 코스가 나올 수 없기 때문입니다.
     constraint = venue_constraint_for_query(request.query_text)
+    meal_unconfirmed = False
     if constraint and constraint.meal_required:
         await tour_api_client.fill_extra_info([place for place in candidates if place.category == "음식점"])
         candidates = [place for place in candidates if constraint.accepts_food_place(place)]
+        candidates, meal_unconfirmed = prefer_confirmed_meals(candidates, constraint)
+    nearby_km: dict[str, float] = {}
+    if candidates and (parsed.prefers_short_route or prefers_short_route(request.query_text)):
+        selection = narrow_for_short_route(candidates, request.user_type.value, constraint)
+        candidates, nearby_km = selection.places[:_CANDIDATE_LIMIT], selection.nearby_km
     missing_categories = constraint.missing_requirements(candidates) if constraint else []
+    if meal_unconfirmed and "음식점" not in missing_categories:
+        missing_categories.append(_MEAL_UNCONFIRMED_LABEL)
     if not candidates:
         logger.info("조건에 맞는 후보가 없습니다: %r", request.query_text)
         return PlaceRecommendationResponse(
@@ -176,6 +196,13 @@ async def recommend_course_places(request: PlaceRecommendationRequest):
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+    # 짧은 동선 묶음 밖에서 덧붙인 곳은 떨어진 거리를 알리고 목록 뒤로 보냅니다.
+    for item in selected:
+        km = nearby_km.get(item.attraction.content_id)
+        if km is not None:
+            item.reason = f"{item.reason} 다른 후보들과 직선 약 {km:g}km 떨어져 있어요."
+    selected.sort(key=lambda item: item.attraction.content_id in nearby_km)
 
     return PlaceRecommendationResponse(
         query_text=request.query_text, candidates=selected, parsed=parsed,

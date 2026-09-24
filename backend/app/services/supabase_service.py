@@ -379,6 +379,7 @@ def row_to_course_response(row: dict) -> CourseResponse:
             generated_for=row["user_type"],
         ),
         row.get("query_text"),
+        sync_title=False,
     )
 
 

@@ -84,7 +84,7 @@ export function TimelineStopItem({
   const { attraction } = stop;
   const unfit = stop.fits_today === false;
   const showMoveButtons = !!(onMoveUp || onMoveDown);
-  const congestion = getCongestionDisplay(attraction, colors);
+  const congestion = getCongestionDisplay(attraction, colors, { level: stop.congestion_level });
   const place = extraInfo?.length ? { ...attraction, extra_info: extraInfo } : attraction;
   const extraInfoNode = renderExtraInfo(place, colors);
   const hasAccessibility = hasAccessibilityIcons(attraction.accessibility, userType);

@@ -11,6 +11,7 @@ Groq API(OpenAI 호환)를 이용한 자연어 질의 파싱 및 무장애 여�
 import asyncio
 import json
 import logging
+import re
 import uuid
 
 import httpx
@@ -33,7 +34,9 @@ from app.services.place_intent import (
     MEAL, NOT_MEAL, meal_status, query_without_excluded_venues, venue_constraint_for_query,
 )
 from app.services.schedule import arrange_for_meals, build_schedule, hours_payload, is_closed_on
-from app.services.course_validator import clean_reason, facility_reason, prefers_short_route, validate_course
+from app.services.course_validator import (
+    clean_reason, congestion_level, facility_reason, fits_congestion, prefers_short_route, validate_course,
+)
 from app.services.sigungu_codes import resolve_sigungu_codes, signgu_name
 
 settings = get_settings()
@@ -359,9 +362,9 @@ SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동반 가
 - 방문 시각은 당신이 정하지 않습니다. 시스템이 영업시간과 장소 사이 이동 시간을
   계산해서 붙이므로, 당신은 "어떤 순서로 도는지"만 정하면 됩니다.
 - 그래서 reason에 "오전 9시에" 같은 구체적인 시각을 쓰지 마세요. 시스템이 계산한
-  시각과 어긋납니다. 대신 "붐비기 전에 먼저" 같은 표현을 쓰세요.
-- reason에 "점심 후에", "식사하고 나서", "마지막으로"처럼 다른 장소와의 순서를
-  전제한 표현도 쓰지 마세요. 시스템이 식사 시간에 맞춰 순서를 옮길 수 있어서, 그런
+  시각과 어긋납니다.
+- reason에 "점심 후에", "식사하고 나서", "마지막으로", "앞쪽에 배치해", "먼저 들러"처럼
+  코스 안의 위치나 다른 장소와의 순서를 전제한 표현도 쓰지 마세요. 시스템이 식사 시간에 맞춰 순서를 옮길 수 있어서, 그런
   표현은 실제 순서와 어긋납니다. 그 장소 자체의 장점만 설명하세요.
 - congestion_rate가 66 이상이거나 혼잡도가 high인 곳은 사람이 덜 몰리도록 코스
   앞쪽(이른 시간)에 배치하세요.
@@ -378,6 +381,8 @@ SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동반 가
 - closed_weekdays가 방문일과 겹치는 곳은 그날 갈 수 없으므로, 그 사실을 reason에
   분명히 알려주세요 (순서를 바꿔도 해결되지 않습니다).
 - 혼잡도나 영업 정보가 없는 관광지는 그것을 근거로 들지 마세요 (추측 금지).
+- reason에서 "사람이 많이 몰리는 편"이라고 쓸 수 있는 곳은 congestion_rate가 66 이상이거나
+  방문일 혼잡도가 high인 곳뿐입니다. 앱은 그 아래를 "보통"이나 "여유"로 표시합니다.
 - conditions에 동행자(companion)나 목적(purposes)이 있으면 그에 맞게 순서를 정하고
   reason에도 반영하세요 (예: 가족 동반이면 이동을 짧게).
 - 사용자 유형에 맞는 이동/휴식 동선을 고려하세요 (예: 고령자/임산부는 휴게 공간이 있는 곳 우선).
@@ -475,9 +480,9 @@ ORDER_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동�
 - 방문 시각은 당신이 정하지 않습니다. 시스템이 영업시간과 장소 사이 이동 시간을
   계산해서 붙이므로, 당신은 "어떤 순서로 도는지"만 정하면 됩니다.
 - 그래서 reason에 "오전 9시에" 같은 구체적인 시각을 쓰지 마세요. 시스템이 계산한
-  시각과 어긋납니다. 대신 "붐비기 전에 먼저" 같은 표현을 쓰세요.
-- reason에 "점심 후에", "식사하고 나서", "마지막으로"처럼 다른 장소와의 순서를
-  전제한 표현도 쓰지 마세요. 시스템이 식사 시간에 맞춰 순서를 옮길 수 있어서, 그런
+  시각과 어긋납니다.
+- reason에 "점심 후에", "식사하고 나서", "마지막으로", "앞쪽에 배치해", "먼저 들러"처럼
+  코스 안의 위치나 다른 장소와의 순서를 전제한 표현도 쓰지 마세요. 시스템이 식사 시간에 맞춰 순서를 옮길 수 있어서, 그런
   표현은 실제 순서와 어긋납니다. 그 장소 자체의 장점만 설명하세요.
 - congestion_rate가 66 이상이거나 혼잡도가 high인 곳은 사람이 덜 몰리도록 코스
   앞쪽(이른 시간)에 배치하세요.
@@ -494,6 +499,8 @@ ORDER_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동�
 - closed_weekdays가 방문일과 겹치는 곳은 그날 갈 수 없으므로, 그 사실을 reason에
   분명히 알려주세요 (순서를 바꿔도 해결되지 않습니다).
 - 혼잡도나 영업 정보가 없는 관광지는 그것을 근거로 들지 마세요 (추측 금지).
+- reason에서 "사람이 많이 몰리는 편"이라고 쓸 수 있는 곳은 congestion_rate가 66 이상이거나
+  방문일 혼잡도가 high인 곳뿐입니다. 앱은 그 아래를 "보통"이나 "여유"로 표시합니다.
 - conditions에 동행자(companion)나 목적(purposes)이 있으면 그에 맞게 순서를 정하고
   reason에도 반영하세요.
 - 사용자 유형에 맞는 이동/휴식 동선을 고려해 순서를 정하세요.
@@ -639,7 +646,8 @@ def _mock_generate(
     stops = []
     for i, a in enumerate(ordered, start=1):
         if a.congestion_rate is not None and a.congestion_rate >= _CROWDED_RATE:
-            reason = f"{a.name}은(는) 평소 사람이 많이 몰리는 곳이라 먼저 들르도록 배치했습니다."
+            # 순서는 이 뒤에 식사 시간에 맞춰 옮겨질 수 있어서 위치("먼저")는 말하지 않습니다.
+            reason = f"{a.name}은(는) 평소 사람이 많이 몰리는 곳이에요."
         elif a.congestion_rate is not None:
             reason = f"{a.name}은(는) 혼잡도가 높지 않은 편이라 여유롭게 둘러보실 수 있습니다."
         else:
@@ -843,7 +851,7 @@ async def generate_course(
         summary=raw.get("summary") if isinstance(raw.get("summary"), str) else "선택한 장소로 구성한 코스입니다.",
         stops=_stops_from_raw(raw, candidates, request.preferred_date),
         generated_for=request.user_type,
-    ), request.query_text)
+    ), request.query_text, request.preferred_date)
 
 
 def _mock_recommend(
@@ -944,8 +952,12 @@ async def _groq_recommend(
 
 
 def _safe_recommendation_reason(reason: object, place: Attraction, request: PlaceRecommendationRequest) -> str:
-    """등록되지 않은 편의시설·경로 안전 단정·음료 가게의 식사 설명을 덜어냅니다."""
+    """등록되지 않은 편의시설·경로 안전 단정·음료 가게의 식사 설명, 화면의 혼잡도
+    표시와 어긋나는 '붐비는 곳' 같은 설명을 덜어냅니다."""
     reason = clean_reason(reason, place, user_type=request.user_type.value)
+    level = congestion_level(place, request.visit_date)
+    kept = [s for s in re.split(r"(?<=[.!?])\s+", reason) if s.strip() and fits_congestion(s, level)]
+    reason = " ".join(kept) if kept else clean_reason("", place, user_type=request.user_type.value)
     if is_closed_on(place, request.visit_date):
         return f"방문 예정일에 휴무로 표시된 장소예요. {reason}"
     return reason
@@ -1107,4 +1119,4 @@ async def generate_course_from_selection(
         summary=raw.get("summary") if isinstance(raw.get("summary"), str) else "선택한 장소로 구성한 코스입니다.",
         stops=_stops_from_raw(raw, selected_attractions, request.visit_date, include_all=True),
         generated_for=request.user_type,
-    ), request.query_text)
+    ), request.query_text, request.visit_date)

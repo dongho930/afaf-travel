@@ -218,7 +218,9 @@ export default function SelectPlacesScreen() {
           {unresolvedCategories.join("·")} 장소를 현재 여행지 자료에서 찾지 못했어요.
           {unresolvedCategories.every((category) => category === "음식점")
             ? " 선택한 장소로 코스를 만들 수 있지만 식사 장소는 포함되지 않아요."
-            : " 지역이나 조건을 바꿔 다시 요청해주세요."}
+            : unresolvedCategories.every((category) => category === "식사 가능 음식점")
+              ? " 식사 여부를 확인하지 못한 식당만 있어요. 방문 전 메뉴를 확인해 주세요."
+              : " 지역이나 조건을 바꿔 다시 요청해주세요."}
         </Text>
       )}
       {conditionChips.length > 0 && (
@@ -259,6 +261,7 @@ export default function SelectPlacesScreen() {
                 selected={selectedIds.has(item.attraction.content_id)}
                 onToggle={() => toggle(item.attraction.content_id)}
                 extraInfo={extraInfoMap[item.attraction.content_id]}
+                visitDate={visitDate}
               />
             )}
           />
@@ -332,6 +335,7 @@ function PlaceOptionCard({
   selected,
   onToggle,
   extraInfo,
+  visitDate,
 }: {
   candidate: PlaceCandidate;
   userType: UserType;
@@ -339,6 +343,8 @@ function PlaceOptionCard({
   onToggle: () => void;
   // 홈 화면 카드와 같은 형식의 부가 정보(이용시간/요금 등).
   extraInfo?: Attraction["extra_info"];
+  // 방문일 예보로 혼잡도를 보여줍니다 (서버가 추천 이유를 검사하는 기준과 같게).
+  visitDate?: string | null;
 }) {
   const router = useRouter();
   const { colors } = useTheme();
@@ -360,7 +366,7 @@ function PlaceOptionCard({
         subtitle={attraction.address}
         rating={attraction.avg_rating}
         reviewCount={attraction.review_count}
-        congestion={getCongestionDisplay(attraction, colors)}
+        congestion={getCongestionDisplay(attraction, colors, { visitDate })}
         topLeft={
           <View style={[styles.checkbox, selected && styles.checkboxSelected]}>
             {selected && <CheckIcon size={14} color="#FFFFFF" weight="bold" />}

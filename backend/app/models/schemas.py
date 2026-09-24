@@ -271,6 +271,9 @@ class CourseStop(BaseModel):
     # 코스 검증(course_validator)에서 나온 이 장소의 경고 — 요청과 어긋나는 이동
     # 거리, 식사 시간대의 음료 위주 가게, 확인되지 않은 필수 편의시설 등.
     warnings: list[str] = Field(default_factory=list)
+    # 앱에 표시할 혼잡도 등급(low/medium/high). 추천 이유의 '붐비는 곳' 같은 표현도
+    # 이 값으로 검사하므로, 화면 표시와 설명이 같은 기준을 씁니다. 정보가 없으면 None.
+    congestion_level: Optional[Literal["low", "medium", "high"]] = None
 
 
 class CourseResponse(BaseModel):
