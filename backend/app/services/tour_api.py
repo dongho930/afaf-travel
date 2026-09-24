@@ -165,7 +165,7 @@ _PURPOSE_CATEGORIES: dict[str, tuple[str, ...]] = {
     "휴식": ("관광지", "숙박"),
     "체험": ("레포츠",),
     "사진": ("관광지",),
-    "쇼핑": ("관광지",),
+    "쇼핑": ("쇼핑",),
 }
 
 # 조건에 맞는 곳을 후보의 몇 할까지 채울지. 나머지는 다른 카테고리에서 골고루
@@ -458,8 +458,10 @@ _CONTENT_TYPE_LABELS: dict[int, str] = {
     39: "음식점",
 }
 
-# 코스에 기본으로 섞어서 조회할 카테고리 (관광지 + 맛집 + 문화시설 + 레포츠 + 숙박)
+# 홈 목록의 카테고리 수는 페이지네이션 계산에도 사용합니다.
 _DEFAULT_CONTENT_TYPE_IDS: list[int] = [12, 39, 14, 28, 32]
+# 플래너와 이름 검색은 쇼핑 장소도 읽습니다. 목록 갱신 시에도 이 유형을 저장합니다.
+_CACHED_CONTENT_TYPE_IDS: list[int] = [*_DEFAULT_CONTENT_TYPE_IDS, 38]
 
 # 목록 캐시를 '나이 상관없이' 읽을 때 쓰는 값 (사실상 무제한).
 #
@@ -2264,7 +2266,7 @@ class TourApiClient:
 
     async def _region_attractions(self, ldong_regn_cd: str = "41") -> list[Attraction]:
         """
-        저장된 목록 캐시에서 그 지역 관광지 전체(카테고리 5개 합집합)를 읽습니다.
+        저장된 목록 캐시에서 그 지역 관광지 전체(쇼핑 포함)를 읽습니다.
 
         이름 검색과 '근처 가볼 만한 곳'이 공유합니다. 둘 다 예전에는 공공데이터
         API(searchKeyword2 / locationBasedList2)를 사용자 요청 중에 불렀는데,
@@ -2283,7 +2285,7 @@ class TourApiClient:
                     None,
                     "관광지 목록",
                 )
-                for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
+                for content_type_id in _CACHED_CONTENT_TYPE_IDS
             )
         )
         merged: list[Attraction] = []
@@ -3116,7 +3118,7 @@ class TourApiClient:
             results_per_type = await asyncio.gather(
                 *(
                     self._fetch_by_content_type(client, ldong_regn_cd, content_type_id, per_type_rows)
-                    for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
+                    for content_type_id in _CACHED_CONTENT_TYPE_IDS
                 )
             )
             candidates: list[Attraction] = []
@@ -3170,7 +3172,7 @@ class TourApiClient:
             results_per_type = await asyncio.gather(
                 *(
                     self._fetch_by_content_type(client, ldong_regn_cd, content_type_id, 2000)
-                    for content_type_id in _DEFAULT_CONTENT_TYPE_IDS
+                    for content_type_id in _CACHED_CONTENT_TYPE_IDS
                 )
             )
             candidates: list[Attraction] = []

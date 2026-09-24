@@ -255,6 +255,15 @@ async def create_course(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
+    constraint = venue_constraint_for_query(request.query_text)
+    if constraint:
+        missing = constraint.missing_requirements([stop.attraction for stop in course.stops])
+        if missing:
+            raise HTTPException(
+                status_code=422,
+                detail=f"요청하신 {'·'.join(missing)} 장소가 없어 코스를 완성할 수 없어요.",
+            )
+
     await save_course(course, query_text=request.query_text, region=request.region, user_id=user_id)
     return course
 

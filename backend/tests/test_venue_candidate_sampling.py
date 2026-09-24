@@ -177,3 +177,53 @@ def test_당일치기_여러_필수_장소가_드물어도_각각_남긴다(monk
         venue_constraint=venue_constraint_for_query("과천 당일치기 과학관과 점심 식당"),
     ))
     assert {place.content_id for place in result} >= {"lunch", "science"}
+
+
+def test_같은_문화시설_카테고리에서도_과학관과_미술관을_각각_남긴다(monkeypatch):
+    client = tour_api.tour_api_client
+    monkeypatch.setattr(client, "use_mock", False)
+
+    async def fake_region(_region):
+        return [
+            _place(str(i), "문화시설").model_copy(update={"name": f"현대미술관 {i}"})
+            for i in range(80)
+        ] + [_place("science", "문화시설").model_copy(update={"name": "국립과천과학관"})]
+
+    async def fake_accessibility(ids):
+        return {content_id: {"wheelchair_accessibility_count": 1} for content_id in ids}
+
+    async def no_display_info(_candidates):
+        return None
+
+    monkeypatch.setattr(client, "_region_attractions", fake_region)
+    monkeypatch.setattr(tour_api, "get_cached_place_accessibility", fake_accessibility)
+    monkeypatch.setattr(client, "_fill_display_info", no_display_info)
+
+    result = asyncio.run(client.sample_accessible_candidates(
+        region="경기도", user_type="wheelchair", limit=12,
+        venue_constraint=venue_constraint_for_query("과학관과 미술관"),
+    ))
+    assert len(result) == 12
+    assert "science" in {place.content_id for place in result}
+    assert any("미술관" in place.name for place in result)
+
+
+def test_플래너_목록_캐시는_쇼핑을_읽고_기본_목록의_카테고리수는_유지한다(monkeypatch):
+    client = tour_api.tour_api_client
+    read_types = []
+
+    async def cached_list(_region, content_type_id, max_age_hours=24.0):
+        read_types.append(content_type_id)
+        if content_type_id == 38:
+            return [{
+                "content_id": "market", "name": "과천시장", "address": "경기도 과천시",
+                "category": "쇼핑", "latitude": 37.43, "longitude": 127.0,
+            }]
+        return []
+
+    monkeypatch.setattr(tour_api, "get_cached_attraction_list", cached_list)
+    result = asyncio.run(client._region_attractions("shopping-test-region"))
+
+    assert 38 not in tour_api._DEFAULT_CONTENT_TYPE_IDS
+    assert 38 in read_types
+    assert [place.content_id for place in result] == ["market"]

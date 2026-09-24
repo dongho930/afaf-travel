@@ -66,13 +66,28 @@ _VENUE_RULES: tuple[tuple[tuple[str, ...], str, tuple[str, ...] | None], ...] = 
     (("과학관",), "문화시설", ("과학관", "과학센터", "과학체험관")),
     (("미술관", "갤러리"), "문화시설", ("미술관", "미술", "갤러리", "아트센터")),
     (("박물관",), "문화시설", ("박물관",)),
-    (("문화시설", "전시관", "전시", "공연장", "극장"), "문화시설", None),
+    (("문화시설",), "문화시설", None),
+    (("전시관", "전시"), "문화시설", ("전시", "미술관", "박물관", "갤러리")),
+    (("공연장",), "문화시설", ("공연장", "아트홀", "예술회관", "시민회관", "문화회관")),
+    (("극장", "영화관", "시네마"), "문화시설", ("극장", "시네마", "영화관")),
     (("호텔",), "숙박", ("호텔", "hotel")),
     (("펜션",), "숙박", ("펜션",)),
-    (("숙박", "숙소", "리조트", "모텔", "게스트하우스", "캠핑장"), "숙박", None),
+    (("숙박", "숙소"), "숙박", None),
+    (("리조트",), "숙박", ("리조트", "resort")),
+    (("모텔",), "숙박", ("모텔", "motel")),
+    (("게스트하우스",), "숙박", ("게스트하우스", "게하", "guesthouse")),
+    (("캠핑장", "캠핑"), "숙박", ("캠핑", "야영장", "오토캠핑")),
     (("자전거",), "레포츠", ("자전거", "바이크", "사이클")),
     (("서핑",), "레포츠", ("서핑", "서프")),
-    (("레포츠", "스포츠", "카약", "래프팅", "승마", "스키장"), "레포츠", None),
+    (("레포츠", "스포츠"), "레포츠", None),
+    (("카약",), "레포츠", ("카약", "kayak")),
+    (("래프팅",), "레포츠", ("래프팅", "rafting")),
+    (("승마",), "레포츠", ("승마", "승마장")),
+    (("스키장",), "레포츠", ("스키장", "스키리조트")),
+    (("쇼핑", "기념품"), "쇼핑", None),
+    (("시장",), "쇼핑", ("시장", "마켓")),
+    (("아울렛", "아웃렛"), "쇼핑", ("아울렛", "아웃렛", "프리미엄")),
+    (("백화점",), "쇼핑", ("백화점",)),
     (("공원",), "관광지", ("공원",)),
     (("관광지", "명소"), "관광지", None),
     (("산책로", "산책", "둘레길", "숲길"), "관광지",
@@ -82,21 +97,51 @@ _VENUE_RULES: tuple[tuple[tuple[str, ...], str, tuple[str, ...] | None], ...] = 
     (("호수",), "관광지", ("호수",)),
     (("해변",), "관광지", ("해변", "해수욕장")),
     (("전망대",), "관광지", ("전망대",)),
-    (("사찰", "성곽", "행궁", "유적", "테마파크", "동물원", "놀이공원"),
-     "관광지", None),
+    (("사찰",), "관광지", ("사찰", "사원", "청계사")),
+    (("성곽",), "관광지", ("성곽", "산성", "성벽")),
+    (("행궁",), "관광지", ("행궁",)),
+    (("유적",), "관광지", ("유적", "유적지")),
+    (("테마파크", "놀이공원"), "관광지", ("테마파크", "놀이공원")),
+    (("동물원",), "관광지", ("동물원", "서울대공원")),
     (("등산", "등산로"), "관광지", ("등산로", "등산", "산")),
     (("등산", "등산로"), "레포츠", ("등산", "산악")),
 )
+
+
+def query_without_excluded_venues(query_text: str) -> str:
+    """'미술관 말고 카페'의 미술관을 목적 파서가 문화예술로 읽지 않게 합니다."""
+    text = query_text or ""
+    terms = sorted({term for words, _, _ in _VENUE_RULES for term in words}, key=len, reverse=True)
+    for term in terms:
+        text = re.sub(
+            re.escape(term) + r"\s*(?:에서|의|을|를|은|는)?\s*(?:말고|빼고|제외)",
+            " ", text,
+        )
+    return text
+
+
+def _active_term_spans(text: str, all_terms: set[str]) -> dict[str, list[tuple[int, int]]]:
+    """'놀이공원' 안의 '공원'처럼 더 긴 장소명이 차지한 글자는 다시 읽지 않습니다."""
+    occupied: set[int] = set()
+    active: dict[str, list[tuple[int, int]]] = {}
+    for term in sorted(all_terms, key=len, reverse=True):
+        for match in re.finditer(re.escape(term), text):
+            span = set(range(match.start(), match.end()))
+            if occupied.isdisjoint(span):
+                active.setdefault(term, []).append((match.start(), match.end()))
+                occupied.update(span)
+    return active
 
 
 def venue_constraint_for_query(query_text: str) -> VenueConstraint | None:
     """분명하게 언급한 장소만 제한합니다. 넓은 목적은 AI가 판단하게 둡니다."""
     text = re.sub(r"\s+", "", query_text or "")
     all_terms = {term for terms, _, _ in _VENUE_RULES for term in terms}
+    active_spans = _active_term_spans(text, all_terms)
     negated: list[tuple[str, tuple[str, ...] | None]] = []
     for terms, category, name_terms in _VENUE_RULES:
-        if any(re.search(re.escape(term) + r"(?:에서|의|을|를|은|는)?(?:말고|빼고|제외)", text)
-               for term in terms):
+        if any(re.match(r"(?:에서|의|을|를|은|는)?(?:말고|빼고|제외)", text[end:])
+               for term in terms for _, end in active_spans.get(term, [])):
             negated.append((category, name_terms))
     for term in sorted(all_terms, key=len, reverse=True):
         # '공원 근처 식당'의 공원과 '미술관 말고 카페'의 미술관은 방문지가 아닙니다.
@@ -108,10 +153,11 @@ def venue_constraint_for_query(query_text: str) -> VenueConstraint | None:
 
     by_category: dict[str, tuple[str, ...] | None] = {}
     by_label: dict[str, list[tuple[str, tuple[str, ...] | None]]] = {}
+    active_terms = set(_active_term_spans(text, all_terms))
     for terms, category, name_terms in _VENUE_RULES:
-        if not any(term in text for term in terms):
+        if not any(term in active_terms for term in terms):
             continue
-        label = {"맛집": "음식점", "사찰": "관광지", "등산": "등산로"}.get(terms[0], terms[0])
+        label = {"맛집": "음식점", "등산": "등산로"}.get(terms[0], terms[0])
         by_label.setdefault(label, []).append((category, name_terms))
         if category not in by_category:
             by_category[category] = name_terms
@@ -132,7 +178,12 @@ def venue_constraint_for_query(query_text: str) -> VenueConstraint | None:
     # 하루 코스처럼 전체 일정을 요청했다면 언급한 식당은 필수지만, 관광지와
     # 문화시설도 함께 추천할 수 있어야 합니다.
     broad_trip = any(term in text for term in (
-        "당일치기", "하루코스", "하루여행", "하루일정", "여행코스", "여행일정",
-        "일일코스", "관광코스", "나들이코스", "1박2일", "2박3일",
+        "당일치기", "당일여행", "하루코스", "하루여행", "하루일정", "여행코스", "여행일정",
+        "일일코스", "관광코스", "나들이코스", "데이트코스", "가족코스",
+        "코스와", "코스랑", "여행", "나들이", "데이트", "구경", "1박2일", "2박3일",
     ))
-    return VenueConstraint(by_category, broad_trip, requirements, tuple(negated)) if by_category else None
+    if not by_category and not negated:
+        return None
+    return VenueConstraint(
+        by_category, broad_trip or not by_category, requirements, tuple(negated)
+    )

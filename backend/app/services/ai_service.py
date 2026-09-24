@@ -29,7 +29,7 @@ from app.models.schemas import (
     TravelPurpose,
 )
 from app.services.memory_cache import TTLCache
-from app.services.place_intent import venue_constraint_for_query
+from app.services.place_intent import query_without_excluded_venues, venue_constraint_for_query
 from app.services.schedule import arrange_for_meals, build_schedule, hours_payload, is_closed_on
 from app.services.sigungu_codes import resolve_sigungu_codes, signgu_name
 
@@ -121,14 +121,14 @@ _COMPANION_KEYWORDS: dict[CompanionType, tuple[str, ...]] = {
 _PURPOSE_KEYWORDS: dict[TravelPurpose, tuple[str, ...]] = {
     TravelPurpose.REST: ("휴식", "쉬어", "쉴", "힐링", "여유", "조용", "산책"),
     TravelPurpose.NATURE: ("자연", "공원", "숲", "바다", "호수", "계곡", "등산", "정원", "꽃", "수목원"),
-    TravelPurpose.CULTURE: ("문화", "예술", "미술관", "박물관", "과학관", "전시", "공연", "갤러리"),
+    TravelPurpose.CULTURE: ("문화", "예술", "미술관", "박물관", "과학관", "전시", "공연", "갤러리", "극장", "영화관", "시네마"),
     TravelPurpose.HISTORY: ("역사", "유적", "고궁", "행궁", "성곽", "문화재", "사찰"),
     TravelPurpose.FOOD: (
         "맛집", "먹거리", "식당", "카페", "음식", "디저트", "빵집", "식도락", "먹방",
         "식사", "점심", "저녁", "아침", "밥집", "브런치", "먹을",
     ),
     TravelPurpose.ACTIVITY: ("체험", "액티비티", "놀거리", "놀이", "테마파크", "만들기"),
-    TravelPurpose.SHOPPING: ("쇼핑", "시장", "아울렛", "백화점", "기념품"),
+    TravelPurpose.SHOPPING: ("쇼핑", "시장", "아울렛", "아웃렛", "백화점", "기념품"),
     TravelPurpose.PHOTO: ("사진", "인생샷", "포토", "야경", "뷰가"),
 }
 
@@ -281,9 +281,21 @@ async def parse_query(
                 logger.warning("질의 해석 실패(%s) — 규칙 기반으로 대체합니다.", e)
 
         # 명시적인 장소 표현은 AI가 목적을 누락해도 조건에 반영합니다.
-        lexical_purposes = _rule_parse(text).purposes
+        lexical_purposes = _rule_parse(query_without_excluded_venues(text)).purposes
         parsed.purposes = list(dict.fromkeys([*lexical_purposes, *parsed.purposes]))[:3]
         constraint = venue_constraint_for_query(text)
+        if constraint and constraint.exclusions:
+            excluded_categories = {category for category, _ in constraint.exclusions}
+            purpose_categories = {
+                TravelPurpose.FOOD: {"음식점"},
+                TravelPurpose.CULTURE: {"문화시설"},
+                TravelPurpose.NATURE: {"관광지"},
+                TravelPurpose.ACTIVITY: {"레포츠"},
+                TravelPurpose.HISTORY: {"문화시설", "관광지"},
+            }
+            parsed.purposes = [purpose for purpose in parsed.purposes
+                               if purpose in lexical_purposes
+                               or not purpose_categories.get(purpose, set()) & excluded_categories]
         if constraint and not constraint.allow_other_categories and constraint.categories == {"음식점"} and lexical_purposes == [TravelPurpose.FOOD]:
             parsed.purposes = [TravelPurpose.FOOD]
 
@@ -390,9 +402,10 @@ RECOMMEND_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 
 
 규칙:
 - 반드시 후보 목록에 있는 관광지만 사용하세요.
-- 질의와 사용자 유형에 맞는 장소만 최대 12개까지 선택하세요. 장소 유형이나
-  세부 유형(예: 과학관, 미술관, 공원)이 명시됐으면 그 장소만 고르세요.
-  여러 유형을 요청한 경우에만 해당 유형을 섞으세요.
+- 질의와 사용자 유형에 맞는 장소만 최대 12개까지 선택하세요. required_venue_types의
+  각 장소 유형은 후보가 있다면 최소 한 곳씩 포함하세요.
+- allow_other_categories가 false이면 요청한 장소 유형만 고르세요.
+  true이면 당일 여행에 어울리는 다른 유형도 함께 고르세요.
   적합한 후보가 적으면 적게 반환하고, 없으면 빈 목록을 반환하세요. 개수를 채우기
   위해 무관한 장소를 고르지 마세요.
 - conditions에 목적(purposes)이나 동행자(companion)가 있으면 그에 맞는 장소를
@@ -681,7 +694,10 @@ async def _groq_call(system_prompt: str, user_prompt: str, timeout: float = 20.0
             resp.raise_for_status()
             data = resp.json()
             text = data["choices"][0]["message"]["content"]
-            return json.loads(text)
+            parsed_response = json.loads(text)
+            if not isinstance(parsed_response, dict):
+                raise ValueError("JSON 객체가 아닙니다")
+            return parsed_response
         except (httpx.HTTPStatusError, KeyError, IndexError, TypeError, ValueError) as e:
             # JSON이 아닌 답, choices가 빈 답 등 — 재시도해도 같은 프롬프트라
             # 결과가 달라지리라는 보장이 없어 바로 실패로 알립니다.
@@ -697,7 +713,8 @@ async def _groq_generate(
 
 
 def _stops_from_raw(
-    raw: dict, candidates: list[Attraction], visit_date: str | None = None
+    raw: dict, candidates: list[Attraction], visit_date: str | None = None,
+    include_all: bool = False,
 ) -> list[CourseStop]:
     """
     AI(또는 대체 로직)가 정한 순서를 실제 코스로 만듭니다.
@@ -713,11 +730,27 @@ def _stops_from_raw(
     """
     by_id = {a.content_id: a for a in candidates}
     ordered: list[tuple[int, Attraction, str]] = []
-    for index, s in enumerate(raw["stops"]):
-        attraction = by_id.get(s.get("content_id"))
-        if not attraction:
+    seen_ids: set[str] = set()
+    raw_stops = raw.get("stops") if isinstance(raw.get("stops"), list) else []
+    for index, s in enumerate(raw_stops):
+        if not isinstance(s, dict):
             continue
-        ordered.append((s.get("order", index + 1), attraction, s.get("reason", "")))
+        content_id = s.get("content_id")
+        if not isinstance(content_id, str):
+            continue
+        attraction = by_id.get(content_id)
+        if not attraction or attraction.content_id in seen_ids:
+            continue
+        seen_ids.add(attraction.content_id)
+        order = s.get("order", index + 1)
+        reason = s.get("reason")
+        ordered.append((order if isinstance(order, int) else index + 1, attraction,
+                        reason if isinstance(reason, str) and reason.strip() else "선택하신 장소예요."))
+    if include_all:
+        for attraction in candidates:
+            if attraction.content_id not in seen_ids:
+                ordered.append((len(raw_stops) + len(ordered) + 1, attraction, "선택하신 장소예요."))
+                seen_ids.add(attraction.content_id)
     ordered.sort(key=lambda item: item[0])
 
     arrangement = arrange_for_meals([attraction for _, attraction, _ in ordered])
@@ -759,8 +792,8 @@ async def generate_course(
 
     return CourseResponse(
         course_id=str(uuid.uuid4()),
-        title=raw["title"],
-        summary=raw["summary"],
+        title=raw.get("title") if isinstance(raw.get("title"), str) else "무장애 여행 코스",
+        summary=raw.get("summary") if isinstance(raw.get("summary"), str) else "선택한 장소로 구성한 코스입니다.",
         stops=_stops_from_raw(raw, candidates, request.preferred_date),
         generated_for=request.user_type,
     )
@@ -819,10 +852,16 @@ async def _groq_recommend(
     candidates: list[Attraction],
     parsed: ParsedQuery | None = None,
 ) -> list[dict]:
+    venue_constraint = venue_constraint_for_query(request.query_text)
     payload = {
         "query_text": request.query_text,
         "user_type": request.user_type,
         "region": request.region,
+        "required_venue_types": (
+            [requirement.label for requirement in venue_constraint.requirements]
+            if venue_constraint else []
+        ),
+        "allow_other_categories": venue_constraint is None or venue_constraint.allow_other_categories,
         "candidates": [
             {
                 "content_id": a.content_id,
@@ -1023,8 +1062,8 @@ async def generate_course_from_selection(
 
     return CourseResponse(
         course_id=str(uuid.uuid4()),
-        title=raw["title"],
-        summary=raw["summary"],
-        stops=_stops_from_raw(raw, selected_attractions, request.visit_date),
+        title=raw.get("title") if isinstance(raw.get("title"), str) else "무장애 여행 코스",
+        summary=raw.get("summary") if isinstance(raw.get("summary"), str) else "선택한 장소로 구성한 코스입니다.",
+        stops=_stops_from_raw(raw, selected_attractions, request.visit_date, include_all=True),
         generated_for=request.user_type,
     )
