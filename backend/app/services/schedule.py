@@ -377,7 +377,7 @@ def arrange_for_meals(attractions: list[Attraction]) -> list[int]:
     meal_slots = meal_slot_indices(attractions)
     assigned = _assign_meals({i: hours[i] for i in meal_slots})
     if not assigned:
-        return list(range(len(attractions)))
+        return _separate_food(attractions, list(range(len(attractions))))
 
     # 시간대가 이른 음식점부터 자리를 찾습니다. 나머지는 원래 순서 그대로 대기합니다.
     pending = sorted(assigned, key=lambda i: assigned[i][1])
@@ -443,7 +443,65 @@ def arrange_for_meals(attractions: list[Attraction]) -> list[int]:
         order.append(chosen)
         previous = chosen
 
-    return order
+    return _separate_food(attractions, order)
+
+
+def _food_adjacency(attractions: list[Attraction], order: list[int]) -> int:
+    """음식점(카페 포함)이 바로 이어지는 곳의 수."""
+    return sum(
+        1 for a, b in zip(order, order[1:])
+        if attractions[a].category == "음식점" and attractions[b].category == "음식점"
+    )
+
+
+def _order_quality(attractions: list[Attraction], order: list[int]) -> tuple[int, int]:
+    """(식사 시간대에 도착하는 음식점 수, 그날 방문 가능한 장소 수) — 클수록 좋습니다."""
+    placed = [attractions[i] for i in order]
+    schedules = build_schedule(placed)
+    meal_hits = sum(
+        1 for place, scheduled in zip(placed, schedules)
+        if place.category == "음식점" and meal_window_at(scheduled.arrival_time) is not None
+    )
+    return meal_hits, sum(1 for scheduled in schedules if scheduled.fits_today)
+
+
+def _separate_food(attractions: list[Attraction], order: list[int]) -> list[int]:
+    """
+    음식점이 연달아 오지 않도록, 음식점이 아닌 장소 하나를 그 사이로 옮깁니다.
+
+    식사 배치(arrange_for_meals)는 관광지가 다 떨어지면 남은 음식점을 바로 뒤에
+    붙여서 '10:40 식당 → 11:50 또 식당' 같은 코스가 나왔습니다. 옮겨 보는 후보마다
+    시각을 다시 계산해, 식사 시간대에 도착하는 음식점 수와 그날 방문 가능한 장소
+    수가 줄지 않는 경우에만 받아들입니다. 사이에 둘 장소가 없으면(음식점만 고른
+    경우 등) 그대로 두고, 코스 검증이 경고를 붙입니다.
+    """
+    current = list(order)
+    while True:
+        adjacency = _food_adjacency(attractions, current)
+        if adjacency == 0:
+            return current
+        base_meals, base_fits = _order_quality(attractions, current)
+
+        best: Optional[tuple[tuple[int, int, int, int], list[int]]] = None
+        for from_pos, index in enumerate(current):
+            if attractions[index].category == "음식점":
+                continue
+            rest = current[:from_pos] + current[from_pos + 1:]
+            for to_pos in range(len(rest) + 1):
+                candidate = rest[:to_pos] + [index] + rest[to_pos:]
+                candidate_adjacency = _food_adjacency(attractions, candidate)
+                if candidate_adjacency >= adjacency:
+                    continue
+                meals, fits = _order_quality(attractions, candidate)
+                if meals < base_meals or fits < base_fits:
+                    continue
+                # 연속을 더 많이 풀고, 식사·방문 가능 수가 많고, 덜 움직이는 쪽을 고릅니다.
+                key = (-candidate_adjacency, meals, fits, -abs(from_pos - to_pos))
+                if best is None or key > best[0]:
+                    best = (key, candidate)
+        if best is None:
+            return current
+        current = best[1]
 
 
 def _closed_note(hours: PlaceHours, day: Optional[datetime.date]) -> Optional[str]:

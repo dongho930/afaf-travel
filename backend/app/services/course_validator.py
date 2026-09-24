@@ -69,6 +69,12 @@ _NO_ACCESSIBLE_RESTROOM_WARNING = "코스 안에 장애인 화장실이 확인�
 _DRINK_PLACE_AT_MEAL_WARNING = (
     "음료·디저트 위주 가게로 보여 {meal} 식사는 어려울 수 있어요. 식사할 곳을 따로 확인해 주세요."
 )
+_CONSECUTIVE_FOOD_WARNING = (
+    "앞 장소도 음식점이라 식당이 연달아 있어요. 한 곳은 빼거나 다른 날로 나누는 걸 고려해 주세요."
+)
+_MEAL_OUTSIDE_WINDOW_WARNING = (
+    "식사 시간대(점심 11~14시, 저녁 17~20시)가 아닐 때 도착해요. 가볍게 들르거나 순서를 바꿔 보세요."
+)
 _UNKNOWN_MEAL_AT_MEAL_WARNING = (
     "등록된 정보로는 {meal} 식사가 가능한지 확인하지 못했어요. 방문 전 메뉴를 확인해 주세요."
 )
@@ -93,14 +99,20 @@ _FACILITY_WORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 # 장소 '안'의 시설이 아니라 장소 '사이' 경로가 무장애라고 단정하는 표현.
 # 데이터에는 장소 사이 경로 정보가 없어서 이런 문장은 근거 없는 안전 보장이 됩니다.
-_ROUTE_CLAIM_PATTERNS = tuple(re.compile(p) for p in (
-    r"(휠체어|유모차)[로도]?\s*(편하게|편리하게|쉽게|무리\s*없이|안전하게|수월하게)?\s*(이동|오가|다니|이어|갈\s*수)",
-    r"무장애\s*(경로|동선|길|이동|코스로\s*이어)",
-    r"(이동|동선|경로|길|구간)[이가은는도]?\s*(편하|편리|쉬|안전|평탄|완만|무난|수월)",
-    r"(안전하게|편하게|편안하게|수월하게|무리\s*없이)\s*(이동|오가|다니|걸)",
-    r"(이동하기|다니기|오가기|걷기)\s*(편한|편리한|좋은|수월한|쉬운|편해)",
-    r"(턱|계단)\s*없이\s*(이동|이어|연결)",
-))
+#
+# 두 가지가 함께 있을 때만 경로 단정으로 봅니다: (1) 장소 '사이'를 가리키는 말과
+# (2) 편하다·안전하다는 주장. 예전에는 (2)만 봐서 "휠체어 이동에 필요한 경사로가
+# 있어요"처럼 장소 안의 편의시설 설명까지 지워져 기본 문구만 남았습니다.
+_BETWEEN_PLACES = re.compile(
+    r"다음\s*(장소|코스|목적지|방문지|일정)|장소\s*(사이|간|끼리)|목적지\s*(사이|간|까지)|"
+    r"이동\s*경로|코스\s*(전체|전반|내내)|전\s*구간|구간|오가는|오가기|오가며|오갈|"
+    r"이어지는\s*(길|동선|경로)|(으로|로)\s*이어져|까지\s*(가는|가기|이동|걸어|이어|연결)|"
+    r"보도|횡단보도|주변\s*(길|도로)"
+)
+_EASE_CLAIM = re.compile(
+    r"편하|편리|편안|쉽|쉬운|쉬워|안전|무리\s*없|수월|평탄|완만|무난|무장애|턱\s*(이\s*)?없|"
+    r"계단\s*(이\s*)?없|문제\s*없|어려움\s*없|막힘\s*없"
+)
 # 이런 말이 함께 있으면 장소 안의 동선 이야기로 보고 경로 단정으로 치지 않습니다.
 _INSIDE_PLACE_HINTS = ("내부", "안에서", "안에", "시설 내", "관내", "경내", "실내")
 
@@ -136,10 +148,51 @@ def _has_any(features: AccessibilityFeatures, fields: Iterable[str]) -> bool:
 def _is_route_claim(sentence: str) -> bool:
     if any(hint in sentence for hint in _INSIDE_PLACE_HINTS):
         return False
-    return any(pattern.search(sentence) for pattern in _ROUTE_CLAIM_PATTERNS)
+    return bool(_BETWEEN_PLACES.search(sentence) and _EASE_CLAIM.search(sentence))
 
 
-def clean_reason(reason: object, place: Attraction, fallback: str | None = None) -> str:
+# 설명이 모두 걸러졌을 때 대신 쓸, 사용자 유형별로 보여줄 편의시설과 이름.
+_FACILITY_LABELS: dict[str, str] = {
+    "has_ramp": "경사로", "has_elevator": "엘리베이터", "has_accessible_restroom": "장애인 화장실",
+    "has_wheelchair_rental": "휠체어 대여", "has_stroller_accessible_path": "유모차 이동 동선",
+    "has_rest_area": "휴게 공간", "has_lactation_room": "수유실", "has_baby_spare_chair": "유아용 보조의자",
+    "has_braille_block": "점자블록", "has_audio_guide": "오디오 가이드", "has_guide_human": "안내요원",
+    "has_help_dog": "보조견 동반", "has_big_print": "큰 활자 안내물", "has_guide_system": "유도 안내설비",
+    "has_braille_promotion": "점자 안내물", "has_sign_guide": "수어 안내", "has_video_guide": "자막 영상 안내",
+    "has_hearing_room": "청각장애인용 객실",
+}
+_FACILITY_ORDER_BY_USER_TYPE: dict[str, tuple[str, ...]] = {
+    "wheelchair": ("has_ramp", "has_elevator", "has_accessible_restroom", "has_wheelchair_rental"),
+    "stroller": ("has_stroller_accessible_path", "has_lactation_room", "has_baby_spare_chair", "has_elevator"),
+    "senior": ("has_rest_area", "has_ramp", "has_elevator", "has_accessible_restroom"),
+    "pregnant": ("has_rest_area", "has_lactation_room", "has_elevator", "has_accessible_restroom"),
+    "visual": ("has_braille_block", "has_audio_guide", "has_guide_human", "has_help_dog",
+               "has_guide_system", "has_big_print", "has_braille_promotion"),
+    "hearing": ("has_sign_guide", "has_video_guide", "has_hearing_room"),
+    "general": ("has_ramp", "has_elevator", "has_accessible_restroom", "has_stroller_accessible_path",
+                "has_rest_area"),
+}
+
+
+def _copula(word: str) -> str:
+    """'관광지예요' / '음식점이에요' — 받침 유무로 서술격 조사를 고릅니다."""
+    last = word[-1] if word else ""
+    has_final = "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 != 0
+    return f"{word}이에요" if has_final else f"{word}예요"
+
+
+def facility_reason(place: Attraction, user_type: str) -> str | None:
+    """등록된 편의시설로 만든 설명. 보여줄 시설이 없으면 None."""
+    order = _FACILITY_ORDER_BY_USER_TYPE.get(user_type, _FACILITY_ORDER_BY_USER_TYPE["general"])
+    labels = [_FACILITY_LABELS[f] for f in order if getattr(place.accessibility, f, False)][:3]
+    if not labels:
+        return None
+    return f"{'·'.join(labels)} 정보가 등록된 {_copula(place.category or '장소')}."
+
+
+def clean_reason(
+    reason: object, place: Attraction, fallback: str | None = None, user_type: str = "general"
+) -> str:
     """
     추천 이유에서 확인할 수 없는 주장이 담긴 문장만 덜어냅니다.
 
@@ -148,7 +201,7 @@ def clean_reason(reason: object, place: Attraction, fallback: str | None = None)
     - 식사할 수 없는 가게(음료·디저트 위주)를 식사 장소로 설명하는 문장
     - 필드명·원시값이 그대로 드러난 문장
 
-    남는 문장이 없으면 fallback(없으면 장소 유형에 맞는 기본 문구)을 씁니다.
+    남는 문장이 없으면 fallback을, 그것도 없으면 등록된 편의시설로 만든 설명을 씁니다.
     """
     features = place.accessibility
     status = meal_status(place) if place.category == "음식점" else MEAL
@@ -177,9 +230,12 @@ def clean_reason(reason: object, place: Attraction, fallback: str | None = None)
         return fallback
     if status == NOT_MEAL:
         return "음료나 디저트를 즐기며 쉬어 가기 좋은 곳이에요."
+    facilities = facility_reason(place, user_type)
+    if facilities:
+        return facilities
     if status == MEAL_UNKNOWN:
         return "요청하신 조건에 맞춰 고른 음식점이에요."
-    return f"요청하신 조건에 맞춰 고른 {place.category} 장소예요."
+    return f"요청하신 조건에 맞춰 고른 {_copula(place.category or '장소')}."
 
 
 def _meal_stop_indices(stops: list[CourseStop]) -> dict[str, list[int]]:
@@ -214,13 +270,18 @@ def _fits_order(sentence: str, index: int, total: int, meal_indices: dict[str, l
 
 
 def _order_consistent_reason(
-    reason: str, place: Attraction, index: int, total: int, meal_indices: dict[str, list[int]]
+    reason: str, place: Attraction, index: int, total: int, meal_indices: dict[str, list[int]],
+    user_type: str,
 ) -> str:
     kept = [
         sentence.strip() for sentence in _SENTENCE_SPLIT.split(reason)
         if sentence.strip() and _fits_order(sentence, index, total, meal_indices)
     ]
-    return " ".join(kept) if kept else clean_reason("", place)
+    return " ".join(kept) if kept else clean_reason("", place, user_type=user_type)
+
+
+def _is_food(stop: CourseStop) -> bool:
+    return stop.attraction.category == "음식점"
 
 
 def validate_course_stops(
@@ -254,17 +315,28 @@ def validate_course_stops(
         if place.category == "음식점":
             status = meal_status(place)
             meal = meal_window_at(stop.recommended_arrival_time)
-            if meal in ("점심", "저녁", "아침") and status == NOT_MEAL:
+            # 아침(07~09시)은 하루 시작(09:00)과 겹쳐서, 첫 장소로 들른 카페마다 '아침
+            # 식사는 어려워요'가 붙습니다. 코스는 아침을 식사 자리로 잡지 않으므로 뺍니다.
+            if meal in ("점심", "저녁") and status == NOT_MEAL:
                 warnings.append(_DRINK_PLACE_AT_MEAL_WARNING.format(meal=meal))
-            elif meal in ("점심", "저녁", "아침") and status == MEAL_UNKNOWN:
+            elif meal in ("점심", "저녁") and status == MEAL_UNKNOWN:
                 warnings.append(_UNKNOWN_MEAL_AT_MEAL_WARNING.format(meal=meal))
 
         if required and not _has_any(place.accessibility, required[0]):
             warnings.append(required[1])
 
+        if index > 0 and _is_food(stop) and _is_food(stops[index - 1]):
+            warnings.append(_CONSECUTIVE_FOOD_WARNING)
+        elif (
+            _is_food(stop) and meal_status(place) == MEAL
+            and meal_window_at(stop.recommended_arrival_time) is None
+        ):
+            warnings.append(_MEAL_OUTSIDE_WINDOW_WARNING)
+
         stop.warnings = warnings
         stop.reason = _order_consistent_reason(
-            clean_reason(stop.reason, place), place, index, len(stops), meal_indices
+            clean_reason(stop.reason, place, user_type=user_type),
+            place, index, len(stops), meal_indices, user_type,
         )
 
     course_warnings: list[str] = []
@@ -277,7 +349,43 @@ def validate_course_stops(
     return course_warnings
 
 
+# 요약에서 '짧은 동선'을 주장하는 문장. 경고와 함께 두면 서로 모순됩니다.
+_SHORT_ROUTE_CLAIM = re.compile(
+    r"짧은\s*동선|동선이\s*짧|동선을\s*짧|가까운\s*(곳|장소|거리)|가깝게|가까이\s*(모여|붙어|있)|"
+    r"이동(이|을|\s*거리가|\s*부담이)?\s*(적|짧|최소|줄)|멀지\s*않|한\s*동네|근거리"
+)
+# 검증이 요약 끝에 덧붙이는 안내. 다시 검증할 때(순서 변경·재조회) 지우고 새로 씁니다.
+# 라우터가 뒤에 붙이는 다른 안내(식사 장소 누락)는 건드리지 않도록 이 문구만 찾습니다.
+_SUMMARY_NOTE_PREFIX = "※ "
+_SUMMARY_NOTE = re.compile(
+    r"\s*※ (?:(?:일부 구간은 요청하신 짧은 동선보다 멀어요\(최대 직선 약 [\d.]+km\)\."
+    r"|식당이 연달아 배치된 구간이 있어요\.)\s*)+"
+)
+
+
+def _sync_summary(course: CourseResponse, short_route: bool, limit_km: float) -> None:
+    """경고와 요약이 어긋나지 않게 요약을 고칩니다."""
+    summary = _SUMMARY_NOTE.sub(" ", course.summary or "").strip()
+    notes: list[str] = []
+
+    far = [s.distance_from_prev_km for s in course.stops
+           if short_route and s.distance_from_prev_km is not None and s.distance_from_prev_km > limit_km]
+    if far:
+        kept = [sentence for sentence in _SENTENCE_SPLIT.split(summary)
+                if sentence.strip() and not _SHORT_ROUTE_CLAIM.search(sentence)]
+        summary = " ".join(kept).strip()
+        notes.append(f"일부 구간은 요청하신 짧은 동선보다 멀어요(최대 직선 약 {max(far):.1f}km).")
+    if any(_CONSECUTIVE_FOOD_WARNING in s.warnings for s in course.stops):
+        notes.append("식당이 연달아 배치된 구간이 있어요.")
+
+    if not summary:
+        summary = "선택하신 장소로 구성한 코스예요."
+    course.summary = f"{summary} {_SUMMARY_NOTE_PREFIX}{' '.join(notes)}" if notes else summary
+
+
 def validate_course(course: CourseResponse, query_text: str | None) -> CourseResponse:
     """CourseResponse 전체를 검증해 경고를 채웁니다 (course를 직접 고치고 그대로 돌려줍니다)."""
-    course.warnings = validate_course_stops(course.stops, course.generated_for.value, query_text)
+    user_type = course.generated_for.value
+    course.warnings = validate_course_stops(course.stops, user_type, query_text)
+    _sync_summary(course, prefers_short_route(query_text), short_route_limit_km(user_type))
     return course

@@ -33,7 +33,7 @@ from app.services.place_intent import (
     MEAL, NOT_MEAL, meal_status, query_without_excluded_venues, venue_constraint_for_query,
 )
 from app.services.schedule import arrange_for_meals, build_schedule, hours_payload, is_closed_on
-from app.services.course_validator import clean_reason, prefers_short_route, validate_course
+from app.services.course_validator import clean_reason, facility_reason, prefers_short_route, validate_course
 from app.services.sigungu_codes import resolve_sigungu_codes, signgu_name
 
 settings = get_settings()
@@ -373,6 +373,8 @@ SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동반 가
   몰아넣지 말고 서로 다른 식사 시간에 하나씩 배치하세요.
 - meal_candidate가 true가 아닌 음식점(false: 카페·음료 위주, "unknown": 식사 여부 미확인)은
   식사 장소로 설명하지 마세요. 식사 시간에는 meal_candidate가 true인 곳을 우선 두세요.
+- 음식점(카페 포함)을 연달아 배치하지 마세요. 음식점이 둘 이상이면 사이에 관광지나
+  문화시설을 두고, 두 번째 식당은 다른 끼니(저녁)나 식사 후 쉬어 가는 자리로 두세요.
 - closed_weekdays가 방문일과 겹치는 곳은 그날 갈 수 없으므로, 그 사실을 reason에
   분명히 알려주세요 (순서를 바꿔도 해결되지 않습니다).
 - 혼잡도나 영업 정보가 없는 관광지는 그것을 근거로 들지 마세요 (추측 금지).
@@ -487,6 +489,8 @@ ORDER_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동�
   몰아넣지 말고 서로 다른 식사 시간에 하나씩 배치하세요.
 - meal_candidate가 true가 아닌 음식점(false: 카페·음료 위주, "unknown": 식사 여부 미확인)은
   식사 장소로 설명하지 마세요. 식사 시간에는 meal_candidate가 true인 곳을 우선 두세요.
+- 음식점(카페 포함)을 연달아 배치하지 마세요. 음식점이 둘 이상이면 사이에 관광지나
+  문화시설을 두고, 두 번째 식당은 다른 끼니(저녁)나 식사 후 쉬어 가는 자리로 두세요.
 - closed_weekdays가 방문일과 겹치는 곳은 그날 갈 수 없으므로, 그 사실을 reason에
   분명히 알려주세요 (순서를 바꿔도 해결되지 않습니다).
 - 혼잡도나 영업 정보가 없는 관광지는 그것을 근거로 들지 마세요 (추측 금지).
@@ -639,7 +643,10 @@ def _mock_generate(
         elif a.congestion_rate is not None:
             reason = f"{a.name}은(는) 혼잡도가 높지 않은 편이라 여유롭게 둘러보실 수 있습니다."
         else:
-            reason = f"{a.name}은(는) 요청하신 접근성 조건에 맞는 장소입니다."
+            # AI 없이도 뻔한 문구 대신 실제 등록된 편의시설로 설명합니다.
+            reason = facility_reason(a, request.user_type.value) or (
+                f"{a.name}은(는) 요청하신 접근성 조건에 맞는 장소입니다."
+            )
         stops.append({"content_id": a.content_id, "order": i, "reason": reason})
 
     conditions = _conditions_payload(parsed)
@@ -938,7 +945,7 @@ async def _groq_recommend(
 
 def _safe_recommendation_reason(reason: object, place: Attraction, request: PlaceRecommendationRequest) -> str:
     """등록되지 않은 편의시설·경로 안전 단정·음료 가게의 식사 설명을 덜어냅니다."""
-    reason = clean_reason(reason, place, fallback=f"요청하신 여행 조건과 관련된 {place.category} 장소예요.")
+    reason = clean_reason(reason, place, user_type=request.user_type.value)
     if is_closed_on(place, request.visit_date):
         return f"방문 예정일에 휴무로 표시된 장소예요. {reason}"
     return reason

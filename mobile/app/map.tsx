@@ -41,6 +41,12 @@ const MODE_LABEL: Record<RouteMode, string> = {
   transit: "대중교통",
   car: "자동차",
 };
+// "대중교통을 / 자동차를 추천해요"처럼 목적격 조사까지 붙인 이름.
+const MODE_OBJECT: Record<RouteMode, string> = {
+  walk: "도보를",
+  transit: "대중교통을",
+  car: "자동차를",
+};
 const MODE_ICON: Record<RouteMode, Icon> = {
   walk: PersonSimpleWalkIcon,
   transit: BusIcon,
@@ -166,9 +172,12 @@ function legChoiceNote(
   if (!chosen || chosen.mode === "walk" || !walk || walk.info.distance_m == null) return null;
   const walkM = walk.info.distance_m;
   const notes: string[] = [];
+  // 경고가 아니라 '왜 이 수단을 골랐는지'에 대한 안내입니다. 짧은 동선 기준(코스
+  // 검증)과 도보 권장 거리는 서로 다른 기준이라, 경고처럼 쓰면 요약의 '짧은 동선'과
+  // 모순돼 보입니다.
   if (walkM > walkLimit) {
     notes.push(
-      `도보 경로가 ${formatDistance(walkM)}로 ${USER_TYPE_LABELS[userType]} 권장 도보 거리(${formatDistance(walkLimit)})를 넘어요`,
+      `${USER_TYPE_LABELS[userType]} 기준 도보 권장 거리(${formatDistance(walkLimit)})보다 멀어 ${MODE_OBJECT[chosen.mode]} 추천해요`,
     );
   }
   if (chosen.mode === "car" && chosen.info.distance_m != null && chosen.info.distance_m > walkM * 1.5) {
