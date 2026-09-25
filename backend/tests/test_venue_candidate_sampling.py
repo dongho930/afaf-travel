@@ -2,7 +2,16 @@ import asyncio
 
 from app.models.schemas import Attraction
 from app.services import tour_api
+from app.services.accessibility_criteria import PARSE_VERSION
 from app.services.place_intent import venue_constraint_for_query
+
+# 휠체어 목록 기준(accessibility_criteria): 접근로·출입통로 중 하나 + 장애인 화장실.
+WHEELCHAIR_ROW = {
+    "has_ramp": True,
+    "has_accessible_restroom": True,
+    "wheelchair_accessibility_count": 2,
+    "parse_version": PARSE_VERSION,
+}
 
 
 def _place(content_id: str, category: str) -> Attraction:
@@ -75,7 +84,7 @@ def test_접근_가능한_음식점이_드물어도_전체_음식점을_확인�
 
     async def fake_accessibility(ids):
         seen_ids.extend(ids)
-        return {"99": {"wheelchair_accessibility_count": 1}}
+        return {"99": dict(WHEELCHAIR_ROW)}
 
     async def no_fallback(**kwargs):
         return []
@@ -131,7 +140,7 @@ def test_당일치기_식사_요청은_음식점과_관광지를_함께_남긴�
         return [_place(str(i), "관광지") for i in range(80)] + [_place("lunch", "음식점")]
 
     async def fake_accessibility(ids):
-        return {content_id: {"wheelchair_accessibility_count": 1} for content_id in ids}
+        return {content_id: dict(WHEELCHAIR_ROW) for content_id in ids}
 
     async def no_display_info(_candidates):
         return None
@@ -163,7 +172,7 @@ def test_당일치기_여러_필수_장소가_드물어도_각각_남긴다(monk
         ]
 
     async def fake_accessibility(ids):
-        return {content_id: {"wheelchair_accessibility_count": 1} for content_id in ids}
+        return {content_id: dict(WHEELCHAIR_ROW) for content_id in ids}
 
     async def no_display_info(_candidates):
         return None
@@ -190,7 +199,7 @@ def test_같은_문화시설_카테고리에서도_과학관과_미술관을_각
         ] + [_place("science", "문화시설").model_copy(update={"name": "국립과천과학관"})]
 
     async def fake_accessibility(ids):
-        return {content_id: {"wheelchair_accessibility_count": 1} for content_id in ids}
+        return {content_id: dict(WHEELCHAIR_ROW) for content_id in ids}
 
     async def no_display_info(_candidates):
         return None

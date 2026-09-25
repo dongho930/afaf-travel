@@ -545,7 +545,7 @@ async def get_saved_course_detail(course_id: str, user_id: str) -> Optional[dict
 # 그 240KB를 매번 Supabase에서 내려받게 됩니다.
 _ACCESSIBILITY_COUNT_COLUMNS = (
     "region,wheelchair_count,senior_count,total_accessible_count,visual_count,"
-    "hearing_count,family_count,pregnant_count,total_candidates"
+    "hearing_count,family_count,pregnant_count,total_candidates,criteria_version"
 )
 
 
@@ -586,7 +586,7 @@ async def get_cached_accessibility_stats(region: str, columns: str = "*") -> Opt
 # 생깁니다. 아래 컬럼들은 있으면 저장하고, 없으면 빼고 다시 시도합니다 —
 # add_accessibility_stats_total_candidates.sql을 아직 안 돌린 환경에서도
 # 기존 숫자는 정상적으로 저장되도록 하기 위함입니다.
-_ACCESSIBILITY_STATS_OPTIONAL_COLUMNS = ("total_candidates",)
+_ACCESSIBILITY_STATS_OPTIONAL_COLUMNS = ("total_candidates", "criteria_version")
 
 
 async def save_accessibility_stats(region: str, data: dict) -> None:
@@ -647,6 +647,7 @@ async def save_accessibility_stats(region: str, data: dict) -> None:
 #     - has_wheelchair_rental (bool)
 #     - has_stroller_accessible_path (bool)
 #     - has_rest_area (bool)
+#     - (그 외 has_* 컬럼과 parse_version은 sql/add_accessibility_criteria_v2.sql 참고)
 #     - record_found (bool)   -- 무장애 정보 API에 이 장소의 레코드가 실제로 있었는지
 #     - fetched_at (timestamptz)
 

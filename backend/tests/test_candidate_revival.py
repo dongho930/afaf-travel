@@ -11,6 +11,7 @@ import asyncio
 import pytest
 
 import app.services.tour_api as tour_api
+from app.services.accessibility_criteria import PARSE_VERSION
 
 # 2026-09-06 실제 상태: 목록 캐시는 543건으로 줄었지만 편의시설 캐시에는 1247건이 남아 있었습니다.
 LIST_CACHE_IDS = [f"L{i}" for i in range(543)]
@@ -34,6 +35,7 @@ def _accessibility_row(content_id: str) -> dict:
         "family_accessibility_count": 0,
         "pregnant_accessibility_count": 3,
         "record_found": True,
+        "parse_version": PARSE_VERSION,
     }
 
 
