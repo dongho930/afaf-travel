@@ -80,6 +80,10 @@ class ParsedQuery(BaseModel):
     companion: CompanionType = CompanionType.UNSPECIFIED
     purposes: list[TravelPurpose] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list, description="지역·동행자·목적 외에 남는 핵심 표현 (예: '산책로')")
+    # AI가 정해진 목록(query_preferences.CONCEPT_LABELS / FACILITY_LABELS)에서 고른
+    # 장소 특성·편의시설. 단어 표로는 못 읽는 표현을 보태 후보 점수에 씁니다.
+    concepts: list[str] = Field(default_factory=list, description="장소 특성 (예: '호수·물가')")
+    facilities: list[str] = Field(default_factory=list, description="원하는 편의시설 (예: '수유실이 있는')")
     prefers_short_route: bool = Field(
         default=False, description="'짧은 동선', '이동 적게'처럼 장소 사이 이동을 줄여 달라고 했는지"
     )

@@ -452,6 +452,16 @@ def venue_constraint_for_query(query_text: str) -> VenueConstraint | None:
         "일일코스", "관광코스", "나들이코스", "데이트코스", "가족코스",
         "코스와", "코스랑", "여행", "나들이", "데이트", "구경", "1박2일", "2박3일",
     ))
+    # "도자기 체험하고 쌀밥 먹기"처럼 먹는 곳과 함께 음식이 아닌 활동을 말했다면,
+    # 식당은 반드시 넣되 다른 종류도 추천합니다. 예전엔 '먹기' 때문에 음식점만 남아
+    # 체험 장소가 통째로 빠졌습니다. (특성 표는 query_preferences에 있습니다.)
+    if set(by_category) == {"음식점"} and not broad_trip:
+        from app.services.query_preferences import CONCEPTS
+
+        broad_trip = any(
+            concept.trigger.search(query_text or "") for concept in CONCEPTS
+            if concept.label not in ("쇼핑 장소",)
+        )
     if not by_category and not negated:
         return None
     return VenueConstraint(

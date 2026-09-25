@@ -31,7 +31,7 @@ from app.models.schemas import (
 )
 from app.services import accessibility_criteria
 from app.services.memory_cache import TTLCache
-from app.services.query_preferences import extract_preferences, text_matches
+from app.services.query_preferences import CONCEPT_LABELS, FACILITY_LABELS, extract_preferences, text_matches
 from app.services.place_intent import (
     MEAL, NOT_MEAL, meal_status, query_without_excluded_venues, venue_constraint_for_query,
 )
@@ -77,11 +77,17 @@ PARSE_SYSTEM_PROMPT = """당신은 여행 질의에서 조건을 뽑아내는 �
 3. purposes: "휴식" / "자연" / "문화예술" / "역사" / "식도락" / "체험" / "쇼핑" / "사진"
    중에서 문장에 실제로 드러난 것만 최대 3개. 없으면 빈 배열.
 4. keywords: 위 세 가지로 표현되지 않는 핵심 표현 최대 5개 (예: "산책로", "실내").
+5. concepts: 사용자가 원하는 장소 특성. 반드시 아래 목록에 있는 이름만, 문장에서 분명히
+   원한 것만 최대 3개. 없으면 빈 배열. (예: "물멍하기 좋은 곳" → ["호수·물가"])
+   목록: {concepts}
+6. facilities: 사용자가 원하는 편의시설. 반드시 아래 목록에 있는 이름만. 없으면 빈 배열.
+   목록: {facilities}
 
 응답은 반드시 아래 JSON 스키마로만 출력하고, 다른 설명은 절대 포함하지 마세요.
 
-{"region": "수원", "companion": "가족", "purposes": ["식도락"], "keywords": ["산책로"]}
-"""
+{{"region": "수원", "companion": "가족", "purposes": ["식도락"], "keywords": ["산책로"],
+ "concepts": ["산책로"], "facilities": ["장애인 화장실이 있는"]}}
+""".format(concepts=", ".join(CONCEPT_LABELS), facilities=", ".join(FACILITY_LABELS))
 
 # 규칙 기반 대체 파서용 표. AI 키가 없거나 한도에 걸렸을 때도 최소한의 조건은
 # 뽑아냅니다. 너무 짧거나 흔한 말(예: '산', '강')은 엉뚱하게 걸리므로 뺐습니다.
@@ -223,12 +229,17 @@ async def _ai_parse(query_text: str) -> ParsedQuery:
             purposes.append(purpose)
 
     keywords = [str(k).strip() for k in (raw.get("keywords") or []) if str(k).strip()][:5]
+    # 목록에 없는 이름은 버립니다 (AI가 비슷한 말을 지어내도 점수에 쓰지 않음).
+    concepts = [c for c in dict.fromkeys(raw.get("concepts") or []) if c in CONCEPT_LABELS][:3]
+    facilities = [f for f in dict.fromkeys(raw.get("facilities") or []) if f in FACILITY_LABELS]
 
     return ParsedQuery(
         region_text=region_text,
         companion=companion,
         purposes=purposes[:3],
         keywords=keywords,
+        concepts=concepts,
+        facilities=facilities,
         parsed_by="ai",
     )
 
@@ -748,6 +759,11 @@ async def _groq_call(system_prompt: str, user_prompt: str, timeout: float = 20.0
             raise GroqRateLimitedError("Groq API 요청 한도(429) 초과")
         if resp.status_code >= 500:
             raise GroqUnavailableError(f"Groq API 서버 오류({resp.status_code})")
+        # JSON 강제 모드에서 모델이 형식이 깨진 답을 내면 Groq가 400(json_validate_failed)을
+        # 돌려줍니다. 같은 요청을 다시 보내면 대개 성공해서 한 번 더 시도합니다.
+        # (평가에서 39개 질의 중 1개가 이걸로 "AI가 응답하지 않아요"가 됐습니다.)
+        if resp.status_code == 400 and "json_validate_failed" in resp.text and attempt < max_retries:
+            continue
 
         try:
             resp.raise_for_status()
@@ -912,7 +928,10 @@ async def _groq_recommend(
     parsed: ParsedQuery | None = None,
 ) -> list[dict]:
     venue_constraint = venue_constraint_for_query(request.query_text)
-    prefs = extract_preferences(request.query_text, parsed.keywords if parsed else None)
+    prefs = extract_preferences(
+        request.query_text, parsed.keywords if parsed else None,
+        ai_labels=[*parsed.concepts, *parsed.facilities] if parsed else None,
+    )
     payload = {
         "query_text": request.query_text,
         "user_type": request.user_type,

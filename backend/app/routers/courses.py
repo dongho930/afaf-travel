@@ -129,6 +129,7 @@ async def _candidates_with_conditions(
         keywords=parsed.keywords,
         venue_constraint=venue_constraint,
         query_text=query_text,
+        ai_labels=[*parsed.concepts, *parsed.facilities],
     )
 
     return candidates, parsed
@@ -191,7 +192,9 @@ async def recommend_course_places(request: PlaceRecommendationRequest):
     # 고른 조건에 맞는 다른 곳을 추천하면서 무엇을 못 찾았는지 알려줍니다.
     # (앱은 missing_categories를 "○○ 장소를 찾지 못했어요"로 보여줍니다.)
     if candidates:
-        prefs = extract_preferences(request.query_text, parsed.keywords)
+        prefs = extract_preferences(
+            request.query_text, parsed.keywords, ai_labels=[*parsed.concepts, *parsed.facilities]
+        )
         missing_categories += [label for label in unmet_labels(candidates, prefs)
                                if label not in missing_categories]
     if not candidates:

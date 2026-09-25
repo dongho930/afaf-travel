@@ -366,3 +366,32 @@ def test_후보가_적으면_있는_만큼만_보여준다(monkeypatch):
     result = asyncio.run(ai_service.recommend_places(request, [_candidate("1"), _candidate("2")]))
 
     assert [item.attraction.content_id for item in result] == ["1", "2"]
+
+
+def test_JSON_검증_실패_400은_한_번_더_시도한다(monkeypatch):
+    import httpx
+
+    monkeypatch.setattr(ai_service.settings, "groq_api_key", "test-key")
+    responses = [
+        httpx.Response(400, text='{"error":{"code":"json_validate_failed"}}'),
+        httpx.Response(200, json={"choices": [{"message": {"content": '{"ok": true}'}}]}),
+    ]
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            response = responses.pop(0)
+            response.request = httpx.Request("POST", ai_service.GROQ_ENDPOINT)
+            return response
+
+    monkeypatch.setattr(ai_service.httpx, "AsyncClient", FakeClient)
+
+    assert asyncio.run(ai_service._groq_call("sys", "user")) == {"ok": True}

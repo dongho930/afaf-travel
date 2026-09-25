@@ -194,3 +194,65 @@ def test_소개문으로_맞는_곳이_있으면_못_찾았다고_하지_않는�
     prefs = extract_preferences("호수 근처")
 
     assert unmet_labels([_place("1", "평범한 관광지")], prefs) == []
+
+
+# ---- B단계: 분류코드·새 특성·AI가 고른 특성 ----
+
+def test_이름에_없어도_분류코드가_맞으면_특성으로_본다():
+    prefs = extract_preferences("역사 유적 둘러보기")
+    haenggung = _place("hg", "화성행궁").model_copy(update={"lcls_systm": "HS010100"})
+    assert text_matches(haenggung, prefs)[0] > 0
+
+
+@pytest.mark.parametrize("query, label, name, lcls, category", [
+    ("비 오는 날 갈 곳", "실내", "경기도어린이박물관", "VE070100", "문화시설"),
+    ("비 오는 날 갈 곳", "실내", "스타필드 하남", None, "쇼핑"),
+    ("동물 보러 가고 싶어", "동물", "아침고요가족동물원", "VE020300", "관광지"),
+    ("도자기 만들기 해보고 싶어", "공예 체험", "도예공방 들꽃마을", None, "관광지"),
+])
+def test_새_특성을_알아듣는다(query, label, name, lcls, category):
+    prefs = extract_preferences(query)
+    place = _place("x", name, category).model_copy(update={"lcls_systm": lcls})
+    assert label in {c.label for c in prefs.concepts}
+    assert label in text_matches(place, prefs)[1]
+
+
+def test_AI가_고른_특성은_점수에_쓰지만_못_찾았다는_안내는_하지_않는다():
+    prefs = extract_preferences("시원하게 멍때리기 좋은 곳", ai_labels=["호수·물가", "없는 특성"])
+    lake = _place("lk", "마장호수").model_copy(update={"lcls_systm": "NA020200"})
+
+    assert text_matches(lake, prefs)[0] > 0            # AI 해석으로 호수를 찾고
+    assert unmet_labels([_place("1", "평범한 곳")], prefs) == []  # 안내는 문장에 쓴 것만
+
+
+def test_먹는_곳과_다른_활동을_함께_말하면_음식점만_남기지_않는다():
+    from app.services.place_intent import venue_constraint_for_query
+
+    constraint = venue_constraint_for_query("도자기 체험하고 쌀밥 먹기")
+    assert constraint.allow_other_categories                 # 체험 장소도 추천
+    assert [r.label for r in constraint.requirements] == ["음식점"]  # 식당은 여전히 필수
+
+    only_food = venue_constraint_for_query("쌀밥 맛집 추천해줘")
+    assert not only_food.allow_other_categories              # 먹는 것만 말하면 음식점만
+
+
+def test_AI_해석에서_목록에_없는_특성은_버린다(monkeypatch):
+    from app.services import ai_service
+
+    async def fake_call(_system, _user, timeout=8.0):
+        return {"region": None, "companion": "미지정", "purposes": [], "keywords": [],
+                "concepts": ["호수·물가", "지어낸 특성"], "facilities": ["수유실이 있는", "아무거나"]}
+
+    monkeypatch.setattr(ai_service, "_groq_call", fake_call)
+    parsed = asyncio.run(ai_service._ai_parse("물멍하고 수유실"))
+
+    assert parsed.concepts == ["호수·물가"]
+    assert parsed.facilities == ["수유실이 있는"]
+
+
+def test_직접_쓴_조건이_AI가_더한_조건보다_점수가_높다():
+    prefs = extract_preferences("자연 속에서 쉬고 싶어", ai_labels=["호수·물가"])
+    forest = _place("f", "물맑음수목원").model_copy(update={"lcls_systm": "NA040700"})
+    island = _place("i", "자라섬").model_copy(update={"lcls_systm": "NA020500"})
+
+    assert text_matches(forest, prefs)[0] > text_matches(island, prefs)[0] > 0

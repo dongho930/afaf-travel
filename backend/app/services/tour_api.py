@@ -1634,6 +1634,7 @@ class TourApiClient:
         keywords: list[str] | None = None,
         venue_constraint: VenueConstraint | None = None,
         query_text: str = "",
+        ai_labels: list[str] | None = None,
     ) -> list[Attraction]:
         """
         AI 장소 추천(1단계)에 넘길 후보를 지역 전체에서 표본으로 뽑습니다.
@@ -1713,7 +1714,7 @@ class TourApiClient:
         wanted_categories: set[str] = set()
         for purpose in purposes or []:
             wanted_categories.update(_PURPOSE_CATEGORIES.get(str(purpose), ()))
-        prefs = extract_preferences(query_text, keywords, wanted_categories)
+        prefs = extract_preferences(query_text, keywords, wanted_categories, ai_labels)
         if prefs.concepts:
             # 이름에 특성이 드러나지 않는 곳도 소개문으로 찾습니다 (DB 캐시, 하루 메모리 보관).
             await load_overview_tags([a.content_id for a in eligible])
