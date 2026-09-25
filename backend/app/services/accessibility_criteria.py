@@ -284,8 +284,8 @@ def _applicable(item: Item, place_category: str, present: bool) -> bool:
     return place_category not in item.exclude
 
 
-def _groups_met(features: AccessibilityFeatures, groups: tuple[tuple[str, ...], ...]) -> bool:
-    return all(any(getattr(features, f, False) for f in group) for group in groups)
+def _groups_met(have: set[str], groups: tuple[tuple[str, ...], ...]) -> bool:
+    return all(any(f in have for f in group) for group in groups)
 
 
 def evaluate(features: AccessibilityFeatures, category: str, place_category: str = "") -> Evaluation:
@@ -297,7 +297,10 @@ def evaluate(features: AccessibilityFeatures, category: str, place_category: str
     have = [f for f in applicable if getattr(features, f, False)]
     total = max(len(applicable), 1)
     score = round(len(have) / total * 100)
-    core_met = bool(crit.core) and _groups_met(features, crit.core)
+    # 핵심 항목·목록 조건도 '이 장소 종류에서 세는 항목'만 봅니다. 예전엔 원래 값을 봐서,
+    # 엘리베이터를 세지 않는 음식점이 엘리베이터 덕분에 핵심 조건을 채워 2/5인데 '많음'이 됐습니다.
+    have_set = set(have)
+    core_met = bool(crit.core) and _groups_met(have_set, crit.core)
 
     if core_met or (score >= 80 and not crit.core_required_for_high):
         tier = "high"
@@ -311,7 +314,7 @@ def evaluate(features: AccessibilityFeatures, category: str, place_category: str
         total=total,
         score=score,
         tier=tier,
-        qualifies=_groups_met(features, crit.entry),
+        qualifies=_groups_met(have_set, crit.entry),
     )
 
 

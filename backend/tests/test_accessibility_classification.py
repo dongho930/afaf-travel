@@ -120,6 +120,18 @@ def test_장소_종류에_맞지_않는_항목은_분모에서_뺀다():
     assert evaluate(features, "hearing", "숙박").total == 4
 
 
+def test_세지_않는_항목으로는_핵심_조건을_채우지_않는다():
+    # 2026-09-25 운영: 엘리베이터를 세지 않는 음식점이 엘리베이터 덕분에 2/5 '많음'이 됐습니다.
+    features = AccessibilityFeatures(
+        has_lactation_room=True, has_accessible_restroom=True, has_elevator=True
+    )
+    ev = evaluate(features, "pregnant", "음식점")
+    assert ev.total == 5
+    assert ev.tier != "high"
+    # 엘리베이터를 세는 문화시설에서는 핵심 조건을 채웁니다.
+    assert evaluate(features, "pregnant", "문화시설").tier == "high"
+
+
 def test_시각장애는_핵심_항목을_갖추면_많음():
     core = AccessibilityFeatures(has_braille_block=True, has_braille_promotion=True)
     assert evaluate(core, "visual", "문화시설").tier == "high"
