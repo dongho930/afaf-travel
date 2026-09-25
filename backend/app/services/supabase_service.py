@@ -915,6 +915,30 @@ async def get_cached_overviews(content_ids: list[str]) -> dict[str, str]:
     return found
 
 
+async def get_cached_overview_texts(content_ids: list[str]) -> dict[str, str]:
+    """
+    소개문만 {content_id: overview}로 돌려줍니다 (다른 컬럼은 읽지 않음).
+
+    AI 플래너가 문장 조건(예: 호수, 산책로)을 소개문에서도 찾을 때 씁니다. 결과는
+    query_preferences가 특성 표시로 바꿔 메모리에 들고 있으므로 자주 부르지 않습니다.
+    """
+    if _client is None or not content_ids:
+        return {}
+    found: dict[str, str] = {}
+    try:
+        for i in range(0, len(content_ids), 500):
+            chunk = content_ids[i : i + 500]
+            result = await _execute(
+                _client.table(_OVERVIEW_TABLE).select("content_id,overview").in_("content_id", chunk)
+            )
+            for row in result.data or []:
+                found[row["content_id"]] = row.get("overview") or ""
+    except Exception as e:
+        print(f"[supabase] 관광지 소개문 캐시 조회 실패: {e}")
+        raise CacheUnavailable(str(e)) from e
+    return found
+
+
 async def get_cached_attraction_basic(content_id: str) -> dict | None:
     """
     상세 페이지용: 캐시된 기본정보(이름/주소/좌표/이미지/카테고리/소개문) 한 건을

@@ -35,7 +35,7 @@ from app.models.schemas import AccessibilityFeatures, Attraction, CongestionFore
 from app.services.memory_cache import TTLCache
 from app.services.place_intent import VenueConstraint
 from app.services.place_popularity_service import read_place_popularity
-from app.services.query_preferences import extract_preferences, grade_rank, text_matches
+from app.services.query_preferences import extract_preferences, grade_rank, load_overview_tags, text_matches
 from app.services.review_service import get_average_ratings
 from app.services.sigungu_codes import (
     area_code_for_signgu,
@@ -1699,6 +1699,9 @@ class TourApiClient:
         for purpose in purposes or []:
             wanted_categories.update(_PURPOSE_CATEGORIES.get(str(purpose), ()))
         prefs = extract_preferences(query_text, keywords, wanted_categories)
+        if prefs.concepts:
+            # 이름에 특성이 드러나지 않는 곳도 소개문으로 찾습니다 (DB 캐시, 하루 메모리 보관).
+            await load_overview_tags([a.content_id for a in eligible])
         scored = [
             (text_matches(a, prefs)[0], grade_rank(a, user_type), random.random(), a)
             for a in eligible

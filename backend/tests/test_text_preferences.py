@@ -115,3 +115,82 @@ def test_문장_조건에_맞는_곳이_없으면_무엇을_못_찾았는지_알
 @pytest.mark.parametrize("query", ["맛있는 거 먹고 싶어", "좋은 곳 추천해줘"])
 def test_특성이_없는_문장은_안내할_것도_없다(query):
     assert unmet_labels([_place("1", "평범한 관광지")], extract_preferences(query)) == []
+
+
+# ---- 소개문 ----
+
+@pytest.fixture
+def overviews(monkeypatch):
+    """소개문 캐시를 흉내 냅니다. 메모리에 든 특성 표시는 테스트마다 비웁니다."""
+    from app.services import query_preferences
+
+    texts: dict[str, str] = {}
+    calls: list[list[str]] = []
+
+    async def fake_texts(ids):
+        calls.append(list(ids))
+        return {i: texts[i] for i in ids if i in texts}
+
+    monkeypatch.setattr(query_preferences, "get_cached_overview_texts", fake_texts)
+    query_preferences._OVERVIEW_TAGS.clear()
+    yield texts, calls
+    query_preferences._OVERVIEW_TAGS.clear()
+
+
+def test_이름에_없어도_소개문에_있으면_찾는다(monkeypatch, overviews):
+    texts, _ = overviews
+    places = [_place(str(i), f"평범한 관광지{i}") for i in range(8)] + [_place("hidden", "평범한 관광지 hidden")]
+    texts["hidden"] = "넓은 호수를 따라 걷는 길이 잘 정비되어 있다."
+    rows = {p.content_id: WHEELCHAIR_LOW for p in places}
+
+    result = _run(monkeypatch, places, rows, "호수 보러 가고 싶어", limit=3)
+
+    assert result[0].content_id == "hidden"
+
+
+def test_이름에_맞는_곳이_소개문에만_맞는_곳보다_앞이다(monkeypatch, overviews):
+    texts, _ = overviews
+    places = [_place("named", "광교호수공원"), _place("hidden", "평범한 관광지")]
+    texts["hidden"] = "호수가 보이는 전망이 좋다."
+    rows = {p.content_id: WHEELCHAIR_LOW for p in places}
+
+    result = _run(monkeypatch, places, rows, "호수 보러 가고 싶어", limit=2)
+
+    assert [a.content_id for a in result] == ["named", "hidden"]
+
+
+def test_소개문의_짧은_말은_엉뚱하게_잡지_않는다():
+    from app.services.query_preferences import _tags_from_overview
+
+    assert "역사 유적" not in _tags_from_overview("무엇이 있을지 궁금해지는 곳")
+    assert "쇼핑 장소" not in _tags_from_overview("주말이면 사람이 몰려 붐빈다")
+    assert "역사 유적" in _tags_from_overview("조선 왕릉과 유적이 남아 있다")
+
+
+def test_소개문은_한_번만_읽는다(monkeypatch, overviews):
+    _, calls = overviews
+    places = [_place(str(i), f"평범한 관광지{i}") for i in range(3)]
+    rows = {p.content_id: WHEELCHAIR_LOW for p in places}
+
+    _run(monkeypatch, places, rows, "호수 보러 가고 싶어")
+    _run(monkeypatch, places, rows, "산책하고 싶어")
+
+    assert len(calls) == 1  # 두 번째 요청은 메모리의 특성 표시를 씁니다
+
+
+def test_특성_표현이_없으면_소개문을_읽지_않는다(monkeypatch, overviews):
+    _, calls = overviews
+    places = [_place("1", "평범한 관광지")]
+
+    _run(monkeypatch, places, {"1": WHEELCHAIR_LOW}, "엘리베이터 있는 곳")
+
+    assert calls == []
+
+
+def test_소개문으로_맞는_곳이_있으면_못_찾았다고_하지_않는다(overviews):
+    from app.services.query_preferences import _OVERVIEW_TAGS, _tags_from_overview
+
+    _OVERVIEW_TAGS["1"] = (0.0, _tags_from_overview("호수 옆 산책길"))
+    prefs = extract_preferences("호수 근처")
+
+    assert unmet_labels([_place("1", "평범한 관광지")], prefs) == []
