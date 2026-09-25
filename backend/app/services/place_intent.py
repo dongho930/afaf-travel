@@ -44,6 +44,37 @@ _MENU_ITEM_SEPARATOR = re.compile(r"[,/·|\n]+")
 _MENU_WORD = re.compile(r"[가-힣a-z]+")
 
 
+# 이름 조건을 분류코드로도 인정합니다. '유적'을 요청했는데 이름에 '유적'이 없는
+# 수원화성·화성행궁(분류: 역사유적 HS01)이 빠져 결과가 0곳이 되던 문제 때문입니다.
+# 관광공사 신분류(lclsSystm)는 경기도 관광지·문화시설·레포츠 전부에 채워져 있습니다.
+_TERM_LCLS_PREFIXES: dict[str, tuple[str, ...]] = {
+    "유적": ("HS01",), "유적지": ("HS01",),
+    "행궁": ("HS0101",), "성곽": ("HS0102", "HS0103"), "산성": ("HS0102",), "성벽": ("HS0102",),
+    "사찰": ("HS0301",), "사원": ("HS0301",),
+    "공원": ("VE03", "NA0402", "NA0405"),
+    "산책로": ("NA0501", "NA0405", "NA0407", "VE03"), "둘레길": ("NA0501",), "숲길": ("NA0501", "NA0406"),
+    "수목원": ("NA0407",), "계곡": ("NA0104",), "호수": ("NA0202",),
+    "해변": ("NA0209",), "해수욕장": ("NA0209",), "전망대": ("VE0102",),
+    "테마파크": ("VE0201", "VE0202"), "놀이공원": ("VE0201", "VE0202"), "동물원": ("VE0203",),
+    "박물관": ("VE0701",), "미술관": ("VE0706",), "미술": ("VE0706",), "갤러리": ("VE0706",),
+    "과학관": ("VE0705",), "과학센터": ("VE0705",), "과학체험관": ("VE0705",),
+    "전시": ("VE0701", "VE0702", "VE0703", "VE0706"),
+    "공연장": ("VE0601",), "아트홀": ("VE0601",), "예술회관": ("VE0601",), "시민회관": ("VE0601",),
+    "문화회관": ("VE0601",),
+    "캠핑": ("AC05",), "야영장": ("AC05",), "오토캠핑": ("AC05",),
+    "산": ("NA0101",), "등산로": ("NA0101",),
+}
+
+
+def _matches_venue_term(place: Attraction, term: str) -> bool:
+    """이름에 그 말이 있거나, 관광공사 분류코드가 그 종류이면 맞습니다."""
+    if _matches_name_term(place.name or "", term):
+        return True
+    code = place.lcls_systm or ""
+    prefixes = _TERM_LCLS_PREFIXES.get(term.replace(" ", ""), ())
+    return bool(code and prefixes and code.startswith(prefixes))
+
+
 def _matches_name_term(name: str, term: str) -> bool:
     normalized_name = name.replace(" ", "").lower()
     normalized_term = term.replace(" ", "").lower()
@@ -163,7 +194,7 @@ class VenueRequirement:
             return False
         return any(
             place.category == category and (
-                terms is None or any(_matches_name_term(place.name or "", term) for term in terms)
+                terms is None or any(_matches_venue_term(place, term) for term in terms)
             )
             for category, terms in self.options
         )
@@ -210,7 +241,7 @@ class VenueConstraint:
         terms = self.name_terms_by_category[place.category]
         if terms is None:
             return True
-        return any(_matches_name_term(place.name or "", term) for term in terms)
+        return any(_matches_venue_term(place, term) for term in terms)
 
     def _requirement_assignment(self, places: list[Attraction]) -> dict[int, int]:
         # 한 장소가 '식당과 카페', '관광지와 박물관'을 동시에 채운 것으로
