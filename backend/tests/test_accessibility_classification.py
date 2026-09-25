@@ -133,8 +133,11 @@ def test_세지_않는_항목으로는_핵심_조건을_채우지_않는다():
 
 
 def test_시각장애는_핵심_항목을_갖추면_많음():
-    core = AccessibilityFeatures(has_braille_block=True, has_braille_promotion=True)
+    core = AccessibilityFeatures(has_braille_block=True, has_braille_promotion=True, has_help_dog=True)
     assert evaluate(core, "visual", "문화시설").tier == "high"
+    # 핵심 두 가지만으로는 '많음 · 7개 중 2개'가 되지 않습니다.
+    only_core = AccessibilityFeatures(has_braille_block=True, has_braille_promotion=True)
+    assert evaluate(only_core, "visual", "문화시설").tier == "mid"
     assert evaluate(AccessibilityFeatures(has_braille_block=True, has_help_dog=True), "visual", "관광지").tier == "mid"
 
 

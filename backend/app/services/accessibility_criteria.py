@@ -166,6 +166,8 @@ class Criteria:
     core: tuple[tuple[str, ...], ...] = ()
     # True면 core를 못 채운 곳은 점수가 높아도 '보통'까지만
     core_required_for_high: bool = False
+    # core를 채워도 '많음'이 되려면 갖춰야 하는 최소 항목 수 (None이면 제한 없음)
+    high_min_have: int | None = None
     # '보통' 최소 항목 수. 항목이 많은 유형은 절반(50점)을 넘기기 어려워서, 두 개만
     # 갖춰도 '적음'으로 떨어지지 않게 합니다. None이면 점수 50 기준.
     mid_min_have: int | None = None
@@ -199,6 +201,8 @@ CRITERIA: dict[str, Criteria] = {
             ("has_braille_promotion", "has_audio_guide", "has_guide_human", "has_big_print"),
         ),
         core_required_for_high=True,
+        # 두 가지만으로 '많음 · 7개 중 2개'가 되면 어색해서 3개 이상일 때만 '많음'.
+        high_min_have=3,
         mid_min_have=2,
     ),
     "hearing": Criteria(
@@ -300,7 +304,11 @@ def evaluate(features: AccessibilityFeatures, category: str, place_category: str
     # 핵심 항목·목록 조건도 '이 장소 종류에서 세는 항목'만 봅니다. 예전엔 원래 값을 봐서,
     # 엘리베이터를 세지 않는 음식점이 엘리베이터 덕분에 핵심 조건을 채워 2/5인데 '많음'이 됐습니다.
     have_set = set(have)
-    core_met = bool(crit.core) and _groups_met(have_set, crit.core)
+    core_met = (
+        bool(crit.core)
+        and _groups_met(have_set, crit.core)
+        and len(have) >= (crit.high_min_have or 0)
+    )
 
     if core_met or (score >= 80 and not crit.core_required_for_high):
         tier = "high"
