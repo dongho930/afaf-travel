@@ -110,7 +110,7 @@ const FEATURE_TOTAL: Record<CategoryKey, number> = {
   hearing_count: 3,
   senior_count: 4,
   family_count: 3,
-  pregnant_count: 3,
+  pregnant_count: 5,
 };
 
 /**
@@ -583,10 +583,8 @@ export default function AccessibilityScreen() {
             (예: 휠체어는 50 다음이 67이라 60~66점이 존재하지 않음). 숫자 대신
             무슨 뜻인지를 한 줄로 설명합니다. */}
         <Text style={styles.legendNote}>
-          {selectedCategory === "senior_count" || selectedCategory === "pregnant_count"
-            ? "확인된 이동 편의정보를 보여줍니다. 휴식 공간이나 실제 이동 가능 여부는 이 자료만으로 확인할 수 없어요. "
-            : "등록된 관련 편의정보를 보여줍니다. 실제 이용 가능 여부는 장소에 확인해 주세요. "}
-          등급 옆 숫자는 {FEATURE_TOTAL[selectedCategory]}개 항목 중 정보가 등록된 개수입니다.
+          아래 목록은 모두 이 유형의 편의시설을 갖춘 곳입니다. 등급 옆 숫자는 이 유형의 전체 항목
+          {` ${FEATURE_TOTAL[selectedCategory]}개`} 중 몇 개를 갖췄는지를 뜻합니다.
         </Text>
 
         <FadeInView key={`places-title-${selectedCategory}`} duration={200} translateY={6}>

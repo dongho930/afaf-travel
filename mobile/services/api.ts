@@ -31,7 +31,6 @@ import {
 } from "../types";
 
 const API_BASE_URL: string =
-  process.env.EXPO_PUBLIC_API_BASE_URL ??
   (Constants.expoConfig?.extra?.apiBaseUrl as string | undefined) ?? "http://localhost:8000";
 
 // 서버가 느리거나 네트워크가 끊겼을 때 화면이 영원히 로딩 상태로 남지 않도록

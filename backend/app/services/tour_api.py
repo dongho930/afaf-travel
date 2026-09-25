@@ -132,17 +132,6 @@ def _region_token_sets(sigungu_cd: int | list[int] | None) -> list[list[str]]:
     return [name.split() for name in (signgu_name(code) for code in codes) if name]
 
 
-def _has_facility_description(value: object) -> bool:
-    """시설 설명이 비어 있거나 명시적으로 부재·이용 불가라면 시설로 세지 않습니다."""
-    if not isinstance(value, str) or not value.strip():
-        return False
-    normalized = re.sub(r"\s+", "", value).lower()
-    return not any(word in normalized for word in (
-        "없음", "없다", "없습니다", "않음", "않습니다", "미설치", "미운영",
-        "이용불가", "대여불가", "사용불가", "불가능", "불가", "제공안함", "미제공",
-    ))
-
-
 def _matches_user_type(a: Attraction, user_type: str) -> bool:
     """
     그 사용자 유형에게 필요한 편의시설이 있는 곳인지. (일반 유형은 전부 통과)
@@ -1148,7 +1137,7 @@ class TourApiClient:
                 d = items[0]
 
                 def has_text(key: str) -> bool:
-                    return _has_facility_description(d.get(key))
+                    return bool((d.get(key) or "").strip())
 
                 # 활용매뉴얼(v4.3) [무장애여행 조회] 오퍼레이션 명세 기준 필드.
                 # 각 카테고리의 '기타상세'(자유서술 텍스트) 항목은 점수 계산에서
@@ -3241,9 +3230,10 @@ class TourApiClient:
         그래서 이 함수는 매 요청마다 부르지 않고, 캐시(accessibility_stats 테이블)에
         저장해두고 필요할 때만(수동 새로고침) 다시 계산하는 용도로 씁니다.
 
-        모든 유형은 관광공사 편의시설 데이터를 사용합니다. 카드의 수치는 해당
-        유형에 관련된 정보가 몇 항목 등록됐는지를 나타내며, 실제 이용 가능성의
-        보증은 아닙니다.
+        휠체어/고령자/유모차는 실제 편의시설 데이터(AccessibilityFeatures)로 계산하고,
+        시각/청각장애는 관련 데이터를 제공하는 API가 없어 표시용 목업 숫자를 씁니다.
+        관광지별 접근성 점수는 6개 편의시설 항목 중 몇 개를 만족하는지로 계산합니다
+        (예: 6개 중 5개 충족 → 83점).
         """
         debug_info: dict = {}
 
@@ -3447,50 +3437,40 @@ class TourApiClient:
         # 실제 그 유형과 무관한 점수가 나오는 문제가 있었습니다. 각 항목 개수는
         # '기타상세'(자유서술 텍스트)를 제외한 정형화된 편의시설 개수 기준입니다.
         def wheelchair_score(a: Attraction) -> int:
-            feats = a.accessibility
-            checks = [feats.has_parking, feats.has_ramp, feats.has_wheelchair_rental,
-                      feats.has_exit, feats.has_elevator, feats.has_accessible_restroom]
-            return round(sum(bool(value) for value in checks) / len(checks) * 100)
+            # 주차/접근로/휠체어대여/출입통로/엘리베이터/화장실 중 몇 개나
+            # 있는지(최대 6개) 기준.
+            return round(min(a.accessibility.wheelchair_accessibility_count, 6) / 6 * 100)
 
         def senior_score(a: Attraction) -> int:
             feats = a.accessibility
-            checks = [feats.has_ramp, feats.has_exit, feats.has_elevator, feats.has_wheelchair_rental]
+            checks = [feats.has_rest_area, feats.has_ramp, feats.has_elevator, feats.has_accessible_restroom]
             return round(sum(1 for c in checks if c) / len(checks) * 100)
 
         def visual_score(a: Attraction) -> int:
-            feats = a.accessibility
-            checks = [feats.has_braille_block, feats.has_help_dog, feats.has_guide_human,
-                      feats.has_audio_guide, feats.has_big_print, feats.has_braille_promotion,
-                      feats.has_guide_system]
-            return round(sum(bool(value) for value in checks) / len(checks) * 100)
+            # 점자블록/보조견동반/안내요원/오디오가이드/큰활자홍보물/점자홍보물/
+            # 유도안내설비 중 몇 개나 있는지(최대 7개) 기준으로 세분화된 점수를 냅니다.
+            return round(min(a.accessibility.visual_accessibility_count, 7) / 7 * 100)
 
         def hearing_score(a: Attraction) -> int:
-            # 객실 편의시설은 숙박 장소에서만 해당합니다.
-            feats = a.accessibility
-            checks = [feats.has_sign_guide, feats.has_video_guide,
-                      feats.has_hearing_room and a.category == "숙박"]
-            return round(sum(bool(value) for value in checks) / len(checks) * 100)
+            # 수화안내/자막비디오가이드/객실 중 몇 개나 있는지(최대 3개) 기준.
+            return round(min(a.accessibility.hearing_accessibility_count, 3) / 3 * 100)
 
         def family_score(a: Attraction) -> int:
-            feats = a.accessibility
-            checks = [feats.has_stroller_accessible_path, feats.has_lactation_room,
-                      feats.has_baby_spare_chair]
-            return round(sum(bool(value) for value in checks) / len(checks) * 100)
+            # 유모차/수유실/유아용보조의자 중 몇 개나 있는지(최대 3개) 기준.
+            return round(min(a.accessibility.family_accessibility_count, 3) / 3 * 100)
 
         def pregnant_score(a: Attraction) -> int:
-            # 현재 데이터에는 임산부 전용 시설이 없으므로 이동 정보만 셉니다.
-            feats = a.accessibility
-            checks = [feats.has_ramp, feats.has_exit, feats.has_elevator]
-            return round(sum(bool(value) for value in checks) / len(checks) * 100)
+            # 수유실/유아용보조의자/접근로/엘리베이터/화장실 중 몇 개나 있는지(최대 5개) 기준.
+            return round(min(a.accessibility.pregnant_accessibility_count, 5) / 5 * 100)
 
-        wheelchair_places = [a for a in candidates if a.accessibility.has_ramp or a.accessibility.has_exit or a.accessibility.has_elevator]
-        senior_places = [a for a in candidates if a.accessibility.has_ramp or a.accessibility.has_exit or a.accessibility.has_elevator or a.accessibility.has_wheelchair_rental]
+        wheelchair_places = [a for a in candidates if a.accessibility.wheelchair_accessibility_count > 0]
+        senior_places = [a for a in candidates if a.accessibility.has_rest_area]
         stroller_places = [a for a in candidates if a.accessibility.has_stroller_accessible_path]
-        visual_places = [a for a in candidates if visual_score(a) > 0]
-        hearing_places = [a for a in candidates if a.accessibility.has_sign_guide or a.accessibility.has_video_guide or (a.category == "숙박" and a.accessibility.has_hearing_room)]
-        family_places = [a for a in candidates if family_score(a) > 0]
-        pregnant_places = [a for a in candidates if a.accessibility.has_ramp or a.accessibility.has_exit or a.accessibility.has_elevator]
-        # '무장애 여행지' 총 개수는 이동 관련 시설·유모차 정보가 있는 장소 중
+        visual_places = [a for a in candidates if a.accessibility.has_visual_accessibility]
+        hearing_places = [a for a in candidates if a.accessibility.has_hearing_accessibility]
+        family_places = [a for a in candidates if a.accessibility.family_accessibility_count > 0]
+        pregnant_places = [a for a in candidates if a.accessibility.pregnant_accessibility_count > 0]
+        # '무장애 여행지' 총 개수는 휠체어/유모차/고령자·임산부(휴게공간) 중
         # 하나라도 해당하는 장소를 중복 없이 합친 값입니다.
         any_accessible_ids = {
             a.content_id for a in (wheelchair_places + senior_places + stroller_places)
@@ -3502,28 +3482,15 @@ class TourApiClient:
         # 이름이 없는 후보(편의시설 캐시에서 되살린 곳)는 개수에는 들어가지만
         # 목록에서는 뺍니다 — 이름/이미지가 없어 화면에 빈 카드로 보입니다.
         # 목록 API가 정상으로 돌아오면 이름이 채워지면서 자연스럽게 합류합니다.
-        def mobility_priority(a: Attraction) -> int:
-            feats = a.accessibility
-            return int(feats.has_ramp and feats.has_exit)
+        def top(places: list[Attraction], score_fn) -> list[Attraction]:
+            return sorted([a for a in places if a.name], key=score_fn, reverse=True)[:200]
 
-        def visual_priority(a: Attraction) -> int:
-            feats = a.accessibility
-            return int(any((feats.has_braille_block, feats.has_guide_system,
-                            feats.has_audio_guide, feats.has_guide_human)))
-
-        def top(places: list[Attraction], score_fn, priority_fn=None) -> list[Attraction]:
-            return sorted(
-                [a for a in places if a.name],
-                key=lambda a: (priority_fn(a) if priority_fn else 0, score_fn(a)),
-                reverse=True,
-            )[:200]
-
-        top_wheelchair = top(wheelchair_places, wheelchair_score, mobility_priority)
-        top_senior = top(senior_places, senior_score, mobility_priority)
-        top_visual = top(visual_places, visual_score, visual_priority)
+        top_wheelchair = top(wheelchair_places, wheelchair_score)
+        top_senior = top(senior_places, senior_score)
+        top_visual = top(visual_places, visual_score)
         top_hearing = top(hearing_places, hearing_score)
         top_family = top(family_places, family_score)
-        top_pregnant = top(pregnant_places, pregnant_score, mobility_priority)
+        top_pregnant = top(pregnant_places, pregnant_score)
 
         # 목록 카드에 "이 곳이 실제로 갖춘 편의시설"을 함께 보여주기 위한 항목들입니다.
         # 위 점수 함수가 세는 항목과 정확히 같아야 합니다 — 그래야 '많음/보통/적음'
@@ -3533,14 +3500,17 @@ class TourApiClient:
                 "has_parking", "has_ramp", "has_wheelchair_rental",
                 "has_exit", "has_elevator", "has_accessible_restroom",
             ),
-            "senior": ("has_ramp", "has_exit", "has_elevator", "has_wheelchair_rental"),
+            "senior": ("has_rest_area", "has_ramp", "has_elevator", "has_accessible_restroom"),
             "visual": (
                 "has_braille_block", "has_help_dog", "has_guide_human", "has_audio_guide",
                 "has_big_print", "has_braille_promotion", "has_guide_system",
             ),
             "hearing": ("has_sign_guide", "has_video_guide", "has_hearing_room"),
             "family": ("has_stroller_accessible_path", "has_lactation_room", "has_baby_spare_chair"),
-            "pregnant": ("has_ramp", "has_exit", "has_elevator"),
+            "pregnant": (
+                "has_lactation_room", "has_baby_spare_chair",
+                "has_ramp", "has_elevator", "has_accessible_restroom",
+            ),
         }
 
         # 카드에 별점을 함께 보여주기 위해 우리 DB의 평균 평점을 한 번에 조회합니다
@@ -3567,8 +3537,7 @@ class TourApiClient:
                         "score": score_fn(a),
                         "address": a.address,
                         "image_url": a.image_url,
-                        "features": [f for f in fields if getattr(a.accessibility, f, False)
-                                     and (f != "has_hearing_room" or a.category == "숙박")],
+                        "features": [f for f in fields if getattr(a.accessibility, f, False)],
                         "avg_rating": rating["avg_rating"] if rating else None,
                         "review_count": rating["review_count"] if rating else 0,
                     }
