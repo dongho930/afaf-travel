@@ -90,7 +90,7 @@ class ParsedQuery(BaseModel):
 
 class AccessibilityFeatures(BaseModel):
     """무장애 여행 정보 API 응답을 매핑한 편의시설 정보"""
-    has_ramp: bool = False                  # 경사로
+    has_ramp: bool = False                  # 휠체어 접근로 (route: 턱 없음 또는 경사로)
     has_elevator: bool = False              # 엘리베이터
     has_accessible_restroom: bool = False   # 장애인 화장실
     has_wheelchair_rental: bool = False     # 휠체어 대여

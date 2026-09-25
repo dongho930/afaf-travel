@@ -37,9 +37,9 @@ _MOBILITY_USER_TYPES = ("wheelchair", "stroller")
 # 사용자 유형과 관련된 편의시설이 하나도 등록되지 않은 곳에 붙이는 경고.
 # 어떤 항목이 '관련 있는지'는 접근성 탭과 같은 기준(accessibility_criteria)을 씁니다.
 _MISSING_FACILITY_WARNINGS: dict[str, str] = {
-    "wheelchair": "경사로·장애인 화장실 등 휠체어 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
+    "wheelchair": "휠체어 접근로·장애인 화장실 등 휠체어 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
     "stroller": "유모차 대여·수유실 등 영유아 동반 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
-    "senior": "경사로·엘리베이터·장애인 화장실 정보가 등록돼 있지 않아요. 방문 전 확인해 주세요.",
+    "senior": "휠체어 접근로·엘리베이터·장애인 화장실 정보가 등록돼 있지 않아요. 방문 전 확인해 주세요.",
     "pregnant": "수유실·임산부 주차구역 등 임산부 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
     "visual": "시각장애인 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
     "hearing": "청각장애인 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
@@ -68,6 +68,7 @@ _UNKNOWN_MEAL_AT_MEAL_WARNING = (
 # 등록되지 않았는데 근거로 들면 안 되는 편의시설 (단어, 확인할 필드들).
 _FACILITY_WORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("경사로", ("has_ramp",)),
+    ("접근로", ("has_ramp",)),
     ("엘리베이터", ("has_elevator",)),
     ("승강기", ("has_elevator",)),
     ("휠체어 대여", ("has_wheelchair_rental",)),

@@ -111,7 +111,7 @@ def test_데이터로_만든_설명은_기본_문구가_아니다():
     park = place("park", has_ramp=True, has_accessible_restroom=True, rate=20)
     text = describe_place(park, "wheelchair", lead="산책로 요청에 맞는 관광지예요.")
     assert text == (
-        "산책로 요청에 맞는 관광지예요. 경사로·장애인 화장실 정보가 등록돼 있어요. "
+        "산책로 요청에 맞는 관광지예요. 휠체어 접근로·장애인 화장실 정보가 등록돼 있어요. "
         "혼잡도는 '여유'로 표시돼요."
     )
 
@@ -135,7 +135,7 @@ def test_AI가_고르지_않은_필수_유형을_채울_때_구체적인_설명�
               for c in asyncio.run(ai_service.recommend_places(request, [trail, sushi]))}
 
     assert "요청하신 산책로 장소예요" not in result["trail"]
-    assert "경사로·장애인 화장실 정보가 등록돼 있어요." in result["trail"]
+    assert "휠체어 접근로·장애인 화장실 정보가 등록돼 있어요." in result["trail"]
     assert "좌석" not in result["sushi"]
 
 

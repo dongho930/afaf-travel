@@ -262,7 +262,7 @@ CRITERIA: dict[str, Criteria] = {
 # 대체 설명이 같은 이름을 씁니다. 'has_stroller_accessible_path'는 이름과 달리 원문이
 # 전부 "유모차 대여 가능/보유"라서(표본 93건 전부) '유모차 대여'로 부릅니다.
 FEATURE_LABELS: dict[str, str] = {
-    "has_ramp": "경사로", "has_elevator": "엘리베이터", "has_accessible_restroom": "장애인 화장실",
+    "has_ramp": "휠체어 접근로", "has_elevator": "엘리베이터", "has_accessible_restroom": "장애인 화장실",
     "has_wheelchair_rental": "휠체어 대여", "has_stroller_accessible_path": "유모차 대여",
     "has_rest_area": "휴게 공간", "has_lactation_room": "수유실", "has_baby_spare_chair": "유아용 보조의자",
     "has_braille_block": "점자블록", "has_audio_guide": "오디오 가이드", "has_guide_human": "안내요원",

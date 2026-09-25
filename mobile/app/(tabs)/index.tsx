@@ -823,7 +823,7 @@ export default function HomeScreen() {
  * 소개문은 문장이 길고 두 줄에서 잘려 있어 상세 화면에 맡깁니다.
  *
  * 예: "가나아트파크, 관광지, 평점 4.5 리뷰 2개, 혼잡 98퍼센트,
- *      주차, 경사로, 장애인 화장실 외 2개"
+ *      주차, 휠체어 접근로, 장애인 화장실 외 2개"
  */
 function placeCardAccessibilityLabel(place: Attraction, colors: ThemeColors): string {
   const parts: string[] = [place.name];

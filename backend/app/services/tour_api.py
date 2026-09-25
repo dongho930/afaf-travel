@@ -72,7 +72,7 @@ logger = logging.getLogger(__name__)
 # AccessibilityFeatures 각 항목을 사람이 읽는 한글 라벨로 바꾸는 매핑.
 # 인기 여행지 카드 등에서 "이 장소가 가진 이점"을 보여줄 때 씁니다.
 _BENEFIT_LABELS: list[tuple[str, str]] = [
-    ("has_ramp", "경사로"),
+    ("has_ramp", "휠체어 접근로"),
     ("has_elevator", "엘리베이터"),
     ("has_accessible_restroom", "장애인 화장실"),
     ("has_wheelchair_rental", "휠체어 대여"),

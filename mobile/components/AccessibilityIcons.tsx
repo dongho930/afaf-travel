@@ -38,7 +38,7 @@ import { AccessibilityFeatures, UserType } from "../types";
 const ICON_MAP: { key: keyof AccessibilityFeatures; icon: Icon; label: string }[] = [
   // 지체장애(휠체어) 관련
   { key: "has_parking", icon: ParkIcon, label: "주차" },
-  { key: "has_ramp", icon: PathIcon, label: "경사로" },
+  { key: "has_ramp", icon: PathIcon, label: "휠체어 접근로" },
   { key: "has_exit", icon: DoorOpenIcon, label: "출입통로" },
   { key: "has_elevator", icon: ElevatorIcon, label: "엘리베이터" },
   { key: "has_accessible_restroom", icon: ToiletIcon, label: "장애인 화장실" },
