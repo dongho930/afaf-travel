@@ -126,6 +126,10 @@ _STOP_WORDS: tuple[str, ...] = (
 # 후보를 못 찾는 일을 막고, AI 호출도 한 번으로 줄입니다.
 _PARSE_CACHE = TTLCache[ParsedQuery](ttl_seconds=600.0)
 
+# 1단계 추천의 최소 개수. 사용자가 이 중에서 골라 코스를 만들므로, 후보가 있는데도
+# 한두 곳만 보여주지 않습니다 (후보 자체가 적으면 있는 만큼만).
+_MIN_RECOMMENDATIONS = 6
+
 
 def _region_label(codes: list[int]) -> str | None:
     """시군구 코드 목록을 사람이 읽는 지역 이름으로 (예: [41111, 41113] -> '수원시')."""
@@ -1086,6 +1090,25 @@ async def recommend_places(
             final_ids.add(content_id)
         if len(final) >= 12:
             break
+
+    # AI는 문장에 딱 맞지 않는 곳을 빼라는 규칙 때문에 후보를 너무 적게(때로 0곳) 고릅니다.
+    # 후보는 이미 고른 유형·지역·방문일을 모두 지킨 곳이고 문장 점수·등급 순으로 서 있으므로,
+    # 모자라면 그 순서대로 채웁니다. 문장 조건을 못 찾았다는 안내는 라우터가 따로 붙입니다.
+    # (평가: '동물 보러 가고 싶어' 0곳, '계단 없는 역사 유적' 후보 9곳 중 2곳만 선택)
+    if len(final) < _MIN_RECOMMENDATIONS:
+        for other in candidates:
+            if len(final) >= _MIN_RECOMMENDATIONS:
+                break
+            if other.content_id in final_ids or is_closed_on(other, request.visit_date):
+                continue
+            final.append(PlaceCandidate(
+                attraction=other,
+                reason=_safe_recommendation_reason(
+                    None, other, request,
+                    lead=f"선택하신 조건에 맞는 {copula(other.category or '장소')}.",
+                ),
+            ))
+            final_ids.add(other.content_id)
     return final
 
 

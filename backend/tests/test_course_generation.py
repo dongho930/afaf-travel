@@ -325,3 +325,44 @@ def test_코스_순서_정하기는_실패해도_규칙_기반으로_이어간�
     )
 
     assert len(course.stops) == len(candidates)
+
+
+# ---- 최소 추천 개수 ----
+
+def _candidate(cid: str) -> Attraction:
+    return Attraction(content_id=cid, name=f"장소{cid}", address="경기도 수원시",
+                      latitude=37.0, longitude=127.0, category="관광지")
+
+
+@pytest.mark.parametrize("ai_picks, expected", [
+    ([], ["1", "2", "3", "4", "5", "6"]),                                # AI가 하나도 안 고름
+    ([{"content_id": "5", "reason": "호수 옆이에요."}], ["5", "1", "2", "3", "4", "6"]),  # AI 선택이 앞
+])
+def test_AI가_적게_고르면_후보_순서대로_채운다(monkeypatch, ai_picks, expected):
+    monkeypatch.setattr(ai_service.settings, "groq_api_key", "test-key")
+
+    async def fake_groq(_request, _candidates, _parsed=None):
+        return ai_picks
+
+    monkeypatch.setattr(ai_service, "_groq_recommend", fake_groq)
+    request = PlaceRecommendationRequest(query_text="동물 보러 가고 싶어", user_type=UserType.STROLLER)
+    candidates = [_candidate(str(i)) for i in range(1, 10)]
+
+    result = asyncio.run(ai_service.recommend_places(request, candidates))
+
+    assert [item.attraction.content_id for item in result] == expected
+    assert all(item.reason for item in result)
+
+
+def test_후보가_적으면_있는_만큼만_보여준다(monkeypatch):
+    monkeypatch.setattr(ai_service.settings, "groq_api_key", "test-key")
+
+    async def fake_groq(_request, _candidates, _parsed=None):
+        return []
+
+    monkeypatch.setattr(ai_service, "_groq_recommend", fake_groq)
+    request = PlaceRecommendationRequest(query_text="수어 해설", user_type=UserType.HEARING)
+
+    result = asyncio.run(ai_service.recommend_places(request, [_candidate("1"), _candidate("2")]))
+
+    assert [item.attraction.content_id for item in result] == ["1", "2"]
