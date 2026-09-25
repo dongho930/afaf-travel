@@ -57,28 +57,35 @@ def candidates() -> list[Attraction]:
 
 # ---- _relevant_accessibility_payload ----
 
-def test_이동유형과_관련_있는_편의시설만_추린다():
-    features = _attraction("1", "x").accessibility.model_dump()
+def test_이동유형_기준으로_갖춘_시설_이름과_등급을_넘긴다():
+    place = _attraction("1", "x")
 
-    wheelchair = ai_service._relevant_accessibility_payload(features, "wheelchair")
+    wheelchair = ai_service._relevant_accessibility_payload(place, "wheelchair")
 
-    assert "has_ramp" in wheelchair
-    assert "visual_accessibility_count" not in wheelchair  # 휠체어와 무관한 항목은 빠집니다
+    assert set(wheelchair) == {"facilities", "grade"}
+    assert "경사로" in wheelchair["facilities"]
+    assert "점자블록" not in wheelchair["facilities"]  # 휠체어와 무관한 시설은 빠집니다
+    assert wheelchair["grade"] in {"많음", "보통", "적음"}
 
 
-def test_general은_유형별_개수만_넘긴다():
-    """general도 개수 5개로 추려야 합니다 — 프롬프트가 Groq의 분당 토큰 한도를
+def test_세지_않는_시설은_넘기지_않는다():
+    # 관광지는 엘리베이터를 세지 않아서, 있어도 근거로 넘기지 않습니다(접근성 탭과 같음).
+    place = _attraction("1", "x")
+
+    senior = ai_service._relevant_accessibility_payload(place, "senior")
+
+    assert "엘리베이터" not in senior["facilities"]
+
+
+def test_general은_맞는_유형_이름만_넘긴다():
+    """general은 유형 이름 목록만 넘깁니다 — 프롬프트가 Groq의 분당 토큰 한도를
     넘겨 후보가 많은 지역에서 추천이 통째로 실패하던 원인이었습니다."""
-    features = _attraction("1", "x").accessibility.model_dump()
+    place = _attraction("1", "x")
 
-    general = ai_service._relevant_accessibility_payload(features, "general")
+    general = ai_service._relevant_accessibility_payload(place, "general")
 
-    assert set(general) == {
-        "wheelchair_accessibility_count", "visual_accessibility_count",
-        "hearing_accessibility_count", "family_accessibility_count",
-        "pregnant_accessibility_count",
-    }
-    assert "has_ramp" not in general  # 개별 편의시설 항목은 빠집니다
+    assert set(general) == {"suitable_for"}
+    assert "고령자" in general["suitable_for"]
 
 
 # ---- _build_user_prompt ----
@@ -92,7 +99,7 @@ def test_프롬프트에_질의와_후보가_담긴다(candidates):
     assert payload["max_stops"] == 2
     assert [c["content_id"] for c in payload["candidates"]] == ["1", "2", "3"]
     # 이동유형에 맞게 추려진 편의시설만 실려야 합니다 (프롬프트 길이 = 토큰 비용)
-    assert "visual_accessibility_count" not in payload["candidates"][0]["accessibility"]
+    assert set(payload["candidates"][0]["accessibility"]) == {"facilities", "grade"}
 
 
 # ---- _mock_generate ----

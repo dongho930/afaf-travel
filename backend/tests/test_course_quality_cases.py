@@ -86,7 +86,7 @@ def test_등록되지_않은_시설을_말한_문장만_지운다():
      "경사로·장애인 화장실 정보가 등록된 관광지예요."),
     ("wheelchair", "문화시설", ALL_WHEELCHAIR, "경사로·엘리베이터·장애인 화장실 정보가 등록된 문화시설이에요."),
     ("stroller", "관광지", dict(has_stroller_accessible_path=True, has_lactation_room=True),
-     "유모차 이동 동선·수유실 정보가 등록된 관광지예요."),
+     "유모차 대여·수유실 정보가 등록된 관광지예요."),
     ("visual", "문화시설", dict(has_audio_guide=True), "오디오 가이드 정보가 등록된 문화시설이에요."),
     ("hearing", "관광지", dict(has_sign_guide=True), "수어 안내 정보가 등록된 관광지예요."),
     ("senior", "레포츠", dict(has_rest_area=True), "휴게 공간 정보가 등록된 레포츠예요."),

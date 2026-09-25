@@ -50,7 +50,7 @@ const ICON_MAP: { key: keyof AccessibilityFeatures; icon: Icon; label: string }[
   { key: "has_low_floor_bus", icon: BusIcon, label: "저상버스" },
   { key: "has_emergency_bell", icon: BellRingingIcon, label: "비상벨" },
   // 영유아가족/임산부 관련
-  { key: "has_stroller_accessible_path", icon: BabyCarriageIcon, label: "유모차 동선" },
+  { key: "has_stroller_accessible_path", icon: BabyCarriageIcon, label: "유모차 대여" },
   { key: "has_lactation_room", icon: BabyIcon, label: "수유실" },
   { key: "has_baby_spare_chair", icon: ArmchairIcon, label: "유아용 보조의자" },
   { key: "has_diaper_station", icon: BabyIcon, label: "기저귀 교환대" },

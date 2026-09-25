@@ -14,7 +14,7 @@ import re
 from typing import Iterable
 
 from app.models.schemas import AccessibilityFeatures, Attraction, CourseResponse, CourseStop
-from app.services.accessibility_criteria import has_any_relevant
+from app.services.accessibility_criteria import FEATURE_LABELS, has_any_relevant
 from app.services.place_intent import MEAL, MEAL_UNKNOWN, NOT_MEAL, meal_status
 from app.services.schedule import meal_window_at, straight_distance_km
 
@@ -38,7 +38,7 @@ _MOBILITY_USER_TYPES = ("wheelchair", "stroller")
 # 어떤 항목이 '관련 있는지'는 접근성 탭과 같은 기준(accessibility_criteria)을 씁니다.
 _MISSING_FACILITY_WARNINGS: dict[str, str] = {
     "wheelchair": "경사로·장애인 화장실 등 휠체어 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
-    "stroller": "유모차 이동 동선·수유실 등 영유아 동반 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
+    "stroller": "유모차 대여·수유실 등 영유아 동반 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
     "senior": "경사로·엘리베이터·장애인 화장실 정보가 등록돼 있지 않아요. 방문 전 확인해 주세요.",
     "pregnant": "수유실·임산부 주차구역 등 임산부 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
     "visual": "시각장애인 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
@@ -228,18 +228,8 @@ def _is_route_claim(sentence: str) -> bool:
 
 
 # 설명이 모두 걸러졌을 때 대신 쓸, 사용자 유형별로 보여줄 편의시설과 이름.
-_FACILITY_LABELS: dict[str, str] = {
-    "has_ramp": "경사로", "has_elevator": "엘리베이터", "has_accessible_restroom": "장애인 화장실",
-    "has_wheelchair_rental": "휠체어 대여", "has_stroller_accessible_path": "유모차 이동 동선",
-    "has_rest_area": "휴게 공간", "has_lactation_room": "수유실", "has_baby_spare_chair": "유아용 보조의자",
-    "has_braille_block": "점자블록", "has_audio_guide": "오디오 가이드", "has_guide_human": "안내요원",
-    "has_help_dog": "보조견 동반", "has_big_print": "큰 활자 안내물", "has_guide_system": "유도 안내설비",
-    "has_braille_promotion": "점자 안내물", "has_sign_guide": "수어 안내", "has_video_guide": "자막 영상 안내",
-    "has_hearing_room": "청각장애인용 객실", "has_parking": "장애인 주차구역", "has_exit": "턱 없는 출입구",
-    "has_accessible_room": "장애인 객실", "has_accessible_seating": "장애인 관람석",
-    "has_low_floor_bus": "저상버스", "has_seated_table": "의자식 테이블", "has_diaper_station": "기저귀 교환대",
-    "has_pregnant_parking": "임산부 주차구역", "has_emergency_bell": "비상벨", "has_hearing_etc": "청각장애인 안내 설비",
-}
+# 이름은 AI에게 넘기는 편의시설 이름과 같은 목록을 씁니다(accessibility_criteria).
+_FACILITY_LABELS = FEATURE_LABELS
 _FACILITY_ORDER_BY_USER_TYPE: dict[str, tuple[str, ...]] = {
     "wheelchair": ("has_ramp", "has_elevator", "has_accessible_restroom", "has_wheelchair_rental",
                    "has_accessible_room", "has_accessible_seating", "has_seated_table"),
