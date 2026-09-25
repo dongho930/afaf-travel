@@ -31,16 +31,16 @@ import { AccessibilityFeatures, UserType } from "../types";
 const ICON_MAP: { key: keyof AccessibilityFeatures; icon: Icon; label: string }[] = [
   // 지체장애(휠체어) 관련
   { key: "has_parking", icon: ParkIcon, label: "주차" },
-  { key: "has_ramp", icon: PathIcon, label: "경사로" },
+  { key: "has_ramp", icon: PathIcon, label: "접근로 정보" },
   { key: "has_exit", icon: DoorOpenIcon, label: "출입통로" },
   { key: "has_elevator", icon: ElevatorIcon, label: "엘리베이터" },
   { key: "has_accessible_restroom", icon: ToiletIcon, label: "장애인 화장실" },
   { key: "has_wheelchair_rental", icon: WheelchairIcon, label: "휠체어 대여" },
   // 영유아가족/임산부 관련
-  { key: "has_stroller_accessible_path", icon: BabyCarriageIcon, label: "유모차 동선" },
+  { key: "has_stroller_accessible_path", icon: BabyCarriageIcon, label: "유모차 대여 정보" },
   { key: "has_lactation_room", icon: BabyIcon, label: "수유실" },
   { key: "has_baby_spare_chair", icon: ArmchairIcon, label: "유아용 보조의자" },
-  { key: "has_rest_area", icon: CouchIcon, label: "휴게 공간" },
+  { key: "has_rest_area", icon: CouchIcon, label: "영유아 편의정보" },
   // 시각장애 관련 (접근성 탭 기준 7개 항목)
   { key: "has_braille_block", icon: DotsSixVerticalIcon, label: "점자블록" },
   { key: "has_help_dog", icon: DogIcon, label: "보조견 동반" },
@@ -69,8 +69,8 @@ const RELEVANT_KEYS_BY_USER_TYPE: Partial<Record<UserType, (keyof AccessibilityF
     "has_wheelchair_rental",
   ],
   stroller: ["has_stroller_accessible_path", "has_lactation_room", "has_baby_spare_chair"],
-  senior: ["has_rest_area", "has_ramp", "has_elevator", "has_accessible_restroom"],
-  pregnant: ["has_lactation_room", "has_baby_spare_chair", "has_ramp", "has_elevator", "has_accessible_restroom"],
+  senior: ["has_ramp", "has_exit", "has_elevator", "has_wheelchair_rental"],
+  pregnant: ["has_ramp", "has_exit", "has_elevator"],
   visual: [
     "has_braille_block",
     "has_help_dog",

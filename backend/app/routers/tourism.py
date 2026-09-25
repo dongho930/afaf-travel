@@ -2,6 +2,7 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.config import get_settings
 from app.models.schemas import (
     AccessibilityPlacePage,
     AccessibilitySummary,
@@ -391,6 +392,12 @@ async def accessibility_summary(
     최대 200곳씩 들어 있어 응답이 240KB를 넘는데, 화면에는 5곳씩만 보여주기
     때문에 대부분이 낭비였습니다. DB에서도 그 컬럼을 아예 안 읽습니다.
     """
+    if get_settings().use_mock_data:
+        data = await tour_api_client.get_accessibility_summary(region)
+        if not include_places:
+            data = {k: v for k, v in data.items() if not k.startswith("top_")}
+        return AccessibilitySummary(**data)
+
     columns = "*" if include_places else _ACCESSIBILITY_COUNT_COLUMNS
     # 캐시를 '읽지 못한' 경우에는 여기서 CacheUnavailable이 그대로 올라가 503이
     # 됩니다(app/main.py 핸들러). 그 자리에서 재계산해 저장해버리면, 외부 API가
@@ -435,6 +442,14 @@ async def accessibility_places(
             status_code=400,
             detail=f"알 수 없는 카테고리예요: {category} "
             f"(가능한 값: {', '.join(_TOP_PLACES_COLUMN)})",
+        )
+
+    if get_settings().use_mock_data:
+        data = await tour_api_client.get_accessibility_summary(region)
+        places = data.get(column) or []
+        return AccessibilityPlacePage(
+            category=category, total=len(places), offset=offset, limit=limit,
+            items=places[offset : offset + limit],
         )
 
     cached = await get_cached_accessibility_stats(region, columns=column)
