@@ -160,7 +160,7 @@ export interface CourseResponse {
 
 export const USER_TYPE_LABELS: Record<UserType, string> = {
   wheelchair: "지체 장애인",
-  stroller: "유모차 동반 가족",
+  stroller: "영유아 가족", // 접근성 탭의 '영유아 가족'과 같은 기준
   senior: "고령자",
   pregnant: "임산부",
   visual: "시각 장애인",

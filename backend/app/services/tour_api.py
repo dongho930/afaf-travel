@@ -76,7 +76,7 @@ _BENEFIT_LABELS: list[tuple[str, str]] = [
     ("has_elevator", "엘리베이터"),
     ("has_accessible_restroom", "장애인 화장실"),
     ("has_wheelchair_rental", "휠체어 대여"),
-    ("has_stroller_accessible_path", "유모차 이동 가능"),
+    ("has_stroller_accessible_path", "유모차 대여"),
     ("has_rest_area", "휴게 공간"),
     ("has_visual_accessibility", "시각장애 편의시설"),
     ("has_hearing_accessibility", "청각장애 편의시설"),

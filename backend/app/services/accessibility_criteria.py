@@ -258,6 +258,35 @@ CRITERIA: dict[str, Criteria] = {
     ),
 }
 
+# 편의시설 항목의 사람이 읽는 이름. AI에게 넘기는 편의시설 목록과 코스 검증의
+# 대체 설명이 같은 이름을 씁니다. 'has_stroller_accessible_path'는 이름과 달리 원문이
+# 전부 "유모차 대여 가능/보유"라서(표본 93건 전부) '유모차 대여'로 부릅니다.
+FEATURE_LABELS: dict[str, str] = {
+    "has_ramp": "경사로", "has_elevator": "엘리베이터", "has_accessible_restroom": "장애인 화장실",
+    "has_wheelchair_rental": "휠체어 대여", "has_stroller_accessible_path": "유모차 대여",
+    "has_rest_area": "휴게 공간", "has_lactation_room": "수유실", "has_baby_spare_chair": "유아용 보조의자",
+    "has_braille_block": "점자블록", "has_audio_guide": "오디오 가이드", "has_guide_human": "안내요원",
+    "has_help_dog": "보조견 동반", "has_big_print": "큰 활자 안내물", "has_guide_system": "유도 안내설비",
+    "has_braille_promotion": "점자 안내물", "has_sign_guide": "수어 안내", "has_video_guide": "자막 영상 안내",
+    "has_hearing_room": "청각장애인용 객실", "has_parking": "장애인 주차구역", "has_exit": "턱 없는 출입구",
+    "has_accessible_room": "장애인 객실", "has_accessible_seating": "장애인 관람석",
+    "has_low_floor_bus": "저상버스", "has_seated_table": "의자식 테이블", "has_diaper_station": "기저귀 교환대",
+    "has_pregnant_parking": "임산부 주차구역", "has_emergency_bell": "비상벨", "has_hearing_etc": "청각장애인 안내 설비",
+}
+
+# 기준 이름 → 사람이 읽는 유형 이름 (일반 유형 추천에서 '어떤 유형에 맞는 곳인지' 알려줄 때).
+CATEGORY_LABELS: dict[str, str] = {
+    "wheelchair": "휠체어 이용자",
+    "visual": "시각장애인",
+    "hearing": "청각장애인",
+    "family": "영유아 동반 가족",
+    "pregnant": "임산부",
+    "senior": "고령자",
+}
+
+TIER_LABELS: dict[str, str] = {"high": "많음", "mid": "보통", "low": "적음"}
+
+
 # 사용자 유형(user_type) 이름 → 기준 이름. 앱의 '유모차'는 영유아 가족 기준을 씁니다.
 USER_TYPE_CATEGORY: dict[str, str] = {
     "wheelchair": "wheelchair",
@@ -340,3 +369,27 @@ def has_any_relevant(attraction: Attraction, user_type: str) -> bool:
     if category is None:
         return True
     return bool(evaluate(attraction.accessibility, category, attraction.category).have)
+
+
+def ai_payload(attraction: Attraction, user_type: str) -> dict:
+    """
+    AI에게 넘기는 편의시설 정보. 접근성 탭과 같은 기준으로 계산합니다.
+
+    - 유형이 있으면: 그 장소 종류에서 세는 항목 중 갖춘 시설 이름과 등급.
+      필드명·true/false 대신 이름만 넘겨서 AI가 원시 값을 노출하지 않고,
+      없는 시설(예: 공원의 엘리베이터)을 약점으로 들지도 않습니다.
+    - 일반 유형이면: 이 장소가 목록에 들어가는 유형 이름만 (토큰을 아끼기 위함).
+    """
+    category = USER_TYPE_CATEGORY.get(user_type)
+    if category is None:
+        return {
+            "suitable_for": [
+                CATEGORY_LABELS[c] for c in CRITERIA
+                if evaluate(attraction.accessibility, c, attraction.category).qualifies
+            ]
+        }
+    ev = evaluate(attraction.accessibility, category, attraction.category)
+    return {
+        "facilities": [FEATURE_LABELS.get(f, f) for f in ev.have],
+        "grade": TIER_LABELS[ev.tier],
+    }

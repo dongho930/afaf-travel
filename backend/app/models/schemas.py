@@ -94,7 +94,7 @@ class AccessibilityFeatures(BaseModel):
     has_elevator: bool = False              # 엘리베이터
     has_accessible_restroom: bool = False   # 장애인 화장실
     has_wheelchair_rental: bool = False     # 휠체어 대여
-    has_stroller_accessible_path: bool = False  # 유모차 이동 가능 동선
+    has_stroller_accessible_path: bool = False  # 유모차 대여 (필드 이름과 달리 원문은 전부 "대여 가능/보유")
     # 벤치·쉼터·휴게시설 (자유 서술에서 추출). 예전엔 수유실/유아용 의자가 있으면
     # True였는데, 고령자 휴게 공간과는 무관해서 의미를 바꿨습니다 (해석 규칙 v2).
     has_rest_area: bool = False

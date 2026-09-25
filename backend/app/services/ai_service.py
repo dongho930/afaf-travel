@@ -29,6 +29,7 @@ from app.models.schemas import (
     PlaceRecommendationRequest,
     TravelPurpose,
 )
+from app.services import accessibility_criteria
 from app.services.memory_cache import TTLCache
 from app.services.place_intent import (
     MEAL, NOT_MEAL, meal_status, query_without_excluded_venues, venue_constraint_for_query,
@@ -45,51 +46,13 @@ logger = logging.getLogger(__name__)
 
 GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 
-# 이동유형별로 실제 관련 있는 편의시설 필드만 골라 AI에게 넘기기 위한 매핑입니다.
-# 예전엔 accessibility 전체(경사로/화장실/유모차로/시각/청각 등 모든 필드)를
-# 사용자 유형과 상관없이 통째로 넘겨서, AI가 시각장애인용 추천인데도 "경사로가
-# 있어서"처럼 무관한 이유를 대는 문제가 있었습니다. 이제 이동유형에 실제로
-# 맞는 필드만 추려서 넘기므로, AI가 애초에 무관한 필드를 볼 수 없습니다.
-_RELEVANT_FIELDS_BY_USER_TYPE: dict[str, list[str]] = {
-    # 접근성 탭과 같은 기준(accessibility_criteria.CRITERIA)의 항목들입니다.
-    "wheelchair": [
-        "has_ramp", "has_exit", "has_elevator", "has_accessible_restroom",
-        "has_wheelchair_rental", "has_accessible_room", "has_accessible_seating", "has_seated_table",
-    ],
-    "stroller": [
-        "has_stroller_accessible_path", "has_lactation_room", "has_diaper_station", "has_baby_spare_chair",
-    ],
-    "senior": [
-        "has_ramp", "has_elevator", "has_accessible_restroom", "has_rest_area",
-        "has_low_floor_bus", "has_emergency_bell",
-    ],
-    "pregnant": [
-        "has_lactation_room", "has_pregnant_parking", "has_diaper_station",
-        "has_elevator", "has_accessible_restroom",
-    ],
-    "visual": ["has_visual_accessibility", "visual_accessibility_count"],
-    "hearing": ["has_hearing_accessibility", "hearing_accessibility_count"],
-    # general(접근성 조건 없음)은 특정 편의시설을 우선할 이유가 없어서, 개별
-    # 항목 대신 유형별 개수 5개만 넘깁니다. 예전엔 매핑에 없다는 이유로
-    # accessibility 30개 필드를 통째로 넘겼는데, 그러면 (1) AI가 "일반" 추천인데도
-    # 점자블록·수화안내처럼 무관한 근거를 들고, (2) 프롬프트가 다른 유형의 서너 배로
-    # 커져서 후보가 많은 지역(수원시 팔달구·성남시 분당구 등)에서는 Groq의 분당 토큰
-    # 한도를 넘겨 요청 자체가 거절당했습니다.
-    "general": [
-        "wheelchair_accessibility_count", "visual_accessibility_count",
-        "hearing_accessibility_count", "family_accessibility_count",
-        "pregnant_accessibility_count",
-    ],
-}
-
-
-def _relevant_accessibility_payload(features: dict, user_type: str) -> dict:
-    """이동유형(user_type)과 실제로 관련 있는 접근성 필드만 골라 반환합니다.
-    매핑에 없는 유형이면 전체를 그대로 넘깁니다."""
-    relevant_keys = _RELEVANT_FIELDS_BY_USER_TYPE.get(user_type)
-    if not relevant_keys:
-        return features
-    return {k: features[k] for k in relevant_keys if k in features}
+# AI에게 넘기는 편의시설 정보는 접근성 탭과 같은 기준(accessibility_criteria)으로
+# 만듭니다. 예전엔 여기서 유형별 필드 목록을 따로 관리해서 탭 기준과 어긋났고
+# (휠체어의 주차, 임산부의 접근로가 빠짐), 시각·청각은 개수만 넘겨 AI가 "점자블록이
+# 있어"처럼 구체적으로 말하지 못했습니다. 무관한 유형의 시설은 여전히 넘기지 않습니다.
+def _relevant_accessibility_payload(attraction: Attraction, user_type: str) -> dict:
+    """이동유형(user_type) 기준으로 갖춘 편의시설 이름과 등급을 돌려줍니다."""
+    return accessibility_criteria.ai_payload(attraction, getattr(user_type, "value", user_type))
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +326,7 @@ def _conditions_payload(parsed: ParsedQuery | None) -> dict:
     return conditions
 
 
-SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동반 가족, 고령자, 임산부, 시각 장애인, 청각 장애인)를 위한
+SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 영유아 동반 가족, 고령자, 임산부, 시각 장애인, 청각 장애인)를 위한
 경기도 무장애 여행 코스를 설계하는 여행 플래너 AI입니다.
 
 주어지는 정보:
@@ -407,21 +370,23 @@ SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동반 가
   방문일 혼잡도가 high인 곳뿐입니다. 앱은 그 아래를 "보통"이나 "여유"로 표시합니다.
 - conditions에 동행자(companion)나 목적(purposes)이 있으면 그에 맞게 순서를 정하고
   reason에도 반영하세요 (예: 가족 동반이면 이동을 짧게).
-- 사용자 유형에 맞는 이동/휴식 동선을 고려하세요 (예: 고령자/임산부는 휴게 공간이 있는 곳 우선).
+- 사용자 유형에 맞게 accessibility.facilities를 보고 동선을 고려하세요 (예: 고령자는
+  경사로·엘리베이터·장애인 화장실, 임산부는 수유실·임산부 주차구역이 있는 곳을 우선).
 - conditions.prefers_short_route가 true이면 사용자가 짧은 동선을 원한 것입니다.
   candidates의 lat/lng를 보고 서로 가까운 장소끼리 고르고, 가까운 순서로 이어지게
   배치하세요. 멀리 떨어진 곳을 끼워 넣지 마세요.
 - accessibility는 각 장소 "안"의 편의시설 정보입니다. 장소와 장소 사이 이동 경로
   (보도·횡단보도·경사)가 무장애라는 정보는 없으므로, "휠체어로 편하게 이동할 수 있어",
   "무장애 동선으로 이어져"처럼 이동 경로가 안전하다고 단정하지 마세요.
-- reason은 반드시 candidates에 주어진 accessibility 필드에 실제로 있는 내용만
-  근거로 쓰세요. 주어지지 않은 편의시설(예: 시각장애 사용자에게 경사로나 화장실처럼
-  무관한 항목)은 절대 언급하지 마세요 — accessibility에 이미 해당 유형과
-  관련된 필드만 들어있습니다.
-- reason은 반드시 자연스러운 한국어 문장으로 작성하세요. has_ramp, true, false,
-  wheelchair_accessibility_count 같은 필드명이나 원시 코드/값을 절대 그대로
-  노출하지 말고, 사람이 읽고 이해할 수 있는 표현(예: "경사로가 설치되어 있어",
-  "휠체어 이용 가능 시설이 4곳 있어")으로 바꿔서 쓰세요.
+- accessibility.facilities는 그 장소에 등록된, 이 사용자 유형과 관련된 편의시설
+  이름이고, accessibility.grade는 접근성 탭과 같은 기준의 편의시설 등급(많음/보통/적음)
+  입니다. 일반 유형이면 accessibility.suitable_for에 이 장소가 맞는 관광약자 유형이
+  있습니다.
+- reason은 반드시 accessibility에 실제로 있는 내용만 근거로 쓰세요. facilities에 없는
+  편의시설은 "있다"고도 "없다"고도 언급하지 마세요 (등록되지 않았을 뿐일 수 있습니다).
+- reason은 반드시 자연스러운 한국어 문장으로 작성하세요. facilities·grade 같은 키 이름을
+  그대로 노출하지 말고, 사람이 읽는 표현(예: "경사로와 장애인 화장실이 있어",
+  "점자블록과 음성 안내가 갖춰져 있어")으로 쓰세요.
 - 응답은 반드시 아래 JSON 스키마로만 출력하고, 다른 설명은 절대 포함하지 마세요.
 
 {
@@ -433,7 +398,7 @@ SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동반 가
 }
 """
 
-RECOMMEND_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동반 가족, 고령자, 임산부, 시각 장애인, 청각 장애인)를 위한
+RECOMMEND_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 영유아 동반 가족, 고령자, 임산부, 시각 장애인, 청각 장애인)를 위한
 경기도 무장애 여행 장소를 추천하는 여행 플래너 AI입니다.
 
 아직 코스(순서·시간)를 정하는 단계가 아닙니다 — 사용자가 나중에 직접 고를 수 있도록,
@@ -463,14 +428,15 @@ RECOMMEND_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 
 - accessibility는 각 장소 "안"의 편의시설 정보입니다. 장소와 장소 사이 이동 경로
   (보도·횡단보도·경사)가 무장애라는 정보는 없으므로, "휠체어로 편하게 이동할 수 있어",
   "무장애 동선으로 이어져"처럼 이동 경로가 안전하다고 단정하지 마세요.
-- reason은 반드시 candidates에 주어진 accessibility 필드에 실제로 있는 내용만
-  근거로 쓰세요. 주어지지 않은 편의시설(예: 시각장애 사용자에게 경사로나 화장실처럼
-  무관한 항목)은 절대 언급하지 마세요 — accessibility에 이미 해당 유형과
-  관련된 필드만 들어있습니다.
-- reason은 반드시 자연스러운 한국어 문장으로 작성하세요. has_ramp, true, false,
-  wheelchair_accessibility_count 같은 필드명이나 원시 코드/값을 절대 그대로
-  노출하지 말고, 사람이 읽고 이해할 수 있는 표현(예: "경사로가 설치되어 있어",
-  "휠체어 이용 가능 시설이 4곳 있어")으로 바꿔서 쓰세요.
+- accessibility.facilities는 그 장소에 등록된, 이 사용자 유형과 관련된 편의시설
+  이름이고, accessibility.grade는 접근성 탭과 같은 기준의 편의시설 등급(많음/보통/적음)
+  입니다. 일반 유형이면 accessibility.suitable_for에 이 장소가 맞는 관광약자 유형이
+  있습니다.
+- reason은 반드시 accessibility에 실제로 있는 내용만 근거로 쓰세요. facilities에 없는
+  편의시설은 "있다"고도 "없다"고도 언급하지 마세요 (등록되지 않았을 뿐일 수 있습니다).
+- reason은 반드시 자연스러운 한국어 문장으로 작성하세요. facilities·grade 같은 키 이름을
+  그대로 노출하지 말고, 사람이 읽는 표현(예: "경사로와 장애인 화장실이 있어",
+  "점자블록과 음성 안내가 갖춰져 있어")으로 쓰세요.
 - 응답은 반드시 아래 JSON 스키마로만 출력하고, 다른 설명은 절대 포함하지 마세요.
 
 {
@@ -480,7 +446,7 @@ RECOMMEND_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 
 }
 """
 
-ORDER_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동반 가족, 고령자, 임산부, 시각 장애인, 청각 장애인)를 위한
+ORDER_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 영유아 동반 가족, 고령자, 임산부, 시각 장애인, 청각 장애인)를 위한
 경기도 무장애 여행 코스를 설계하는 여행 플래너 AI입니다.
 
 사용자가 이미 방문하고 싶은 장소를 직접 골랐습니다. 당신의 역할은 그 장소들을
@@ -533,14 +499,15 @@ ORDER_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 유모차 동�
 - accessibility는 각 장소 "안"의 편의시설 정보입니다. 장소와 장소 사이 이동 경로
   (보도·횡단보도·경사)가 무장애라는 정보는 없으므로, "휠체어로 편하게 이동할 수 있어",
   "무장애 동선으로 이어져"처럼 이동 경로가 안전하다고 단정하지 마세요.
-- reason은 반드시 candidates에 주어진 accessibility 필드에 실제로 있는 내용만
-  근거로 쓰세요. 주어지지 않은 편의시설(예: 시각장애 사용자에게 경사로나 화장실처럼
-  무관한 항목)은 절대 언급하지 마세요 — accessibility에 이미 해당 유형과
-  관련된 필드만 들어있습니다.
-- reason은 반드시 자연스러운 한국어 문장으로 작성하세요. has_ramp, true, false,
-  wheelchair_accessibility_count 같은 필드명이나 원시 코드/값을 절대 그대로
-  노출하지 말고, 사람이 읽고 이해할 수 있는 표현(예: "경사로가 설치되어 있어",
-  "휠체어 이용 가능 시설이 4곳 있어")으로 바꿔서 쓰세요.
+- accessibility.facilities는 그 장소에 등록된, 이 사용자 유형과 관련된 편의시설
+  이름이고, accessibility.grade는 접근성 탭과 같은 기준의 편의시설 등급(많음/보통/적음)
+  입니다. 일반 유형이면 accessibility.suitable_for에 이 장소가 맞는 관광약자 유형이
+  있습니다.
+- reason은 반드시 accessibility에 실제로 있는 내용만 근거로 쓰세요. facilities에 없는
+  편의시설은 "있다"고도 "없다"고도 언급하지 마세요 (등록되지 않았을 뿐일 수 있습니다).
+- reason은 반드시 자연스러운 한국어 문장으로 작성하세요. facilities·grade 같은 키 이름을
+  그대로 노출하지 말고, 사람이 읽는 표현(예: "경사로와 장애인 화장실이 있어",
+  "점자블록과 음성 안내가 갖춰져 있어")으로 쓰세요.
 - 응답은 반드시 아래 JSON 스키마로만 출력하고, 다른 설명은 절대 포함하지 마세요.
 
 {
@@ -615,9 +582,7 @@ def _build_user_prompt(
                 **{key: field.value for key, label in _FOOD_INFO_FIELDS
                    for field in a.extra_info if field.label == label and field.value},
             } if a.category == "음식점" else {}),
-            "accessibility": _relevant_accessibility_payload(
-                a.accessibility.model_dump(), request.user_type
-            ),
+            "accessibility": _relevant_accessibility_payload(a, request.user_type),
             **_congestion_payload(a, include_forecast, visit_date),
             # 영업시간·휴무일은 순서를 정할 때만 씁니다 (시각 자체는 시스템 계산).
             **(hours_payload(a) if include_forecast else {}),
@@ -953,9 +918,7 @@ async def _groq_recommend(
                 "content_id": a.content_id,
                 "name": a.name,
                 "category": a.category,
-                "accessibility": _relevant_accessibility_payload(
-                    a.accessibility.model_dump(), request.user_type
-                ),
+                "accessibility": _relevant_accessibility_payload(a, request.user_type),
                 # 1단계는 후보가 25곳까지 실려서 프롬프트가 큽니다. 날짜별 예보는
                 # 빼고 집중률 숫자 하나만 넣습니다(장소 고르기엔 이걸로 충분).
                 **_congestion_payload(a, include_forecast=False),
