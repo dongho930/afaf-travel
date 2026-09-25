@@ -6,7 +6,15 @@
 **미완성 집계가 멀쩡한 캐시를 덮어썼다.** 그래서 여기서는 "그 상황에서 저장을
 막는가"를 검사합니다.
 """
-import pytest
+import os
+
+# 로컬 backend/.env에 운영 키가 있어도 테스트는 외부 서비스(운영 Supabase·Groq·관광공사
+# API)에 절대 닿지 않게 합니다. 설정은 환경변수를 .env보다 우선하므로, 앱을 불러오기
+# 전에 빈 값으로 덮어둡니다. 키가 필요한 동작은 각 테스트가 monkeypatch로 흉내 냅니다.
+for _name in ("SUPABASE_URL", "SUPABASE_SERVICE_KEY", "GROQ_API_KEY", "TOUR_API_KEY", "TOUR_API_KEY_2"):
+    os.environ[_name] = ""
+
+import pytest  # noqa: E402
 
 
 def summary_payload(total: int, candidates: int, **debug_extra) -> dict:

@@ -122,6 +122,8 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        # .env에 이 앱이 쓰지 않는 변수(예: 다른 도구의 설정)가 있어도 시작을 거부하지 않습니다.
+        extra = "ignore"
 
 
 @lru_cache
