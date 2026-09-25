@@ -51,7 +51,7 @@ _WEIGHTS = {"review": 0.25, "post": 0.25, "save": 0.25, "rating": 0.25}
 _FALLBACK_CITIES = ["수원", "용인", "성남", "고양", "안양"]
 # 실제 데이터 기반 지역 조회에 쓰는 시/도 — 이 앱은 경기도만 다룹니다.
 _LDONG_REGN_CD = "41"
-_DEFAULT_CONTENT_TYPE_IDS = [12, 39, 14, 28, 32]
+_DEFAULT_CONTENT_TYPE_IDS = [12, 39, 14, 28, 32, 38]  # tour_api._DEFAULT_CONTENT_TYPE_IDS와 같게
 
 
 def _strip_city_suffix(city_full: str) -> str:

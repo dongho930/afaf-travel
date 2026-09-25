@@ -45,10 +45,10 @@ import { httpsImageUrl } from "../../utils/imageUrl";
 // 서버(region-popularity, 매일 다시 계산되는 실사용 인기도 랭킹)에서 지역 칩을
 // 아직 못 받아왔거나 요청이 실패했을 때 보여줄 기본값입니다.
 const FALLBACK_REGION_CHIPS = ["전체", "수원", "용인", "성남", "고양", "안양"];
-const CATEGORY_CHIPS = ["전체", "관광지", "문화시설", "레포츠", "숙박", "음식점"];
+const CATEGORY_CHIPS = ["전체", "관광지", "문화시설", "레포츠", "숙박", "음식점", "쇼핑"];
 // 인기 여행지 목록에서 아예 제외할 카테고리 (필터 칩으로도 고를 수 없고, '전체'를
 // 선택해도 안 보입니다). 나중에 다시 보이게 하려면 이 배열을 비우면 됩니다.
-const EXCLUDED_CATEGORIES = ["축제/공연/행사", "여행코스", "쇼핑"];
+const EXCLUDED_CATEGORIES = ["축제/공연/행사", "여행코스"];
 
 // 지난번에 봤던 홈 화면 내용을 기기에 저장해뒀다가, 다음에 앱을 켤 때 서버 응답을
 // 기다리지 않고 곧바로 그려주기 위한 값들입니다. 화면을 그린 뒤에는 평소대로
@@ -351,7 +351,7 @@ export default function HomeScreen() {
       .then((places) => {
         freshPlacesArrivedRef.current = true;
         hasMoreRef.current = places.length === PLACES_FETCH_PAGE_SIZE;
-        // 축제/공연/행사, 여행코스, 쇼핑은 인기 여행지 목록에서 아예 제외합니다.
+        // 축제/공연/행사, 여행코스는 인기 여행지 목록에서 아예 제외합니다.
         const filtered = places.filter((p) => !EXCLUDED_CATEGORIES.includes(p.category));
         // 사진이 있는 관광지들의 사진 URL을 후보 목록으로 저장해두고, 그중
         // 하나를 무작위로 골라 상단 배너 배경으로 씁니다. 아래 useEffect가 이
