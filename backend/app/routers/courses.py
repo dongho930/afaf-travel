@@ -60,6 +60,7 @@ from app.services.supabase_service import (
     update_trip,
     update_visited_place_date,
 )
+from app.services.query_preferences import extract_preferences, unmet_labels
 from app.services.request_conflicts import conflict_message, find_conflicts
 from app.services.schedule import is_closed_on, next_day_of
 from app.services.tour_api import tour_api_client
@@ -127,6 +128,7 @@ async def _candidates_with_conditions(
         purposes=[p.value for p in parsed.purposes],
         keywords=parsed.keywords,
         venue_constraint=venue_constraint,
+        query_text=query_text,
     )
 
     return candidates, parsed
@@ -185,6 +187,13 @@ async def recommend_course_places(request: PlaceRecommendationRequest):
     missing_categories = constraint.missing_requirements(candidates) if constraint else []
     if meal_unconfirmed and "음식점" not in missing_categories:
         missing_categories.append(_MEAL_UNCONFIRMED_LABEL)
+    # 문장에서 원한 특성·편의시설(예: 호수, 장애인 화장실)에 맞는 곳이 하나도 없으면,
+    # 고른 조건에 맞는 다른 곳을 추천하면서 무엇을 못 찾았는지 알려줍니다.
+    # (앱은 missing_categories를 "○○ 장소를 찾지 못했어요"로 보여줍니다.)
+    if candidates:
+        prefs = extract_preferences(request.query_text, parsed.keywords)
+        missing_categories += [label for label in unmet_labels(candidates, prefs)
+                               if label not in missing_categories]
     if not candidates:
         logger.info("조건에 맞는 후보가 없습니다: %r", request.query_text)
         return PlaceRecommendationResponse(
