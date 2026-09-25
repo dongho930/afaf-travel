@@ -217,7 +217,7 @@ def test_같은_문화시설_카테고리에서도_과학관과_미술관을_각
     assert any("미술관" in place.name for place in result)
 
 
-def test_플래너_목록_캐시는_쇼핑을_읽고_기본_목록의_카테고리수는_유지한다(monkeypatch):
+def test_플래너_목록_캐시는_쇼핑을_읽는다(monkeypatch):
     client = tour_api.tour_api_client
     read_types = []
 
@@ -233,7 +233,7 @@ def test_플래너_목록_캐시는_쇼핑을_읽고_기본_목록의_카테고�
     monkeypatch.setattr(tour_api, "get_cached_attraction_list", cached_list)
     result = asyncio.run(client._region_attractions("shopping-test-region"))
 
-    assert 38 not in tour_api._DEFAULT_CONTENT_TYPE_IDS
+    assert 38 in tour_api._DEFAULT_CONTENT_TYPE_IDS  # 2026-09부터 홈 목록·접근성 통계에도 쇼핑 포함
     assert 38 in read_types
     assert [place.content_id for place in result] == ["market"]
 

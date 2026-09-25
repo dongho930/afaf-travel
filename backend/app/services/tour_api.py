@@ -462,10 +462,12 @@ _CONTENT_TYPE_LABELS: dict[int, str] = {
     39: "음식점",
 }
 
-# 홈 목록의 카테고리 수는 페이지네이션 계산에도 사용합니다.
-_DEFAULT_CONTENT_TYPE_IDS: list[int] = [12, 39, 14, 28, 32]
-# 플래너와 이름 검색은 쇼핑 장소도 읽습니다. 목록 갱신 시에도 이 유형을 저장합니다.
-_CACHED_CONTENT_TYPE_IDS: list[int] = [*_DEFAULT_CONTENT_TYPE_IDS, 38]
+# 홈 목록과 접근성 통계가 다루는 유형. 카테고리 수는 홈 목록 페이지네이션 계산에도 씁니다.
+# 쇼핑(38)은 2026-09에 추가했습니다 (경기도 무장애 쇼핑 391곳). 축제(15)는 끝난 행사가
+# 목록에 남고, 여행코스(25)는 경기도 데이터가 없어 넣지 않았습니다.
+_DEFAULT_CONTENT_TYPE_IDS: list[int] = [12, 39, 14, 28, 32, 38]
+# 목록 캐시에 저장하는 유형. 지금은 위와 같습니다.
+_CACHED_CONTENT_TYPE_IDS: list[int] = list(_DEFAULT_CONTENT_TYPE_IDS)
 
 # 목록 캐시를 '나이 상관없이' 읽을 때 쓰는 값 (사실상 무제한).
 #
@@ -594,6 +596,16 @@ _INTRO_FIELDS_BY_TYPE: dict[int, list[tuple[str, str]]] = {
         ("seat", "좌석 수"),
         ("scalefood", "규모"),
         ("infocenterfood", "문의 및 안내"),
+    ],
+    38: [  # 쇼핑
+        ("opentime", "영업시간"),
+        ("restdateshopping", "쉬는날"),
+        ("fairday", "장서는 날"),
+        ("saleitem", "판매 품목"),
+        ("parkingshopping", "주차시설"),
+        ("chkbabycarriageshopping", "유모차 대여"),
+        ("chkcreditcardshopping", "신용카드 사용"),
+        ("infocentershopping", "문의 및 안내"),
     ],
 }
 

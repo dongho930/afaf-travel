@@ -145,7 +145,7 @@ def test_활동_기록이_없으면_가나다순으로_남지_않는다(monkeypa
 
     monkeypatch.setattr(tour_api.TourApiClient, "_place_popularity_scores", no_scores)
 
-    names = [a.name for a in _search(limit=50)]
+    names = [a.name for a in _search(limit=60)]
 
     assert sorted(names) == sorted(n for _, n in PLACES)  # 빠진 곳 없이 전부
     assert names != [n for _, n in PLACES]  # 그러나 원래(가나다) 순서는 아님
@@ -193,6 +193,6 @@ def test_인기도를_못_읽어도_목록은_나온다(monkeypatch):
 
     monkeypatch.setattr(tour_api, "read_place_popularity", boom)
 
-    names = [a.name for a in _search(limit=50)]
+    names = [a.name for a in _search(limit=60)]
 
     assert len(names) == len(PLACES)
