@@ -265,3 +265,37 @@ def test_식당과_카페_요청은_카페가_많아도_식당을_후보에_남�
     assert len(result) == 12
     assert "meal" in {place.content_id for place in result}
     assert any("카페" in place.name for place in result)
+
+
+# ---- 이름에 종류 단어가 없어도 관광공사 분류코드로 인정 (2026-09 평가에서 발견) ----
+
+def test_유적_요청은_이름에_유적이_없어도_역사유적_분류면_맞다():
+    from app.services.place_intent import venue_constraint_for_query
+
+    constraint = venue_constraint_for_query("계단 없이 다닐 수 있는 역사 유적")
+    haenggung = _place("hg", "관광지").model_copy(update={"name": "화성행궁", "lcls_systm": "HS010100"})
+    park = _place("pk", "관광지").model_copy(update={"name": "효원공원", "lcls_systm": "VE030100"})
+
+    assert constraint.matches(haenggung)
+    assert not constraint.matches(park)
+
+
+def test_놀이공원_요청은_테마파크_분류를_인정한다():
+    from app.services.place_intent import venue_constraint_for_query
+
+    constraint = venue_constraint_for_query("놀이공원 가고 싶어")
+    theme = _place("ev", "관광지").model_copy(update={"name": "에버랜드", "lcls_systm": "VE020100"})
+
+    assert constraint.matches(theme)
+
+
+def test_한국_밖_좌표는_좌표_없음으로_둔다():
+    place = tour_api.TourApiClient._attraction_from_cache_dict({
+        "content_id": "x", "name": "복하천수변공원", "category": "관광지",
+        "latitude": 19.69442748, "longitude": 117.9925662504,
+    })
+    assert (place.latitude, place.longitude) == (0.0, 0.0)
+    ok = tour_api.TourApiClient._attraction_from_cache_dict({
+        "content_id": "y", "name": "수원화성", "category": "관광지", "latitude": 37.28, "longitude": 127.01,
+    })
+    assert (ok.latitude, ok.longitude) == (37.28, 127.01)

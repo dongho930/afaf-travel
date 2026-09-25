@@ -84,6 +84,23 @@ _BENEFIT_LABELS: list[tuple[str, str]] = [
 ]
 
 
+def _valid_coordinates(latitude, longitude) -> dict[str, float]:
+    """
+    한국 범위를 벗어난 좌표는 '좌표 없음'(0)으로 둡니다.
+
+    관광공사 자료에 (19.69, 117.99) — 남중국해 — 로 등록된 곳이 있어(복하천수변공원,
+    시화조력문화관, 서해수호관) 거리 계산과 지도가 수백 km씩 틀어졌습니다. 0은 이미
+    모든 거리 계산에서 '모름'으로 처리됩니다.
+    """
+    try:
+        lat, lng = float(latitude or 0), float(longitude or 0)
+    except (TypeError, ValueError):
+        return {"latitude": 0.0, "longitude": 0.0}
+    if 33.0 <= lat <= 39.0 and 124.0 <= lng <= 132.0:
+        return {"latitude": lat, "longitude": lng}
+    return {"latitude": 0.0, "longitude": 0.0}
+
+
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """두 좌표 사이의 대권 거리(km). 근처 관광지를 DB만으로 뽑을 때 씁니다."""
     radius = 6371.0
@@ -703,8 +720,7 @@ class TourApiClient:
             name=item.get("title", ""),
             address=" ".join(filter(None, [item.get("addr1", ""), item.get("addr2", "")])).strip(),
             # TourAPI는 mapx=경도(longitude), mapy=위도(latitude) 순서이므로 주의
-            longitude=float(item.get("mapx") or 0),
-            latitude=float(item.get("mapy") or 0),
+            **_valid_coordinates(item.get("mapy"), item.get("mapx")),
             category=category,
             image_url=item.get("firstimage") or item.get("firstimage2") or None,
             lcls_systm=item.get("lclsSystm3") or item.get("lclsSystm2") or None,
@@ -1569,8 +1585,7 @@ class TourApiClient:
             content_id=d.get("content_id", ""),
             name=d.get("name", ""),
             address=d.get("address", ""),
-            latitude=d.get("latitude") or 0,
-            longitude=d.get("longitude") or 0,
+            **_valid_coordinates(d.get("latitude"), d.get("longitude")),
             category=d.get("category", ""),
             image_url=d.get("image_url"),
             lcls_systm=d.get("lcls_systm") or None,
@@ -1752,6 +1767,10 @@ class TourApiClient:
                 region=region, user_type=user_type, limit=limit, sigungu_cd=sigungu_cd
             ):
                 if venue_constraint and not venue_constraint.matches(a):
+                    continue
+                # 보충 경로도 유형 기준을 반드시 지킵니다 (그 경로의 마지막 안전망은
+                # 거르지 않은 표본을 돌려줄 수 있어, 청각 유형에 기준 미달 장소가 섞였습니다).
+                if not _matches_user_type(a, user_type):
                     continue
                 if a.content_id not in known:
                     candidates.append(a)
@@ -2072,10 +2091,8 @@ class TourApiClient:
                 results = await self._accessibility_fallback_candidates(
                     category_key_by_user_type[user_type]
                 )
-            if not results:
-                # 캐시에도 진짜 하나도 없으면(데이터 자체가 아직 없는 극단적
-                # 경우) 그래도 빈 화면보다는 원래 표본이라도 보여줍니다.
-                results = attractions
+            # 캐시에도 없으면 빈 목록입니다. 예전엔 '빈 화면보다는'이라며 거르지 않은
+            # 표본을 돌려줬는데, 그러면 선택한 유형 기준을 못 넘는 곳이 추천됐습니다.
         else:
             results = attractions
         results = results[:limit]
