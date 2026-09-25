@@ -42,7 +42,7 @@ import { RegionOption, UserType, USER_TYPE_LABELS } from "../../types";
 const OPTIONS: { type: UserType; icon: Icon; desc: string }[] = [
   { type: "wheelchair", icon: userTypeIcon.wheelchair, desc: "턱 없는 출입구와 장애인 화장실이 있는 곳 우선" },
   { type: "stroller", icon: userTypeIcon.stroller, desc: "유모차 대여·수유실·기저귀 교환대가 있는 곳 우선" },
-  { type: "senior", icon: userTypeIcon.senior, desc: "경사로·엘리베이터·장애인 화장실이 있는 곳 우선" },
+  { type: "senior", icon: userTypeIcon.senior, desc: "휠체어 접근로·엘리베이터·장애인 화장실이 있는 곳 우선" },
   { type: "pregnant", icon: userTypeIcon.pregnant, desc: "수유실·임산부 주차구역이 있는 곳 우선" },
   { type: "visual", icon: userTypeIcon.visual, desc: "점자블록·오디오가이드 등 시각 안내시설 우선" },
   { type: "hearing", icon: userTypeIcon.hearing, desc: "수어 안내·자막 안내 등 청각 안내시설 우선" },

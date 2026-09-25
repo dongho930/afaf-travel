@@ -63,7 +63,7 @@ def test_이동유형_기준으로_갖춘_시설_이름과_등급을_넘긴다()
     wheelchair = ai_service._relevant_accessibility_payload(place, "wheelchair")
 
     assert set(wheelchair) == {"facilities", "grade"}
-    assert "경사로" in wheelchair["facilities"]
+    assert "휠체어 접근로" in wheelchair["facilities"]
     assert "점자블록" not in wheelchair["facilities"]  # 휠체어와 무관한 시설은 빠집니다
     assert wheelchair["grade"] in {"많음", "보통", "적음"}
 

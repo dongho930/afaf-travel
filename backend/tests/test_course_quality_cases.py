@@ -83,8 +83,8 @@ def test_등록되지_않은_시설을_말한_문장만_지운다():
 
 @pytest.mark.parametrize("user_type, category, features, expected", [
     ("wheelchair", "관광지", dict(has_ramp=True, has_accessible_restroom=True),
-     "경사로·장애인 화장실 정보가 등록된 관광지예요."),
-    ("wheelchair", "문화시설", ALL_WHEELCHAIR, "경사로·엘리베이터·장애인 화장실 정보가 등록된 문화시설이에요."),
+     "휠체어 접근로·장애인 화장실 정보가 등록된 관광지예요."),
+    ("wheelchair", "문화시설", ALL_WHEELCHAIR, "휠체어 접근로·엘리베이터·장애인 화장실 정보가 등록된 문화시설이에요."),
     ("stroller", "관광지", dict(has_stroller_accessible_path=True, has_lactation_room=True),
      "유모차 대여·수유실 정보가 등록된 관광지예요."),
     ("visual", "문화시설", dict(has_audio_guide=True), "오디오 가이드 정보가 등록된 문화시설이에요."),
@@ -109,7 +109,7 @@ def test_코스_검증에서도_편의시설_설명으로_대체된다():
         stop(1, first, reason="다음 장소까지 휠체어로 편하게 이동할 수 있어요."),
         stop(2, second, reason="마지막으로 들르기 좋아요. 코스 전체가 무장애 동선이에요."),
     ], UserType.WHEELCHAIR), "시흥 여행")
-    assert result.stops[0].reason == "경사로·엘리베이터·장애인 화장실 정보가 등록된 관광지예요."
+    assert result.stops[0].reason == "휠체어 접근로·엘리베이터·장애인 화장실 정보가 등록된 관광지예요."
     assert result.stops[1].reason == "마지막으로 들르기 좋아요."
 
 
@@ -118,7 +118,7 @@ def test_장소_추천_단계도_편의시설_설명을_쓴다():
     target = place("a", "A", has_ramp=True)
     assert ai_service._safe_recommendation_reason(
         "다음 장소까지 안전하게 이동할 수 있어요.", target, request
-    ) == "경사로 정보가 등록돼 있어요."
+    ) == "휠체어 접근로 정보가 등록돼 있어요."
 
 
 # ---------------------------------------------------------------------------
@@ -306,5 +306,5 @@ def test_AI_없이_만든_코스도_편의시설로_설명한다(monkeypatch):
     )
     result = asyncio.run(ai_service.generate_course_from_selection(request, spots))
     reasons = {s.attraction.content_id: s.reason for s in result.stops}
-    assert reasons["a"] == "경사로·엘리베이터·장애인 화장실 정보가 등록된 관광지예요."
-    assert reasons["b"] == "경사로 정보가 등록된 관광지예요."
+    assert reasons["a"] == "휠체어 접근로·엘리베이터·장애인 화장실 정보가 등록된 관광지예요."
+    assert reasons["b"] == "휠체어 접근로 정보가 등록된 관광지예요."
