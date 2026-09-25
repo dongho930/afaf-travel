@@ -57,3 +57,24 @@ def test_되살리기가_실패해_그대로면_저장하지_않는다(damaged_c
 def test_절대_하한_미만은_직전_값과_무관하게_막는다(candidates, healthy_cache):
     for existing in (None, healthy_cache):
         assert _is_regression(existing, summary_payload(candidates, candidates)) is True
+
+
+def test_분류_기준이_바뀐_직후에는_숫자가_줄어도_저장한다(healthy_cache):
+    # 휠체어 탭 조건을 엄격하게 바꾸면 숫자가 줄어드는 게 정상입니다. 새 기준으로
+    # 다시 조회하는 동안(예산 초과로 일부 미룸) 막히면 새 기준이 영영 저장되지 않습니다.
+    data = summary_payload(700, 2400, accessibility_fetch={"deferred_no_budget": 300})
+    data["criteria_version"] = 2
+    assert _is_regression(healthy_cache, data) is False
+
+
+def test_같은_분류_기준끼리는_숫자_감소를_막는다(healthy_cache):
+    existing = {**healthy_cache, "criteria_version": 2}
+    data = summary_payload(700, 2400, accessibility_fetch={"deferred_no_budget": 300})
+    data["criteria_version"] = 2
+    assert _is_regression(existing, data) is True
+
+
+def test_분류_기준이_바뀌어도_후보_급감은_막는다(healthy_cache):
+    data = summary_payload(539, 1000)
+    data["criteria_version"] = 2
+    assert _is_regression(healthy_cache, data) is True

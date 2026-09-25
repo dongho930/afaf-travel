@@ -102,9 +102,10 @@ const PLACES_PAGE_SIZE = 5;
 // 응답이 240KB나 되면서 정작 쓰이는 건 고른 카테고리의 앞 5곳뿐이었습니다.
 const PLACES_FETCH_PAGE_SIZE = 20;
 
-// 유형별 편의시설 항목 수. 서버가 점수를 매길 때 세는 항목 수와 같아야 합니다
-// (backend/app/services/tour_api.py의 fields_by_category / *_score 함수 참고).
-const FEATURE_TOTAL: Record<CategoryKey, number> = {
+// 예전 기준(v1)의 유형별 항목 수. 지금은 장소 종류마다 세는 항목이 달라서 서버가
+// 장소별 total을 함께 보내줍니다(backend/app/services/accessibility_criteria.py).
+// 통계 캐시가 새 기준으로 다시 계산되기 전의 응답에만 이 값을 씁니다.
+const LEGACY_FEATURE_TOTAL: Record<CategoryKey, number> = {
   wheelchair_count: 6,
   visual_count: 7,
   hearing_count: 3,
@@ -144,7 +145,7 @@ function placeAccessibilityLabel(
  * (score = 갖춘 수 ÷ 전체 × 100 이라 나눗셈을 되돌리면 정확히 떨어집니다).
  */
 function featureCount(place: AccessibilityPlaceScore, category: CategoryKey): { have: number; total: number } {
-  const total = FEATURE_TOTAL[category];
+  const total = place.total ?? LEGACY_FEATURE_TOTAL[category];
   const fromFeatures = place.features?.length ?? 0;
   return { have: fromFeatures || Math.round((place.score * total) / 100), total };
 }
@@ -161,19 +162,15 @@ function featuresOf(place: AccessibilityPlaceScore): Partial<AccessibilityFeatur
 /**
  * 그 장소가 해당 유형의 편의시설을 얼마나 갖췄는지 나타내는 등급입니다.
  *
- * score는 서버에서 "갖춘 항목 수 ÷ 그 유형의 전체 항목 수 × 100"으로 계산됩니다
- * (휠체어 6개, 시각 7개, 임산부 5개, 고령자 4개, 청각·영유아가족 3개 항목).
- * 항목 수가 유형마다 다르다 보니 나올 수 있는 점수도 띄엄띄엄 다릅니다. 그래서
- * "절반쯤 갖춘 곳"이 어느 유형에서나 같은 등급이 되도록 절반(50)을 경계로 씁니다.
- * 예전에는 경계가 60이라, 똑같이 절반을 갖춰도 청각 2/3(67)은 '보통'인데
- * 휠체어 3/6(50)과 시각 4/7(57)은 '주의'로 갈리는 문제가 있었습니다.
+ * 등급은 서버가 정해서 보냅니다(tier, backend/app/services/accessibility_criteria.py).
+ * 기본은 "갖춘 항목 ÷ 그 장소에 해당하는 항목"이 80% 이상이면 많음, 50% 이상이면
+ * 보통입니다. 다만 항목이 많아 비율로는 '많음'이 거의 안 나오는 유형(시각, 고령자,
+ * 임산부, 영유아 가족)은 핵심 항목을 모두 갖추면 '많음'으로 올립니다. 예를 들어
+ * 시각장애는 이동 안내(점자블록·유도설비)와 정보 안내(점자안내판·오디오가이드 등)를
+ * 모두 갖추면 '많음'입니다.
  *
- * 유형별로 실제 등급이 갈리는 지점은 이렇습니다.
- *   휠체어(6): 많음 5~6 / 보통 3~4 / 적음 1~2
- *   시각(7):   많음 6~7 / 보통 4~5 / 적음 1~3
- *   임산부(5): 많음 4~5 / 보통 3   / 적음 1~2
- *   고령자(4): 많음 4   / 보통 2~3 / 적음 1
- *   청각(3), 영유아가족(3): 많음 3 / 보통 2 / 적음 1
+ * 통계 캐시가 새 기준으로 다시 계산되기 전의 응답에는 tier가 없어서, 그때는 예전처럼
+ * 점수(80/50)로 정합니다.
  *
  * 문구가 '우수/보통/주의'가 아닌 이유: 이 목록에 오르는 곳은 이미 해당 편의시설을
  * 하나 이상 갖춰서 걸러진 곳들입니다. 그런데 '주의'는 가면 위험한 곳처럼 읽혀서,
@@ -181,15 +178,16 @@ function featuresOf(place: AccessibilityPlaceScore): Partial<AccessibilityFeatur
  */
 type Tier = { label: string; badgeBg: string; badgeText: string; accent: string };
 
-function tierLabel(score: number, colors: ThemeColors): Tier {
+function tierLabel(place: AccessibilityPlaceScore, colors: ThemeColors): Tier {
+  const tier = place.tier ?? (place.score >= 80 ? "high" : place.score >= 50 ? "mid" : "low");
   // 배지의 배경/글자색은 테마가 짝으로 정의해둔 조합만 씁니다. 예전에는 어떤
   // 배경이든 흰 글자를 얹었는데, 그러면 대비가 부족했습니다(라이트 '보통' 2.9:1,
   // 다크는 세 등급 모두 2~3:1로 WCAG AA 4.5:1 미달). 아래 조합은 라이트/다크
   // 양쪽 모두 5:1 이상입니다. accent는 글자가 아닌 오른쪽 색 막대에 씁니다.
-  if (score >= 80) {
+  if (tier === "high") {
     return { label: "많음", badgeBg: colors.primary, badgeText: colors.onPrimary, accent: colors.primary };
   }
-  if (score >= 50) {
+  if (tier === "mid") {
     return {
       label: "보통",
       badgeBg: colors.warningLight,
@@ -583,9 +581,15 @@ export default function AccessibilityScreen() {
             (예: 휠체어는 50 다음이 67이라 60~66점이 존재하지 않음). 숫자 대신
             무슨 뜻인지를 한 줄로 설명합니다. */}
         <Text style={styles.legendNote}>
-          아래 목록은 모두 이 유형의 편의시설을 갖춘 곳입니다. 등급 옆 숫자는 이 유형의 전체 항목
-          {` ${FEATURE_TOTAL[selectedCategory]}개`} 중 몇 개를 갖췄는지를 뜻합니다.
+          아래 목록은 모두 이 유형의 편의시설을 갖춘 곳입니다. 등급 옆 숫자는 그 장소에 해당하는
+          항목 중 몇 개를 갖췄는지를 뜻합니다(예: 장애인 객실은 숙박시설에서만 셉니다).
         </Text>
+        {selectedCategory === "hearing_count" && (
+          <Text style={styles.legendNote}>
+            청각장애 편의시설(수어 안내, 자막 안내 등)은 관광공사에 등록된 정보가 매우 적어요. 목록에 없는
+            곳도 현장에서 지원할 수 있으니 방문 전 문의해 보세요.
+          </Text>
+        )}
 
         <FadeInView key={`places-title-${selectedCategory}`} duration={200} translateY={6}>
           <View style={styles.sectionTitleRow}>
@@ -597,7 +601,7 @@ export default function AccessibilityScreen() {
         </FadeInView>
         {selectedPlaces.length ? (
           selectedPlaces.slice(0, visiblePlacesCount).map((place) => {
-            const tier = tierLabel(place.score, colors);
+            const tier = tierLabel(place, colors);
             const count = featureCount(place, selectedCategory);
             return (
               <FadeInView key={place.content_id || place.name} duration={250}>

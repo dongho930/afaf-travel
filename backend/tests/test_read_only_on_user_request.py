@@ -12,6 +12,7 @@ import pytest
 
 import app.services.tour_api as tour_api
 from app.models.schemas import Attraction
+from app.services.accessibility_criteria import PARSE_VERSION
 
 CACHED_ID = "1"
 UNCACHED_ID = "2"
@@ -47,6 +48,7 @@ def test_편의시설은_캐시에_있는_것만_채운다(no_api, monkeypatch):
             CACHED_ID: {
                 "content_id": CACHED_ID,
                 "has_ramp": True,
+                "parse_version": PARSE_VERSION,
                 "wheelchair_accessibility_count": 4,
             }
         }

@@ -51,13 +51,22 @@ GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 # 있어서"처럼 무관한 이유를 대는 문제가 있었습니다. 이제 이동유형에 실제로
 # 맞는 필드만 추려서 넘기므로, AI가 애초에 무관한 필드를 볼 수 없습니다.
 _RELEVANT_FIELDS_BY_USER_TYPE: dict[str, list[str]] = {
+    # 접근성 탭과 같은 기준(accessibility_criteria.CRITERIA)의 항목들입니다.
     "wheelchair": [
-        "has_ramp", "has_elevator", "has_accessible_restroom",
-        "has_wheelchair_rental", "wheelchair_accessibility_count",
+        "has_ramp", "has_exit", "has_elevator", "has_accessible_restroom",
+        "has_wheelchair_rental", "has_accessible_room", "has_accessible_seating", "has_seated_table",
     ],
-    "stroller": ["has_stroller_accessible_path", "family_accessibility_count"],
-    "senior": ["has_rest_area", "has_ramp", "has_elevator", "has_accessible_restroom"],
-    "pregnant": ["has_rest_area", "pregnant_accessibility_count"],
+    "stroller": [
+        "has_stroller_accessible_path", "has_lactation_room", "has_diaper_station", "has_baby_spare_chair",
+    ],
+    "senior": [
+        "has_ramp", "has_elevator", "has_accessible_restroom", "has_rest_area",
+        "has_low_floor_bus", "has_emergency_bell",
+    ],
+    "pregnant": [
+        "has_lactation_room", "has_pregnant_parking", "has_diaper_station",
+        "has_elevator", "has_accessible_restroom",
+    ],
     "visual": ["has_visual_accessibility", "visual_accessibility_count"],
     "hearing": ["has_hearing_accessibility", "hearing_accessibility_count"],
     # general(접근성 조건 없음)은 특정 편의시설을 우선할 이유가 없어서, 개별

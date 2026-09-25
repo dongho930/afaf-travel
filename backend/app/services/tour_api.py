@@ -29,6 +29,8 @@ import re
 import httpx
 
 from app.config import get_settings
+from app.services import accessibility_criteria
+from app.services.accessibility_criteria import PARSE_VERSION, features_from_detail
 from app.models.schemas import AccessibilityFeatures, Attraction, CongestionForecast, InfoField
 from app.services.memory_cache import TTLCache
 from app.services.place_intent import VenueConstraint
@@ -75,7 +77,7 @@ _BENEFIT_LABELS: list[tuple[str, str]] = [
     ("has_accessible_restroom", "장애인 화장실"),
     ("has_wheelchair_rental", "휠체어 대여"),
     ("has_stroller_accessible_path", "유모차 이동 가능"),
-    ("has_rest_area", "임산부/고령자 휴게공간"),
+    ("has_rest_area", "휴게 공간"),
     ("has_visual_accessibility", "시각장애 편의시설"),
     ("has_hearing_accessibility", "청각장애 편의시설"),
 ]
@@ -138,20 +140,9 @@ def _matches_user_type(a: Attraction, user_type: str) -> bool:
 
     접근성 탭(get_accessibility_summary)의 카테고리별 판단 기준과 같은 식이어야
     '접근성 탭에서 우수한 곳'과 'AI 추천 후보'가 서로 다른 기준으로 갈리지 않습니다.
+    기준 자체는 accessibility_criteria.CRITERIA에 있습니다.
     """
-    if user_type == "wheelchair":
-        return a.accessibility.wheelchair_accessibility_count > 0
-    if user_type == "stroller":
-        return a.accessibility.family_accessibility_count > 0
-    if user_type == "senior":
-        return a.accessibility.has_rest_area
-    if user_type == "pregnant":
-        return a.accessibility.pregnant_accessibility_count > 0
-    if user_type == "visual":
-        return a.accessibility.has_visual_accessibility
-    if user_type == "hearing":
-        return a.accessibility.has_hearing_accessibility
-    return True
+    return accessibility_criteria.qualifies(a, user_type)
 
 
 # 질의에서 읽어낸 목적(TravelPurpose) → 후보로 더 실어줄 카테고리.
@@ -288,6 +279,9 @@ _DETAIL_ACCESSIBILITY_FIELDS: tuple[str, ...] = (
     "has_big_print", "has_braille_promotion", "has_guide_system",
     "has_sign_guide", "has_video_guide", "has_hearing_room",
     "has_lactation_room", "has_baby_spare_chair",
+    # 해석 규칙 v2에서 추가 (sql/add_accessibility_criteria_v2.sql)
+    "has_accessible_room", "has_accessible_seating", "has_low_floor_bus", "has_seated_table",
+    "has_diaper_station", "has_pregnant_parking", "has_emergency_bell", "has_hearing_etc",
 )
 _COUNT_ACCESSIBILITY_FIELDS: tuple[str, ...] = (
     "wheelchair_accessibility_count", "visual_accessibility_count",
@@ -299,13 +293,23 @@ def _accessibility_to_cache_row(features: AccessibilityFeatures) -> dict:
     """AccessibilityFeatures를 place_accessibility_cache 저장용 딕셔너리로 변환."""
     row = {f: getattr(features, f) for f in _DETAIL_ACCESSIBILITY_FIELDS}
     row.update({f: getattr(features, f) for f in _COUNT_ACCESSIBILITY_FIELDS})
+    row["parse_version"] = PARSE_VERSION
     return row
+
+
+def _cache_row_is_stale(row: dict) -> bool:
+    """예전 해석 규칙으로 저장된 행인지. 이런 행은 다시 조회 대상입니다."""
+    return int(row.get("parse_version") or 1) < PARSE_VERSION
 
 
 def _accessibility_from_cache_row(row: dict) -> AccessibilityFeatures:
     """place_accessibility_cache의 한 행을 AccessibilityFeatures로 복원."""
     kwargs = {f: bool(row.get(f)) for f in _DETAIL_ACCESSIBILITY_FIELDS}
     kwargs.update({f: int(row.get(f) or 0) for f in _COUNT_ACCESSIBILITY_FIELDS})
+    if _cache_row_is_stale(row):
+        # v1의 has_rest_area는 '수유실 또는 유아용 의자'라는 뜻이었습니다. 다시 조회되기
+        # 전까지 고령자 휴게 공간으로 잘못 세지 않도록 꺼둡니다.
+        kwargs["has_rest_area"] = False
     return AccessibilityFeatures(**kwargs)
 
 settings = get_settings()
@@ -1136,83 +1140,9 @@ class TourApiClient:
                     return AccessibilityFeatures(), True
                 d = items[0]
 
-                def has_text(key: str) -> bool:
-                    return bool((d.get(key) or "").strip())
-
-                # 활용매뉴얼(v4.3) [무장애여행 조회] 오퍼레이션 명세 기준 필드.
-                # 각 카테고리의 '기타상세'(자유서술 텍스트) 항목은 점수 계산에서
-                # 제외합니다 — 정형화된 편의시설 유무가 아니라 임의의 설명 텍스트라
-                # 있고 없고가 실제 접근성 수준을 나타내지 않기 때문입니다.
-                wheelchair_fields = (
-                    "parking",     # 주차 여부
-                    "route",       # 접근로(경사로)
-                    "wheelchair",  # 휠체어 대여
-                    "exit",        # 출입통로
-                    "elevator",    # 엘리베이터
-                    "restroom",    # 화장실
-                )
-                visual_fields = (
-                    "braileblock",       # 점자블록
-                    "helpdog",           # 보조견 동반
-                    "guidehuman",        # 안내요원
-                    "audioguide",        # 오디오가이드
-                    "bigprint",          # 큰 활자 홍보물
-                    "brailepromotion",   # 점자 홍보물 및 점자표지판
-                    "guidesystem",       # 유도 안내설비
-                )
-                hearing_fields = (
-                    "signguide",    # 수화 안내
-                    "videoguide",   # 자막 비디오가이드 및 영상 자막안내
-                    "hearingroom",  # 객실
-                )
-                family_fields = (
-                    "stroller",       # 유모차
-                    "lactationroom",  # 수유실
-                    "babysparechair",  # 유아용 보조의자
-                )
-                pregnant_fields = (
-                    "lactationroom",   # 수유실
-                    "babysparechair",  # 유아용 보조의자
-                    "route",           # 접근로(경사로)
-                    "elevator",        # 엘리베이터
-                    "restroom",        # 화장실
-                )
-
-                wheelchair_count = sum(1 for f in wheelchair_fields if has_text(f))
-                visual_count = sum(1 for f in visual_fields if has_text(f))
-                hearing_count = sum(1 for f in hearing_fields if has_text(f))
-                family_count = sum(1 for f in family_fields if has_text(f))
-                pregnant_count = sum(1 for f in pregnant_fields if has_text(f))
-
-                features = AccessibilityFeatures(
-                    has_ramp=has_text("route"),
-                    has_elevator=has_text("elevator"),
-                    has_accessible_restroom=has_text("restroom"),
-                    has_wheelchair_rental=has_text("wheelchair"),
-                    has_stroller_accessible_path=has_text("stroller"),
-                    has_rest_area=has_text("lactationroom") or has_text("babysparechair"),
-                    has_parking=has_text("parking"),
-                    has_exit=has_text("exit"),
-                    has_visual_accessibility=visual_count > 0,
-                    has_hearing_accessibility=hearing_count > 0,
-                    has_braille_block=has_text("braileblock"),
-                    has_help_dog=has_text("helpdog"),
-                    has_guide_human=has_text("guidehuman"),
-                    has_audio_guide=has_text("audioguide"),
-                    has_big_print=has_text("bigprint"),
-                    has_braille_promotion=has_text("brailepromotion"),
-                    has_guide_system=has_text("guidesystem"),
-                    has_sign_guide=has_text("signguide"),
-                    has_video_guide=has_text("videoguide"),
-                    has_hearing_room=has_text("hearingroom"),
-                    has_lactation_room=has_text("lactationroom"),
-                    has_baby_spare_chair=has_text("babysparechair"),
-                    wheelchair_accessibility_count=wheelchair_count,
-                    visual_accessibility_count=visual_count,
-                    hearing_accessibility_count=hearing_count,
-                    family_accessibility_count=family_count,
-                    pregnant_accessibility_count=pregnant_count,
-                )
+                # 필드 해석(부정 표현 거르기, 기타상세 키워드 추출)은
+                # accessibility_criteria.features_from_detail 한 곳에서 합니다.
+                features = features_from_detail(d)
                 if diag is not None:
                     diag["has_record"] = diag.get("has_record", 0) + 1
                 return features, True
@@ -1384,7 +1314,13 @@ class TourApiClient:
         if diag is not None:
             diag["from_cache"] = diag.get("from_cache", 0) + len(cached_rows)
 
+        # 캐시에 없는 곳을 먼저, 예전 해석 규칙으로 저장된 곳(stale)을 그다음에 조회합니다.
+        # stale 행은 예산이 모자라 이번에 못 다시 받아도 아래에서 캐시 값으로 채워집니다.
         to_fetch = [a for a in candidates if a.content_id and a.content_id not in cached_rows]
+        to_fetch += [
+            a for a in candidates
+            if a.content_id in cached_rows and _cache_row_is_stale(cached_rows[a.content_id])
+        ]
 
         deferred_count = 0
         if max_new_fetches is not None and len(to_fetch) > max_new_fetches:
@@ -1394,6 +1330,7 @@ class TourApiClient:
             diag["deferred_no_budget"] = diag.get("deferred_no_budget", 0) + deferred_count
 
         new_cache_rows: list[dict] = []
+        refreshed_ids: set[str] = set()
         for chunk_start in range(0, len(to_fetch), max_concurrency):
             chunk = to_fetch[chunk_start : chunk_start + max_concurrency]
             semaphore = asyncio.Semaphore(max_concurrency)
@@ -1409,6 +1346,7 @@ class TourApiClient:
                 attraction.accessibility = features
                 if record_found:
                     chunk_all_rate_limited = False
+                    refreshed_ids.add(attraction.content_id)
                     new_cache_rows.append(
                         {
                             "content_id": attraction.content_id,
@@ -1439,6 +1377,8 @@ class TourApiClient:
                 )
 
         for attraction in candidates:
+            if attraction.content_id in refreshed_ids:
+                continue
             row = cached_rows.get(attraction.content_id)
             if row is not None:
                 attraction.accessibility = _accessibility_from_cache_row(row)
@@ -1922,18 +1862,7 @@ class TourApiClient:
             # 접근성 탭(get_accessibility_summary)의 카테고리별 판단 기준과 정확히
             # 동일하게 맞춥니다 — 그래야 "접근성 탭에서 우수하게 나오는 곳"과
             # "AI 코스 생성 1단계 후보"가 서로 다른 기준으로 갈리지 않습니다.
-            if user_type == "wheelchair":
-                results = [a for a in results if a.accessibility.wheelchair_accessibility_count > 0]
-            elif user_type == "stroller":
-                results = [a for a in results if a.accessibility.family_accessibility_count > 0]
-            elif user_type == "senior":
-                results = [a for a in results if a.accessibility.has_rest_area]
-            elif user_type == "pregnant":
-                results = [a for a in results if a.accessibility.pregnant_accessibility_count > 0]
-            elif user_type == "visual":
-                results = [a for a in results if a.accessibility.has_visual_accessibility]
-            elif user_type == "hearing":
-                results = [a for a in results if a.accessibility.has_hearing_accessibility]
+            results = [a for a in results if _matches_user_type(a, user_type)]
             results = results[offset : offset + limit]
             for a in results:
                 a.accessibility_benefits = _accessibility_benefit_labels(a.accessibility)
@@ -2524,11 +2453,15 @@ class TourApiClient:
             cached = await _optional_cache(
                 get_cached_place_accessibility([content_id]), {}, "장소별 무장애 정보"
             )
-            if content_id in cached:
-                attraction.accessibility = _accessibility_from_cache_row(cached[content_id])
+            cached_row = cached.get(content_id)
+            if cached_row is not None and not _cache_row_is_stale(cached_row):
+                attraction.accessibility = _accessibility_from_cache_row(cached_row)
             else:
+                # 예전 해석 규칙으로 저장된 행이면 다시 받아오고, 실패하면 그 행을 씁니다.
                 features, ok = await self._fetch_accessibility(client, content_id)
-                attraction.accessibility = features
+                attraction.accessibility = (
+                    features if ok or cached_row is None else _accessibility_from_cache_row(cached_row)
+                )
                 if ok:
                     await save_place_accessibility_batch(
                         [
@@ -3230,10 +3163,8 @@ class TourApiClient:
         그래서 이 함수는 매 요청마다 부르지 않고, 캐시(accessibility_stats 테이블)에
         저장해두고 필요할 때만(수동 새로고침) 다시 계산하는 용도로 씁니다.
 
-        휠체어/고령자/유모차는 실제 편의시설 데이터(AccessibilityFeatures)로 계산하고,
-        시각/청각장애는 관련 데이터를 제공하는 API가 없어 표시용 목업 숫자를 씁니다.
-        관광지별 접근성 점수는 6개 편의시설 항목 중 몇 개를 만족하는지로 계산합니다
-        (예: 6개 중 5개 충족 → 83점).
+        유형별 목록 포함 조건과 점수·등급은 accessibility_criteria.CRITERIA 기준입니다
+        (점수 = 그 장소 종류에서 세는 항목 중 갖춘 비율).
         """
         debug_info: dict = {}
 
@@ -3431,91 +3362,48 @@ class TourApiClient:
 
             candidates = all_candidates
 
-        # 탭(휠체어/시각/청각/고령자)마다 실제로 관련 있는 편의시설 항목만 세서
-        # 점수를 매깁니다 — 예전엔 모든 탭이 휠체어용 4개 항목만 공통으로 써서,
-        # 시각장애 탭인데 경사로/엘리베이터가 없다고 '주의' 등급이 뜨는 등
-        # 실제 그 유형과 무관한 점수가 나오는 문제가 있었습니다. 각 항목 개수는
-        # '기타상세'(자유서술 텍스트)를 제외한 정형화된 편의시설 개수 기준입니다.
-        def wheelchair_score(a: Attraction) -> int:
-            # 주차/접근로/휠체어대여/출입통로/엘리베이터/화장실 중 몇 개나
-            # 있는지(최대 6개) 기준.
-            return round(min(a.accessibility.wheelchair_accessibility_count, 6) / 6 * 100)
-
-        def senior_score(a: Attraction) -> int:
-            feats = a.accessibility
-            checks = [feats.has_rest_area, feats.has_ramp, feats.has_elevator, feats.has_accessible_restroom]
-            return round(sum(1 for c in checks if c) / len(checks) * 100)
-
-        def visual_score(a: Attraction) -> int:
-            # 점자블록/보조견동반/안내요원/오디오가이드/큰활자홍보물/점자홍보물/
-            # 유도안내설비 중 몇 개나 있는지(최대 7개) 기준으로 세분화된 점수를 냅니다.
-            return round(min(a.accessibility.visual_accessibility_count, 7) / 7 * 100)
-
-        def hearing_score(a: Attraction) -> int:
-            # 수화안내/자막비디오가이드/객실 중 몇 개나 있는지(최대 3개) 기준.
-            return round(min(a.accessibility.hearing_accessibility_count, 3) / 3 * 100)
-
-        def family_score(a: Attraction) -> int:
-            # 유모차/수유실/유아용보조의자 중 몇 개나 있는지(최대 3개) 기준.
-            return round(min(a.accessibility.family_accessibility_count, 3) / 3 * 100)
-
-        def pregnant_score(a: Attraction) -> int:
-            # 수유실/유아용보조의자/접근로/엘리베이터/화장실 중 몇 개나 있는지(최대 5개) 기준.
-            return round(min(a.accessibility.pregnant_accessibility_count, 5) / 5 * 100)
-
-        wheelchair_places = [a for a in candidates if a.accessibility.wheelchair_accessibility_count > 0]
-        senior_places = [a for a in candidates if a.accessibility.has_rest_area]
-        stroller_places = [a for a in candidates if a.accessibility.has_stroller_accessible_path]
-        visual_places = [a for a in candidates if a.accessibility.has_visual_accessibility]
-        hearing_places = [a for a in candidates if a.accessibility.has_hearing_accessibility]
-        family_places = [a for a in candidates if a.accessibility.family_accessibility_count > 0]
-        pregnant_places = [a for a in candidates if a.accessibility.pregnant_accessibility_count > 0]
-        # '무장애 여행지' 총 개수는 휠체어/유모차/고령자·임산부(휴게공간) 중
-        # 하나라도 해당하는 장소를 중복 없이 합친 값입니다.
+        # 유형별 분류(목록 포함 조건)와 점수·등급은 accessibility_criteria에 모아뒀습니다.
+        # AI 추천 후보 필터(_matches_user_type)도 같은 기준을 써서, '접근성 탭에서
+        # 우수한 곳'과 '추천 후보'가 서로 다른 기준으로 갈리지 않습니다.
+        evaluations: dict[str, dict[str, accessibility_criteria.Evaluation]] = {
+            category: {
+                a.content_id: accessibility_criteria.evaluate(a.accessibility, category, a.category)
+                for a in candidates
+            }
+            for category in accessibility_criteria.CRITERIA
+        }
+        places_by_category: dict[str, list[Attraction]] = {
+            category: [a for a in candidates if evals[a.content_id].qualifies]
+            for category, evals in evaluations.items()
+        }
+        # '무장애 여행지' 총 개수는 여섯 유형 중 하나라도 해당하는 장소를 중복 없이 합친 값입니다.
         any_accessible_ids = {
-            a.content_id for a in (wheelchair_places + senior_places + stroller_places)
+            a.content_id for places in places_by_category.values() for a in places
         }
 
         # 접근성 탭에서 '더보기'로 여러 페이지 볼 수 있도록 넉넉하게 담아둡니다.
-        # 실제 화면 노출은 앱에서 5개씩 나눠서 보여줍니다.
+        # 실제 화면 노출은 앱에서 5개씩 나눠서 보여줍니다. 등급(많음→보통→적음),
+        # 같은 등급 안에서는 점수 순입니다 — 시각장애처럼 핵심 항목을 갖춰 '많음'이
+        # 된 곳이 점수만 높은 곳보다 뒤로 밀리지 않도록 합니다.
         #
         # 이름이 없는 후보(편의시설 캐시에서 되살린 곳)는 개수에는 들어가지만
         # 목록에서는 뺍니다 — 이름/이미지가 없어 화면에 빈 카드로 보입니다.
         # 목록 API가 정상으로 돌아오면 이름이 채워지면서 자연스럽게 합류합니다.
-        def top(places: list[Attraction], score_fn) -> list[Attraction]:
-            return sorted([a for a in places if a.name], key=score_fn, reverse=True)[:200]
-
-        top_wheelchair = top(wheelchair_places, wheelchair_score)
-        top_senior = top(senior_places, senior_score)
-        top_visual = top(visual_places, visual_score)
-        top_hearing = top(hearing_places, hearing_score)
-        top_family = top(family_places, family_score)
-        top_pregnant = top(pregnant_places, pregnant_score)
-
-        # 목록 카드에 "이 곳이 실제로 갖춘 편의시설"을 함께 보여주기 위한 항목들입니다.
-        # 위 점수 함수가 세는 항목과 정확히 같아야 합니다 — 그래야 '많음/보통/적음'
-        # 등급과 화면에 찍히는 시설 목록이 서로 어긋나지 않습니다.
-        fields_by_category: dict[str, tuple[str, ...]] = {
-            "wheelchair": (
-                "has_parking", "has_ramp", "has_wheelchair_rental",
-                "has_exit", "has_elevator", "has_accessible_restroom",
-            ),
-            "senior": ("has_rest_area", "has_ramp", "has_elevator", "has_accessible_restroom"),
-            "visual": (
-                "has_braille_block", "has_help_dog", "has_guide_human", "has_audio_guide",
-                "has_big_print", "has_braille_promotion", "has_guide_system",
-            ),
-            "hearing": ("has_sign_guide", "has_video_guide", "has_hearing_room"),
-            "family": ("has_stroller_accessible_path", "has_lactation_room", "has_baby_spare_chair"),
-            "pregnant": (
-                "has_lactation_room", "has_baby_spare_chair",
-                "has_ramp", "has_elevator", "has_accessible_restroom",
-            ),
+        tier_rank = {"high": 2, "mid": 1, "low": 0}
+        top_by_category: dict[str, list[Attraction]] = {
+            category: sorted(
+                [a for a in places if a.name],
+                key=lambda a, evals=evaluations[category]: (
+                    tier_rank[evals[a.content_id].tier], evals[a.content_id].score
+                ),
+                reverse=True,
+            )[:200]
+            for category, places in places_by_category.items()
         }
 
         # 카드에 별점을 함께 보여주기 위해 우리 DB의 평균 평점을 한 번에 조회합니다
         # (외부 API가 아니라 우리 리뷰 테이블이라 조회 한 번이면 됩니다).
-        top_lists = (top_wheelchair, top_senior, top_visual, top_hearing, top_family, top_pregnant)
+        top_lists = tuple(top_by_category.values())
         rating_rows: dict[str, dict] = {}
         try:
             top_ids = sorted({a.content_id for lst in top_lists for a in lst if a.content_id})
@@ -3525,19 +3413,23 @@ class TourApiClient:
             # 평점을 못 받아와도 목록 자체는 그대로 내보냅니다.
             logger.warning("get_accessibility_summary: 평점 조회 실패 — 별점 없이 진행합니다: %s", e)
 
-        def to_place_scores(places: list[Attraction], score_fn, category: str) -> list[dict]:
-            fields = fields_by_category[category]
+        def to_place_scores(category: str) -> list[dict]:
+            evals = evaluations[category]
             result = []
-            for a in places:
+            for a in top_by_category[category]:
+                ev = evals[a.content_id]
                 rating = rating_rows.get(a.content_id)
                 result.append(
                     {
                         "content_id": a.content_id,
                         "name": a.name,
-                        "score": score_fn(a),
+                        "score": ev.score,
+                        "total": ev.total,
+                        "tier": ev.tier,
                         "address": a.address,
                         "image_url": a.image_url,
-                        "features": [f for f in fields if getattr(a.accessibility, f, False)],
+                        # 등급을 매길 때 센 항목과 같은 목록이라 화면의 시설 칩과 등급이 어긋나지 않습니다.
+                        "features": ev.have,
                         "avg_rating": rating["avg_rating"] if rating else None,
                         "review_count": rating["review_count"] if rating else 0,
                     }
@@ -3545,8 +3437,8 @@ class TourApiClient:
             return result
 
         return {
-            "wheelchair_count": len(wheelchair_places),
-            "senior_count": len(senior_places),
+            "wheelchair_count": len(places_by_category["wheelchair"]),
+            "senior_count": len(places_by_category["senior"]),
             "total_accessible_count": len(any_accessible_ids),
             # 이번 집계가 몇 곳을 놓고 센 것인지. 캐시에도 함께 저장해서, 다음 갱신 때
             # "후보 자체가 확 줄었으면 저장하지 않는다"는 판단 기준으로 씁니다
@@ -3555,16 +3447,18 @@ class TourApiClient:
             "total_candidates": len(candidates),
             # 활용매뉴얼(v4.3) 기준 실제 응답 필드(점자블록/오디오가이드/수화안내/
             # 자막비디오가이드 등)로 계산한 값입니다 — 더 이상 목업이 아닙니다.
-            "visual_count": len(visual_places),
-            "hearing_count": len(hearing_places),
-            "family_count": len(family_places),
-            "pregnant_count": len(pregnant_places),
-            "top_wheelchair_places": to_place_scores(top_wheelchair, wheelchair_score, "wheelchair"),
-            "top_senior_places": to_place_scores(top_senior, senior_score, "senior"),
-            "top_visual_places": to_place_scores(top_visual, visual_score, "visual"),
-            "top_hearing_places": to_place_scores(top_hearing, hearing_score, "hearing"),
-            "top_family_places": to_place_scores(top_family, family_score, "family"),
-            "top_pregnant_places": to_place_scores(top_pregnant, pregnant_score, "pregnant"),
+            "visual_count": len(places_by_category["visual"]),
+            "hearing_count": len(places_by_category["hearing"]),
+            "family_count": len(places_by_category["family"]),
+            "pregnant_count": len(places_by_category["pregnant"]),
+            # 분류 기준 버전. 기준이 바뀐 직후의 첫 집계는 숫자가 줄어도 저장합니다(_is_regression).
+            "criteria_version": accessibility_criteria.CRITERIA_VERSION,
+            "top_wheelchair_places": to_place_scores("wheelchair"),
+            "top_senior_places": to_place_scores("senior"),
+            "top_visual_places": to_place_scores("visual"),
+            "top_hearing_places": to_place_scores("hearing"),
+            "top_family_places": to_place_scores("family"),
+            "top_pregnant_places": to_place_scores("pregnant"),
             # 진단용 필드: 43 같은 숫자가 왜 그렇게 나왔는지 원인을 구분하기 위한 정보.
             # candidates_per_category: 카테고리별(관광지/음식점/문화시설/레포츠/숙박) 수집 건수
             # total_candidates_before_accessibility_fetch: 중복 제거 후 전체 후보 수

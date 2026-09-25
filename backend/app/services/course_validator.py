@@ -14,6 +14,7 @@ import re
 from typing import Iterable
 
 from app.models.schemas import AccessibilityFeatures, Attraction, CourseResponse, CourseStop
+from app.services.accessibility_criteria import has_any_relevant
 from app.services.place_intent import MEAL, MEAL_UNKNOWN, NOT_MEAL, meal_status
 from app.services.schedule import meal_window_at, straight_distance_km
 
@@ -33,32 +34,15 @@ _SHORT_ROUTE_LIMIT_KM = 2.3
 _SHORT_ROUTE_LIMIT_KM_MOBILITY = 1.5
 _MOBILITY_USER_TYPES = ("wheelchair", "stroller")
 
-# 사용자 유형별 '이 중 하나는 확인돼야 하는' 편의시설.
-_REQUIRED_FACILITIES: dict[str, tuple[tuple[str, ...], str]] = {
-    "wheelchair": (
-        ("has_ramp", "has_elevator", "wheelchair_accessibility_count"),
-        "경사로·엘리베이터 등 휠체어 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
-    ),
-    "stroller": (
-        ("has_stroller_accessible_path", "family_accessibility_count"),
-        "유모차 이동 동선 등 영유아 동반 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
-    ),
-    "senior": (
-        ("has_rest_area", "has_ramp", "has_elevator"),
-        "휴게 공간·경사로·엘리베이터 정보가 등록돼 있지 않아요. 방문 전 확인해 주세요.",
-    ),
-    "pregnant": (
-        ("has_rest_area", "pregnant_accessibility_count"),
-        "휴게 공간 등 임산부 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
-    ),
-    "visual": (
-        ("has_visual_accessibility", "visual_accessibility_count"),
-        "시각장애인 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
-    ),
-    "hearing": (
-        ("has_hearing_accessibility", "hearing_accessibility_count"),
-        "청각장애인 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
-    ),
+# 사용자 유형과 관련된 편의시설이 하나도 등록되지 않은 곳에 붙이는 경고.
+# 어떤 항목이 '관련 있는지'는 접근성 탭과 같은 기준(accessibility_criteria)을 씁니다.
+_MISSING_FACILITY_WARNINGS: dict[str, str] = {
+    "wheelchair": "경사로·장애인 화장실 등 휠체어 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
+    "stroller": "유모차 이동 동선·수유실 등 영유아 동반 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
+    "senior": "경사로·엘리베이터·장애인 화장실 정보가 등록돼 있지 않아요. 방문 전 확인해 주세요.",
+    "pregnant": "수유실·임산부 주차구역 등 임산부 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
+    "visual": "시각장애인 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
+    "hearing": "청각장애인 편의시설이 등록돼 있지 않아요. 방문 전 확인해 주세요.",
 }
 
 _ROUTE_UNVERIFIED_WARNING = (
@@ -95,6 +79,9 @@ _FACILITY_WORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("수유실", ("has_lactation_room",)),
     ("휴게 공간", ("has_rest_area",)),
     ("휴게공간", ("has_rest_area",)),
+    ("기저귀", ("has_diaper_station",)),
+    ("저상버스", ("has_low_floor_bus",)),
+    ("관람석", ("has_accessible_seating",)),
 )
 
 # 부가정보(detailIntro)로만 확인할 수 있는 주장 — (표현, 뒷받침하는 부가정보 라벨,
@@ -248,16 +235,23 @@ _FACILITY_LABELS: dict[str, str] = {
     "has_braille_block": "점자블록", "has_audio_guide": "오디오 가이드", "has_guide_human": "안내요원",
     "has_help_dog": "보조견 동반", "has_big_print": "큰 활자 안내물", "has_guide_system": "유도 안내설비",
     "has_braille_promotion": "점자 안내물", "has_sign_guide": "수어 안내", "has_video_guide": "자막 영상 안내",
-    "has_hearing_room": "청각장애인용 객실",
+    "has_hearing_room": "청각장애인용 객실", "has_parking": "장애인 주차구역", "has_exit": "턱 없는 출입구",
+    "has_accessible_room": "장애인 객실", "has_accessible_seating": "장애인 관람석",
+    "has_low_floor_bus": "저상버스", "has_seated_table": "의자식 테이블", "has_diaper_station": "기저귀 교환대",
+    "has_pregnant_parking": "임산부 주차구역", "has_emergency_bell": "비상벨", "has_hearing_etc": "청각장애인 안내 설비",
 }
 _FACILITY_ORDER_BY_USER_TYPE: dict[str, tuple[str, ...]] = {
-    "wheelchair": ("has_ramp", "has_elevator", "has_accessible_restroom", "has_wheelchair_rental"),
-    "stroller": ("has_stroller_accessible_path", "has_lactation_room", "has_baby_spare_chair", "has_elevator"),
-    "senior": ("has_rest_area", "has_ramp", "has_elevator", "has_accessible_restroom"),
-    "pregnant": ("has_rest_area", "has_lactation_room", "has_elevator", "has_accessible_restroom"),
+    "wheelchair": ("has_ramp", "has_elevator", "has_accessible_restroom", "has_wheelchair_rental",
+                   "has_accessible_room", "has_accessible_seating", "has_seated_table"),
+    "stroller": ("has_stroller_accessible_path", "has_lactation_room", "has_diaper_station",
+                 "has_baby_spare_chair", "has_elevator"),
+    "senior": ("has_ramp", "has_elevator", "has_accessible_restroom", "has_rest_area",
+               "has_low_floor_bus", "has_emergency_bell"),
+    "pregnant": ("has_lactation_room", "has_pregnant_parking", "has_diaper_station",
+                 "has_elevator", "has_accessible_restroom"),
     "visual": ("has_braille_block", "has_audio_guide", "has_guide_human", "has_help_dog",
                "has_guide_system", "has_big_print", "has_braille_promotion"),
-    "hearing": ("has_sign_guide", "has_video_guide", "has_hearing_room"),
+    "hearing": ("has_sign_guide", "has_video_guide", "has_hearing_room", "has_hearing_etc"),
     "general": ("has_ramp", "has_elevator", "has_accessible_restroom", "has_stroller_accessible_path",
                 "has_rest_area"),
 }
@@ -432,7 +426,7 @@ def validate_course_stops(
     """
     short_route = prefers_short_route(query_text)
     limit_km = short_route_limit_km(user_type)
-    required = _REQUIRED_FACILITIES.get(user_type)
+    missing_facility_warning = _MISSING_FACILITY_WARNINGS.get(user_type)
 
     meal_indices = _meal_stop_indices(stops)
 
@@ -458,8 +452,8 @@ def validate_course_stops(
             elif meal in ("점심", "저녁") and status == MEAL_UNKNOWN:
                 warnings.append(_UNKNOWN_MEAL_AT_MEAL_WARNING.format(meal=meal))
 
-        if required and not _has_any(place.accessibility, required[0]):
-            warnings.append(required[1])
+        if missing_facility_warning and not has_any_relevant(place, user_type):
+            warnings.append(missing_facility_warning)
 
         if index > 0 and _is_food(stop) and _is_food(stops[index - 1]):
             warnings.append(_CONSECUTIVE_FOOD_WARNING)

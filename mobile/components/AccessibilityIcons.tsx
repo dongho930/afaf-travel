@@ -2,18 +2,25 @@ import {
   ArmchairIcon,
   BabyCarriageIcon,
   BabyIcon,
+  BedIcon,
+  BellRingingIcon,
   BookOpenTextIcon,
+  BusIcon,
+  CarIcon,
   ClosedCaptioningIcon,
   CouchIcon,
   DogIcon,
   DoorOpenIcon,
   DotsSixVerticalIcon,
+  EarIcon,
   ElevatorIcon,
+  ForkKnifeIcon,
   HandWavingIcon,
   type Icon,
   ParkIcon,
   PathIcon,
   PersonSimpleWalkIcon,
+  SeatIcon,
   SignpostIcon,
   SpeakerHighIcon,
   TextAaIcon,
@@ -36,10 +43,18 @@ const ICON_MAP: { key: keyof AccessibilityFeatures; icon: Icon; label: string }[
   { key: "has_elevator", icon: ElevatorIcon, label: "엘리베이터" },
   { key: "has_accessible_restroom", icon: ToiletIcon, label: "장애인 화장실" },
   { key: "has_wheelchair_rental", icon: WheelchairIcon, label: "휠체어 대여" },
+  { key: "has_accessible_room", icon: BedIcon, label: "장애인 객실" },
+  { key: "has_accessible_seating", icon: SeatIcon, label: "장애인 관람석" },
+  { key: "has_seated_table", icon: ForkKnifeIcon, label: "의자식 테이블" },
+  // 고령자 관련
+  { key: "has_low_floor_bus", icon: BusIcon, label: "저상버스" },
+  { key: "has_emergency_bell", icon: BellRingingIcon, label: "비상벨" },
   // 영유아가족/임산부 관련
   { key: "has_stroller_accessible_path", icon: BabyCarriageIcon, label: "유모차 동선" },
   { key: "has_lactation_room", icon: BabyIcon, label: "수유실" },
   { key: "has_baby_spare_chair", icon: ArmchairIcon, label: "유아용 보조의자" },
+  { key: "has_diaper_station", icon: BabyIcon, label: "기저귀 교환대" },
+  { key: "has_pregnant_parking", icon: CarIcon, label: "임산부 주차구역" },
   { key: "has_rest_area", icon: CouchIcon, label: "휴게 공간" },
   // 시각장애 관련 (접근성 탭 기준 7개 항목)
   { key: "has_braille_block", icon: DotsSixVerticalIcon, label: "점자블록" },
@@ -53,10 +68,11 @@ const ICON_MAP: { key: keyof AccessibilityFeatures; icon: Icon; label: string }[
   { key: "has_sign_guide", icon: HandWavingIcon, label: "수화 안내" },
   { key: "has_video_guide", icon: ClosedCaptioningIcon, label: "자막 비디오가이드" },
   { key: "has_hearing_room", icon: CouchIcon, label: "청각장애 편의 객실" },
+  { key: "has_hearing_etc", icon: EarIcon, label: "청각 안내 설비" },
 ];
 
 // 이동유형별로 실제 관련 있는 편의시설 항목만 골라 보여주기 위한 매핑입니다.
-// 백엔드 ai_service.py의 _RELEVANT_FIELDS_BY_USER_TYPE와 동일한 기준입니다.
+// 백엔드 accessibility_criteria.py의 CRITERIA(접근성 탭 분류 기준)와 같은 항목입니다.
 // AI 코스 생성 흐름(장소 선택하기/최종 코스 결과)에서, 선택한 이동유형과
 // 무관한 태그(예: 청각장애를 선택했는데 경사로가 뜨는 것)가 안 뜨게 합니다.
 const RELEVANT_KEYS_BY_USER_TYPE: Partial<Record<UserType, (keyof AccessibilityFeatures)[]>> = {
@@ -67,10 +83,28 @@ const RELEVANT_KEYS_BY_USER_TYPE: Partial<Record<UserType, (keyof AccessibilityF
     "has_elevator",
     "has_accessible_restroom",
     "has_wheelchair_rental",
+    "has_accessible_room",
+    "has_accessible_seating",
+    "has_seated_table",
   ],
-  stroller: ["has_stroller_accessible_path", "has_lactation_room", "has_baby_spare_chair"],
-  senior: ["has_rest_area", "has_ramp", "has_elevator", "has_accessible_restroom"],
-  pregnant: ["has_lactation_room", "has_baby_spare_chair", "has_ramp", "has_elevator", "has_accessible_restroom"],
+  stroller: ["has_stroller_accessible_path", "has_lactation_room", "has_diaper_station", "has_baby_spare_chair"],
+  senior: [
+    "has_ramp",
+    "has_elevator",
+    "has_accessible_restroom",
+    "has_parking",
+    "has_low_floor_bus",
+    "has_rest_area",
+    "has_emergency_bell",
+  ],
+  pregnant: [
+    "has_lactation_room",
+    "has_pregnant_parking",
+    "has_diaper_station",
+    "has_ramp",
+    "has_elevator",
+    "has_accessible_restroom",
+  ],
   visual: [
     "has_braille_block",
     "has_help_dog",
@@ -80,7 +114,7 @@ const RELEVANT_KEYS_BY_USER_TYPE: Partial<Record<UserType, (keyof AccessibilityF
     "has_braille_promotion",
     "has_guide_system",
   ],
-  hearing: ["has_sign_guide", "has_video_guide", "has_hearing_room"],
+  hearing: ["has_sign_guide", "has_video_guide", "has_hearing_room", "has_hearing_etc"],
 };
 
 /**

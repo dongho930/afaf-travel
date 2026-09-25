@@ -115,11 +115,16 @@ def _is_regression(existing: dict | None, data: dict) -> bool:
     if not existing:
         return False
 
+    # 분류 기준이 바뀐 직후의 첫 집계는 숫자가 줄어드는 게 정상입니다 (예: 휠체어 탭
+    # 조건을 엄격하게 바꿈). 아래 (2)·(3)의 '숫자 감소' 비교는 같은 기준끼리만 합니다.
+    # 후보 수(4)는 기준과 무관하므로 그대로 봅니다.
+    same_criteria = existing.get("criteria_version") == data.get("criteria_version")
+
     # (1) 예전엔 있었는데 이번엔 0곳이 된 경우.
     if data.get("total_accessible_count", 0) == 0 and existing.get("total_accessible_count", 0) > 0:
         return True
 
-    dropped = [
+    dropped = same_criteria and [
         key
         for key in ("total_accessible_count", "wheelchair_count")
         if data.get(key, 0) < existing.get(key, 0)

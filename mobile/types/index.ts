@@ -26,7 +26,17 @@ export interface AccessibilityFeatures {
   // 영유아가족/임산부 세부 항목
   has_lactation_room: boolean;
   has_baby_spare_chair: boolean;
-  // 접근성 탭 점수 계산과 동일한 개수 필드
+  // 분류 기준 v2에서 추가 (backend/app/services/accessibility_criteria.py).
+  // 서버를 먼저 배포하기 전 응답에는 없을 수 있어 선택 항목입니다.
+  has_accessible_room?: boolean; // 장애인 객실
+  has_accessible_seating?: boolean; // 장애인 관람석
+  has_low_floor_bus?: boolean; // 저상버스
+  has_seated_table?: boolean; // 의자식 테이블
+  has_diaper_station?: boolean; // 기저귀 교환대
+  has_pregnant_parking?: boolean; // 임산부 주차구역
+  has_emergency_bell?: boolean; // 비상벨
+  has_hearing_etc?: boolean; // 청각장애 기타 편의시설
+  // 개수 필드 (AI 프롬프트·예전 캐시 호환용. 분류·등급은 서버가 장소 종류까지 보고 계산)
   wheelchair_accessibility_count: number;
   visual_accessibility_count: number;
   hearing_accessibility_count: number;
@@ -209,6 +219,10 @@ export interface AccessibilityPlaceScore {
   // 이 유형에서 실제로 갖춘 편의시설 필드명(has_ramp 등). 등급 점수를 매길 때
   // 쓰는 항목과 같은 목록이라, 화면의 시설 목록과 등급이 서로 어긋나지 않습니다.
   features?: (keyof AccessibilityFeatures)[];
+  // 이 장소 종류에서 세는 전체 항목 수와 등급. 장소 종류마다 분모가 달라 서버가 보냅니다.
+  // 통계 캐시가 새 기준으로 다시 계산되기 전에는 비어 있습니다.
+  total?: number;
+  tier?: "high" | "mid" | "low";
   avg_rating?: number | null;
   review_count?: number;
 }

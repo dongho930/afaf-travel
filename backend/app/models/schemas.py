@@ -95,7 +95,9 @@ class AccessibilityFeatures(BaseModel):
     has_accessible_restroom: bool = False   # 장애인 화장실
     has_wheelchair_rental: bool = False     # 휠체어 대여
     has_stroller_accessible_path: bool = False  # 유모차 이동 가능 동선
-    has_rest_area: bool = False             # 임산부/고령자용 휴게 공간
+    # 벤치·쉼터·휴게시설 (자유 서술에서 추출). 예전엔 수유실/유아용 의자가 있으면
+    # True였는데, 고령자 휴게 공간과는 무관해서 의미를 바꿨습니다 (해석 규칙 v2).
+    has_rest_area: bool = False
     # 접근성 탭에서 지체장애 점수를 매길 때 쓰는 6개 항목 중, 위에 없는 나머지 2개.
     has_parking: bool = False               # 주차 여부
     has_exit: bool = False                  # 출입통로
@@ -130,6 +132,16 @@ class AccessibilityFeatures(BaseModel):
     # has_stroller_accessible_path는 이미 위에 별도로 있습니다).
     has_lactation_room: bool = False        # 수유실
     has_baby_spare_chair: bool = False      # 유아용 보조의자
+
+    # 해석 규칙 v2에서 추가한 항목 (accessibility_criteria.features_from_detail 참고).
+    has_accessible_room: bool = False       # 장애인 객실 (room, 숙박)
+    has_accessible_seating: bool = False    # 장애인 관람석 (auditorium, 문화시설)
+    has_low_floor_bus: bool = False         # 저상버스 운행 (publictransport)
+    has_seated_table: bool = False          # 의자식·입식 테이블 (기타상세, 음식점)
+    has_diaper_station: bool = False        # 기저귀 교환대 (기타상세)
+    has_pregnant_parking: bool = False      # 임산부 주차구역 (기타상세)
+    has_emergency_bell: bool = False        # 비상벨·호출벨 (기타상세)
+    has_hearing_etc: bool = False           # 청각장애 기타 편의시설 (hearinghandicapetc)
 
     # 지체장애/시각장애/청각장애/영유아가족 세부 편의시설이 몇 개나 있는지(개수).
     # 지체장애는 주차/접근로/휠체어대여/출입통로/엘리베이터/화장실 중 몇 개
@@ -423,6 +435,10 @@ class AccessibilityPlaceScore(HttpsImageUrl):
     # 이 유형에서 실제로 갖춘 편의시설 필드명(has_ramp 등). 앱이 아이콘/문구로 바꿔 보여줍니다.
     # 유형과 상관있는 항목만 담습니다 — 점수를 매길 때 쓰는 항목과 같은 목록입니다.
     features: list[str] = Field(default_factory=list)
+    # 이 장소 종류에서 세는 전체 항목 수와 등급(high/mid/low). 장소 종류마다 분모가
+    # 달라서 서버가 함께 보냅니다. 예전 캐시에는 없어서 선택 항목입니다.
+    total: int | None = None
+    tier: str | None = None
     avg_rating: float | None = None
     review_count: int = 0
 
@@ -449,6 +465,8 @@ class AccessibilitySummary(BaseModel):
     # 실패로 보이지 않습니다. 이 값을 함께 저장해두고 다음 갱신에서 비교합니다.
     # (accessibility_stats에 컬럼이 아직 없는 환경에서는 None)
     total_candidates: int | None = None
+    # 이 통계를 계산한 분류 기준 버전(accessibility_criteria.CRITERIA_VERSION). 예전 캐시는 None.
+    criteria_version: int | None = None
     # 진단용(선택): wheelchair_count 등이 왜 그렇게 나왔는지 원인 확인용 정보.
     # (아래 top_* 목록들은 include_places=False면 전부 빈 목록으로 옵니다 —
     #  접근성 탭은 /accessibility-places로 필요한 만큼만 따로 받아옵니다.)
