@@ -36,10 +36,22 @@ class Concept:
     # 소개문은 긴 글이라 짧은 말('궁'→'궁금', '몰'→'몰려', '섬'→'섬세')이 엉뚱하게
     # 걸립니다. 그런 특성은 소개문용 표현을 따로 둡니다 (None이면 name_pattern).
     overview_pattern: re.Pattern | None = None
+    # 관광공사 신분류(lclsSystm) 앞자리. 이름·소개문보다 정확해서 이름과 같은 점수를 줍니다.
+    lcls_prefixes: tuple[str, ...] = ()
+    # 카테고리 자체가 그 특성인 경우 (예: 쇼핑 장소 = 쇼핑 카테고리)
+    categories: frozenset[str] = frozenset()
 
     @property
     def overview_re(self) -> re.Pattern:
         return self.overview_pattern or self.name_pattern
+
+    def matches_place(self, a: Attraction) -> bool:
+        """이름·분류코드·카테고리로 맞는지 (소개문은 따로 봅니다)."""
+        if self.name_pattern.search((a.name or "").replace(" ", "")):
+            return True
+        if self.lcls_prefixes and (a.lcls_systm or "").startswith(self.lcls_prefixes):
+            return True
+        return a.category in self.categories
 
 
 @dataclass(frozen=True)
@@ -56,29 +68,54 @@ def _re(pattern: str) -> re.Pattern:
 
 CONCEPTS: tuple[Concept, ...] = (
     Concept("산책로", _re(r"산책|걷기|둘레길|트레킹"),
-            _re(r"공원|수목원|호수|숲|둘레길|산책|생태|정원|천변|유원지|휴양림")),
-    Concept("호수·물가", _re(r"호수|강변|강가|바다|물가|계곡|해변|폭포|저수지"),
+            _re(r"공원|수목원|호수|숲|둘레길|산책|생태|정원|천변|유원지|휴양림"),
+            lcls_prefixes=("VE03", "NA0402", "NA0405", "NA0406", "NA0407", "NA0501")),
+    Concept("호수·물가", _re(r"호수|강변|강가|바다|물가|계곡|해변|폭포|저수지|물멍"),
             _re(r"호수|저수지|강변|한강|바다|해수욕장|해변|계곡|폭포|포구|섬"),
-            _re(r"호수|저수지|강변|한강|바다|해수욕장|해변|계곡|폭포|포구|강가|물가")),
+            _re(r"호수|저수지|강변|한강|바다|해수욕장|해변|계곡|폭포|포구|강가|물가"),
+            lcls_prefixes=("NA02", "NA0103", "NA0104")),
     Concept("숲·정원", _re(r"숲|수목원|정원|꽃|식물|자연"),
-            _re(r"수목원|숲|정원|식물원|꽃|휴양림|허브|농원")),
+            _re(r"수목원|숲|정원|식물원|꽃|휴양림|허브|농원"),
+            lcls_prefixes=("NA0406", "NA0407")),
     Concept("박물관·전시", _re(r"박물관|미술관|전시|갤러리|기념관|역사관|과학관"),
-            _re(r"박물관|미술관|갤러리|전시|기념관|역사관|과학관|뮤지엄")),
+            _re(r"박물관|미술관|갤러리|전시|기념관|역사관|과학관|뮤지엄"),
+            lcls_prefixes=("VE0701", "VE0702", "VE0703", "VE0705", "VE0706")),
     Concept("공연장", _re(r"공연|연극|음악회|콘서트|뮤지컬"),
-            _re(r"아트홀|예술의전당|아트센터|문화예술회관|공연장|극장|시민회관")),
+            _re(r"아트홀|예술의전당|아트센터|문화예술회관|공연장|극장|시민회관"),
+            lcls_prefixes=("VE0601",)),
     Concept("역사 유적", _re(r"역사|유적|궁|성곽|문화재|왕릉|전통"),
             _re(r"궁|행궁|성곽|산성|릉|유적|향교|서원|사찰|민속촌|한옥"),
-            _re(r"궁궐|행궁|성곽|산성|왕릉|유적|문화재|향교|서원|사찰|민속촌|한옥")),
-    Concept("체험 장소", _re(r"체험|키즈|어린이|동물|아이들?이\s*좋아"),
-            _re(r"어린이|키즈|체험|동물원|아쿠아|과학관|놀이|랜드|목장|농장|파크")),
+            _re(r"궁궐|행궁|성곽|산성|왕릉|유적|문화재|향교|서원|사찰|민속촌|한옥"),
+            lcls_prefixes=("HS01", "HS03")),
+    Concept("체험 장소", _re(r"체험|키즈|어린이|아이들?이\s*좋아|놀거리|놀\s*곳"),
+            _re(r"어린이|키즈|체험|아쿠아|과학관|놀이|랜드|목장|농장|파크"),
+            lcls_prefixes=("EX", "VE0201", "VE0202", "VE0204", "VE0205", "VE0903")),
+    Concept("동물", _re(r"동물|목장|아쿠아리움|곤충|새\s*보|물고기"),
+            _re(r"동물|목장|아쿠아|곤충|조류|새공원|주렁주렁"),
+            _re(r"동물원|동물|목장|아쿠아리움|곤충|조류|먹이\s*주기"),
+            lcls_prefixes=("VE0203", "VE0204", "EX0302")),
+    Concept("공예 체험", _re(r"도자기|도예|공방|공예|만들기|원데이\s*클래스"),
+            _re(r"도자|도예|공방|공예|요업|가마"),
+            _re(r"도자기|도예|공방|공예|만들기\s*체험|물레"),
+            lcls_prefixes=("EX0702",)),
+    Concept("실내", _re(r"실내|비\s*(가\s*)?(오는|올|와)|우천|너무\s*(덥|추운|더운)|추운\s*날|더운\s*날"),
+            _re(r"박물관|미술관|전시|과학관|아쿠아|백화점|아울렛|몰|스타필드|도서관|체험관"),
+            _re(r"실내|전시관|박물관|미술관|체험관"),
+            lcls_prefixes=("VE07", "VE06", "VE0204", "VE0202", "VE1002", "LS0109", "EX0702"),
+            categories=frozenset({"쇼핑"})),
     Concept("쇼핑 장소", _re(r"쇼핑|시장|아울렛|백화점"),
             _re(r"시장|아울렛|백화점|몰|스타필드|쇼핑"),
-            _re(r"전통시장|아울렛|백화점|쇼핑몰|쇼핑")),
+            _re(r"전통시장|아울렛|백화점|쇼핑몰|쇼핑"),
+            categories=frozenset({"쇼핑"})),
     Concept("온천·휴양", _re(r"온천|스파|힐링|휴양"),
-            _re(r"온천|스파|휴양림|힐링|찜질")),
-    Concept("전망 좋은 곳", _re(r"야경|전망|경치|뷰\b|풍경"),
-            _re(r"전망대|타워|스카이|전망")),
+            _re(r"온천|스파|휴양림|힐링|찜질"),
+            lcls_prefixes=("EX05", "NA0406")),
+    Concept("전망 좋은 곳", _re(r"야경|전망|경치|뷰|풍경"),
+            _re(r"전망대|타워|스카이|전망"),
+            lcls_prefixes=("VE0102", "VE0103")),
 )
+
+CONCEPT_LABELS: tuple[str, ...] = tuple(c.label for c in CONCEPTS)
 
 FACILITY_WISHES: tuple[FacilityWish, ...] = (
     FacilityWish("장애인 화장실이 있는", _re(r"화장실"), ("has_accessible_restroom",)),
@@ -99,9 +136,14 @@ FACILITY_WISHES: tuple[FacilityWish, ...] = (
     FacilityWish("저상버스로 갈 수 있는", _re(r"저상\s*버스|대중교통|버스"), ("has_low_floor_bus",)),
 )
 
+FACILITY_LABELS: tuple[str, ...] = tuple(f.label for f in FACILITY_WISHES)
+
 # 가중치: 문장이 콕 집어 말한 것(특성·편의시설·이름) > 목적에서 짐작한 카테고리.
 _CONCEPT_POINTS = 3
 _CONCEPT_OVERVIEW_POINTS = 2   # 이름보다 약하게 — 소개문은 주변 설명이 섞입니다
+# AI 해석으로만 더해진 조건(사용자가 그 말을 직접 쓰지 않음)은 1점 낮게 줍니다.
+# 직접 쓴 '자연'(숲·정원)보다 AI가 짐작한 '호수·물가'가 같은 점수로 앞서지 않게.
+_AI_ONLY_PENALTY = 1
 _FACILITY_POINTS = 3
 _KEYWORD_POINTS = 3
 _PURPOSE_POINTS = 1
@@ -113,6 +155,9 @@ class TextPreferences:
     facilities: list[FacilityWish] = field(default_factory=list)
     keywords: list[str] = field(default_factory=list)          # 장소 이름에서 찾을 말
     purpose_categories: set[str] = field(default_factory=set)  # 목적에서 짐작한 카테고리
+    # 문장에 그 표현이 실제로 있는 조건. AI 해석으로 더해진 조건은 점수에만 쓰고,
+    # "○○를 찾지 못했어요" 안내는 사용자가 실제로 쓴 조건에만 붙입니다.
+    explicit_labels: set[str] = field(default_factory=set)
 
     @property
     def is_empty(self) -> bool:
@@ -120,11 +165,22 @@ class TextPreferences:
 
 
 def extract_preferences(
-    query_text: str, keywords: list[str] | None = None, purpose_categories: set[str] | None = None
+    query_text: str,
+    keywords: list[str] | None = None,
+    purpose_categories: set[str] | None = None,
+    ai_labels: list[str] | None = None,
 ) -> TextPreferences:
+    """
+    ai_labels: 문장 해석 AI가 특성·편의시설 목록에서 고른 이름. 단어 표로는 못 읽는
+    표현("물멍하기 좋은 곳" → 호수·물가)을 보탭니다. 목록에 없는 이름은 버립니다.
+    """
     text = query_text or ""
-    concepts = [c for c in CONCEPTS if c.trigger.search(text)]
-    facilities = [f for f in FACILITY_WISHES if f.trigger.search(text)]
+    wanted = set(ai_labels or ())
+    explicit = {c.label for c in CONCEPTS if c.trigger.search(text)} | {
+        f.label for f in FACILITY_WISHES if f.trigger.search(text)
+    }
+    concepts = [c for c in CONCEPTS if c.label in explicit or c.label in wanted]
+    facilities = [f for f in FACILITY_WISHES if f.label in explicit or f.label in wanted]
     # 특성·편의시설 표현으로 이미 읽은 말은 이름 검색 키워드에서 뺍니다
     # ("산책로" 키워드로 이름에 '산책로'가 든 곳만 찾는 것보다 특성 점수가 넓습니다).
     covered = [c.trigger for c in concepts] + [f.trigger for f in facilities]
@@ -132,7 +188,7 @@ def extract_preferences(
         k.replace(" ", "").lower() for k in (keywords or [])
         if len(k) >= 2 and not any(p.search(k) for p in covered)
     ]
-    return TextPreferences(concepts, facilities, needles, set(purpose_categories or ()))
+    return TextPreferences(concepts, facilities, needles, set(purpose_categories or ()), explicit)
 
 
 def text_matches(a: Attraction, prefs: TextPreferences) -> tuple[int, list[str]]:
@@ -140,18 +196,21 @@ def text_matches(a: Attraction, prefs: TextPreferences) -> tuple[int, list[str]]
     score = 0
     matched: list[str] = []
     name = (a.name or "").replace(" ", "")
+    def points(label: str, base: int) -> int:
+        return base if label in prefs.explicit_labels else base - _AI_ONLY_PENALTY
+
     for c in prefs.concepts:
-        if c.name_pattern.search(name):
-            score += _CONCEPT_POINTS
+        if c.matches_place(a):
+            score += points(c.label, _CONCEPT_POINTS)
             matched.append(c.label)
     for f in prefs.facilities:
         if any(getattr(a.accessibility, field_name, False) for field_name in f.fields):
-            score += _FACILITY_POINTS
+            score += points(f.label, _FACILITY_POINTS)
             matched.append(f.label)
     tags = overview_tags(a.content_id)
     for c in prefs.concepts:
         if c.label not in matched and c.label in tags:
-            score += _CONCEPT_OVERVIEW_POINTS
+            score += points(c.label, _CONCEPT_OVERVIEW_POINTS)
             matched.append(c.label)
     lowered = name.lower()
     if any(n in lowered for n in prefs.keywords):
@@ -174,15 +233,15 @@ def grade_rank(a: Attraction, user_type: str) -> int:
 
 def unmet_labels(candidates: list[Attraction], prefs: TextPreferences) -> list[str]:
     """문장에서 원한 특성·편의시설 중 후보에 하나도 없는 것 (안내용)."""
-    names = [(a.name or "").replace(" ", "") for a in candidates]
     unmet = [
         c.label for c in prefs.concepts
-        if not any(c.name_pattern.search(n) for n in names)
-        and not any(c.label in overview_tags(a.content_id) for a in candidates)
+        if c.label in prefs.explicit_labels
+        and not any(c.matches_place(a) or c.label in overview_tags(a.content_id) for a in candidates)
     ]
     unmet += [
         f.label for f in prefs.facilities
-        if not any(getattr(a.accessibility, fn, False) for a in candidates for fn in f.fields)
+        if f.label in prefs.explicit_labels
+        and not any(getattr(a.accessibility, fn, False) for a in candidates for fn in f.fields)
     ]
     return unmet
 

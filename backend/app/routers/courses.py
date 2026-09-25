@@ -102,7 +102,8 @@ def _note_missing_meal(course: CourseResponse, meal_gap: bool) -> None:
 
 
 async def _candidates_with_conditions(
-    query_text: str, user_type: str, region: str, sigungu_cd: Optional[int]
+    query_text: str, user_type: str, region: str, sigungu_cd: Optional[int],
+    visit_date: Optional[str] = None,
 ) -> tuple[list[Attraction], ParsedQuery]:
     """
     질의에서 조건을 뽑아낸 뒤, 그 조건(지역·목적·키워드)에 맞는 무장애 관광지
@@ -129,6 +130,8 @@ async def _candidates_with_conditions(
         keywords=parsed.keywords,
         venue_constraint=venue_constraint,
         query_text=query_text,
+        ai_labels=[*parsed.concepts, *parsed.facilities],
+        visit_date=visit_date,
     )
 
     return candidates, parsed
@@ -157,7 +160,8 @@ async def recommend_course_places(request: PlaceRecommendationRequest):
 
     try:
         candidates, parsed = await _candidates_with_conditions(
-            request.query_text, request.user_type.value, request.region, request.sigungu_cd
+            request.query_text, request.user_type.value, request.region, request.sigungu_cd,
+            request.visit_date,
         )
     except CacheUnavailable as e:
         # 후보를 고르려면 편의시설 캐시를 반드시 읽어야 합니다. 못 읽었다는 건
@@ -191,7 +195,9 @@ async def recommend_course_places(request: PlaceRecommendationRequest):
     # 고른 조건에 맞는 다른 곳을 추천하면서 무엇을 못 찾았는지 알려줍니다.
     # (앱은 missing_categories를 "○○ 장소를 찾지 못했어요"로 보여줍니다.)
     if candidates:
-        prefs = extract_preferences(request.query_text, parsed.keywords)
+        prefs = extract_preferences(
+            request.query_text, parsed.keywords, ai_labels=[*parsed.concepts, *parsed.facilities]
+        )
         missing_categories += [label for label in unmet_labels(candidates, prefs)
                                if label not in missing_categories]
     if not candidates:

@@ -32,11 +32,13 @@ from app.config import get_settings
 from app.services import accessibility_criteria
 from app.services.accessibility_criteria import PARSE_VERSION, features_from_detail
 from app.models.schemas import AccessibilityFeatures, Attraction, CongestionForecast, InfoField
+from app.services.candidate_ranking import Scored, cluster_nearby, drop_near_duplicates
 from app.services.memory_cache import TTLCache
 from app.services.place_intent import VenueConstraint
 from app.services.place_popularity_service import read_place_popularity
 from app.services.query_preferences import extract_preferences, grade_rank, load_overview_tags, text_matches
 from app.services.review_service import get_average_ratings
+from app.services.schedule import is_closed_on
 from app.services.sigungu_codes import (
     area_code_for_signgu,
     find_area_signgu,
@@ -1634,6 +1636,8 @@ class TourApiClient:
         keywords: list[str] | None = None,
         venue_constraint: VenueConstraint | None = None,
         query_text: str = "",
+        ai_labels: list[str] | None = None,
+        visit_date: str | None = None,
     ) -> list[Attraction]:
         """
         AI 장소 추천(1단계)에 넘길 후보를 지역 전체에서 표본으로 뽑습니다.
@@ -1713,22 +1717,33 @@ class TourApiClient:
         wanted_categories: set[str] = set()
         for purpose in purposes or []:
             wanted_categories.update(_PURPOSE_CATEGORIES.get(str(purpose), ()))
-        prefs = extract_preferences(query_text, keywords, wanted_categories)
+        prefs = extract_preferences(query_text, keywords, wanted_categories, ai_labels)
         if prefs.concepts:
             # 이름에 특성이 드러나지 않는 곳도 소개문으로 찾습니다 (DB 캐시, 하루 메모리 보관).
             await load_overview_tags([a.content_id for a in eligible])
+        popularity = await self._place_popularity_scores()
         scored = [
-            (text_matches(a, prefs)[0], grade_rank(a, user_type), random.random(), a)
+            Scored(a, text_matches(a, prefs)[0], grade_rank(a, user_type),
+                   popularity.get(a.content_id, 0.0), random.random())
             for a in eligible
         ]
-        preferred = sorted((s for s in scored if s[0] > 0), key=lambda s: (-s[0], -s[1], s[2]))
-        others = [s for s in scored if s[0] == 0]
+        # 지역을 고르지 않았으면(문장에도 지역이 없으면) 한 코스로 다닐 수 있게 가까운
+        # 곳끼리 묶습니다. 짧은 동선 요청은 라우터가 따로 더 좁힙니다.
+        # 방문일에 쉬는 곳은 묶기 전에 뺍니다 — 묶은 뒤에 빼면 월요일 박물관 요청처럼
+        # 묶음 안의 대부분이 휴관이라 두세 곳만 남았습니다. (영업 정보는 DB 캐시만 읽음)
+        if not sigungu_cd:
+            if visit_date:
+                await self.fill_extra_info([s.place for s in scored])
+                scored = [s for s in scored if not is_closed_on(s.place, visit_date)]
+            scored = cluster_nearby(scored, limit)
+        preferred = sorted((s for s in scored if s.text > 0), key=lambda s: s.key)
+        others = [s for s in scored if s.text == 0]
 
-        def mixed_by_grade(items: list, count: int) -> list[Attraction]:
-            """카테고리를 번갈아 담되(관광지만 가득 차지 않게), 카테고리 안에서는 등급 높은 순."""
+        def mixed_by_grade(items: list[Scored], count: int) -> list[Attraction]:
+            """카테고리를 번갈아 담되(관광지만 가득 차지 않게), 카테고리 안에서는 등급·인기도 순."""
             groups: dict[str, list[Attraction]] = {}
-            for s in sorted(items, key=lambda s: (-s[1], s[2])):
-                groups.setdefault(s[3].category or "기타", []).append(s[3])
+            for item in sorted(items, key=lambda s: s.key):
+                groups.setdefault(item.place.category or "기타", []).append(item.place)
             picked: list[Attraction] = []
             order = sorted(groups)
             index = 0
@@ -1742,16 +1757,19 @@ class TourApiClient:
         if venue_constraint:
             # 필수 장소 종류는 prioritize_required가 앞쪽에 모읍니다. 드문 종류(음식점 등)가
             # 잘려나가지 않도록 전체를 순서대로 넘깁니다.
-            ordered = [s[3] for s in preferred] + mixed_by_grade(others, len(others))
+            ordered = drop_near_duplicates(
+                [s.place for s in preferred] + mixed_by_grade(others, len(others))
+            )
             candidates = prioritize_required(ordered)
         else:
             # 문장 조건에 맞는 곳을 7할까지, 나머지는 곁들일 만한 다른 곳으로 채웁니다.
+            top = drop_near_duplicates([s.place for s in preferred])
             quota = int(limit * _PREFERRED_CANDIDATE_RATIO) if others else limit
-            candidates = [s[3] for s in preferred[:quota]]
+            candidates = top[:quota]
             candidates += mixed_by_grade(others, limit - len(candidates))
             if len(candidates) < limit:
-                candidates += [s[3] for s in preferred[quota:]][: limit - len(candidates)]
-
+                candidates += top[quota:][: limit - len(candidates)]
+            candidates = drop_near_duplicates(candidates)
 
         # 4) 유형에 맞는 곳이 워낙 드문 경우(예: 청각장애 편의시설은 경기도에 몇 곳
         #    뿐이라 표본에 하나도 안 걸릴 수 있음) 기존 방식으로 보완합니다.
