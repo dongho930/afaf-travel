@@ -60,7 +60,8 @@ from app.services.supabase_service import (
     update_trip,
     update_visited_place_date,
 )
-from app.services.schedule import next_day_of
+from app.services.request_conflicts import conflict_message, find_conflicts
+from app.services.schedule import is_closed_on, next_day_of
 from app.services.tour_api import tour_api_client
 
 router = APIRouter(tags=["courses"])
@@ -140,7 +141,18 @@ async def recommend_course_places(request: PlaceRecommendationRequest):
     질의는 그대로 AI에게 넘기기만 하는 게 아니라, 먼저 지역·동행자·목적을 뽑아
     (parse_query) 지역은 후보 검색 범위로, 동행자·목적은 추천 조건으로 씁니다.
     무엇으로 이해했는지는 응답의 parsed에 담아 앱이 보여줄 수 있게 합니다.
+
+    우선순위는 화면에서 고른 유형·지역·방문일이 먼저입니다. 문장에 적은 유형·지역·
+    날짜가 고른 값과 어긋나면 추천으로 넘어가지 않고, 무엇이 맞지 않는지 알려줍니다
+    (422 — 앱은 detail 문장을 그대로 알림으로 보여줍니다).
     """
+    conflicts = find_conflicts(
+        request.query_text, request.user_type.value, request.sigungu_cd,
+        request.visit_date, request.region,
+    )
+    if conflicts:
+        raise HTTPException(status_code=422, detail=conflict_message(conflicts))
+
     try:
         candidates, parsed = await _candidates_with_conditions(
             request.query_text, request.user_type.value, request.region, request.sigungu_cd
@@ -184,6 +196,15 @@ async def recommend_course_places(request: PlaceRecommendationRequest):
     # 것이라, 날짜가 없으면 굳이 조회할 이유가 없습니다.
     if request.visit_date:
         await tour_api_client.fill_extra_info(candidates)
+        # 방문일에 쉬는 게 확인된 곳은 후보에서 뺍니다. 영업 정보가 없는 곳은 남깁니다
+        # (is_closed_on은 휴무가 확실할 때만 True). 예전엔 AI에게 "고르지 마세요"라고
+        # 부탁만 해서, AI가 고르면 휴무인 곳이 그대로 추천에 남았습니다.
+        candidates = [place for place in candidates if not is_closed_on(place, request.visit_date)]
+        if not candidates:
+            return PlaceRecommendationResponse(
+                query_text=request.query_text, candidates=[], parsed=parsed,
+                missing_categories=missing_categories,
+            )
     try:
         selected = await recommend_places(request, candidates, parsed) if candidates else []
     except GroqUnavailableError as e:

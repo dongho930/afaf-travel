@@ -176,11 +176,23 @@ def test_여러_장소_유형도_요청한_카테고리로_제한한다(
 def test_화면에서_고른_지역이_있으면_그대로_쓴다(client, searches):
     response = client.post(
         "/api/courses/recommend",
-        json={"query_text": "가평 계곡", "user_type": "general", "sigungu_cd": 41135},
+        json={"query_text": "계곡", "user_type": "general", "sigungu_cd": 41135},
     )
 
     assert searches == [[41135]]
     assert response.json()["parsed"]["region_source"] == "user_selected"
+
+
+def test_고른_지역과_문장의_지역이_다르면_추천하지_않고_알린다(client, searches):
+    """예전엔 고른 값을 조용히 따랐는데, 어느 쪽을 따라도 원한 결과가 아니라서 묻습니다."""
+    response = client.post(
+        "/api/courses/recommend",
+        json={"query_text": "가평 계곡", "user_type": "general", "sigungu_cd": 41135},
+    )
+
+    assert response.status_code == 422
+    assert "가평" in response.json()["detail"]
+    assert searches == []  # 후보를 찾기 전에 멈춥니다
 
 
 def test_질의에_명시한_지역에_후보가_없으면_다른_도시를_추천하지_않는다(client, monkeypatch):
@@ -221,15 +233,17 @@ def test_2단계에서_예보를_채운_뒤_코스를_만든다(client, details,
     assert filled == [["1", "2"]]  # 코스를 만들기 전에 선택한 장소들의 예보를 채웁니다
 
 
-def test_방문일에_쉬는_곳은_추천_뒤로_밀린다(client, monkeypatch):
-    """월요일에 가겠다는 사람에게 월요일 휴관인 곳을 앞세워 추천하면 안 됩니다."""
+def test_방문일에_쉬는_곳은_추천에서_뺀다(client, monkeypatch):
+    """월요일에 가겠다는 사람에게 월요일 휴관인 곳을 추천하면 안 됩니다.
+    (예전엔 뒤로 밀기만 해서 목록에 남았습니다.) 영업 정보가 없는 곳은 남깁니다."""
     async def fake_search(region, user_type, limit=20, sigungu_cd=None, **kwargs):
         closed = _attraction("closed", "월요일 휴관 박물관")
         closed.category = "문화시설"
         closed.extra_info = [InfoField(label="쉬는날", value="매주 월요일")]
         open_place = _attraction("open", "연중무휴 공원")
         open_place.extra_info = [InfoField(label="쉬는날", value="연중무휴")]
-        return [closed, open_place]
+        unknown = _attraction("unknown", "영업 정보 없는 공원")
+        return [closed, open_place, unknown]
 
     async def noop_fill(attractions):
         return 0
@@ -243,7 +257,8 @@ def test_방문일에_쉬는_곳은_추천_뒤로_밀린다(client, monkeypatch)
     )
 
     names = [c["attraction"]["content_id"] for c in response.json()["candidates"]]
-    assert names.index("open") < names.index("closed")
+    assert "closed" not in names
+    assert {"open", "unknown"} <= set(names)
 
 
 def test_방문_날짜를_보내면_휴무일을_경고한다(client, details, monkeypatch):
