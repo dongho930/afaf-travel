@@ -35,6 +35,7 @@ from app.models.schemas import AccessibilityFeatures, Attraction, CongestionFore
 from app.services.memory_cache import TTLCache
 from app.services.place_intent import VenueConstraint
 from app.services.place_popularity_service import read_place_popularity
+from app.services.query_preferences import extract_preferences, grade_rank, load_overview_tags, text_matches
 from app.services.review_service import get_average_ratings
 from app.services.sigungu_codes import (
     area_code_for_signgu,
@@ -1617,6 +1618,7 @@ class TourApiClient:
         purposes: list[str] | None = None,
         keywords: list[str] | None = None,
         venue_constraint: VenueConstraint | None = None,
+        query_text: str = "",
     ) -> list[Attraction]:
         """
         AI 장소 추천(1단계)에 넘길 후보를 지역 전체에서 표본으로 뽑습니다.
@@ -1655,12 +1657,6 @@ class TourApiClient:
         pool = _filter_and_mix_by_regions(pool, _region_token_sets(sigungu_cd))
         if venue_constraint:
             pool = [a for a in pool if venue_constraint.matches(a)]
-        if venue_constraint and venue_constraint.allow_other_categories:
-            required_pool = [a for a in pool if venue_constraint.matches_requirement(a)]
-            required_ids = {a.content_id for a in required_pool}
-            remaining_pool = [a for a in pool if a.content_id not in required_ids]
-            picked = _stratified_sample(required_pool, len(required_pool))
-            picked += _stratified_sample(remaining_pool, limit * 3)
         if not pool:
             return []
 
@@ -1681,56 +1677,66 @@ class TourApiClient:
                     reserved_ids.add(a.content_id)
             return (reserved + [a for a in items if a.content_id not in reserved_ids])[:limit]
 
-        # 1) 질의 조건에 맞는 곳과 나머지로 가릅니다.
-        wanted_categories: set[str] = set()
-        for purpose in purposes or []:
-            wanted_categories.update(_PURPOSE_CATEGORIES.get(str(purpose), ()))
-        needles = [k.replace(" ", "").lower() for k in (keywords or []) if len(k) >= 2]
-
-        def matches_conditions(a: Attraction) -> bool:
-            if needles and any(n in (a.name or "").replace(" ", "").lower() for n in needles):
-                return True
-            return bool(wanted_categories) and a.category in wanted_categories
-
-        preferred = [a for a in pool if matches_conditions(a)]
-        others = [a for a in pool if not matches_conditions(a)]
-
-        # 2) 편의시설 필터에서 상당수가 걸러지므로 넉넉히(3배) 뽑아둡니다.
-        if venue_constraint and venue_constraint.allow_other_categories:
-            pass  # 위에서 필수 유형 전체와 일반 장소 표본을 이미 뽑았습니다.
-        elif venue_constraint:
-            # 특정 장소 종류를 원하는 요청에서는 접근 가능한 곳이 드물 수 있습니다.
-            # 일부만 무작위로 뽑으면 실제 음식점이 있는데도 결과가 0개가 됩니다.
-            picked = _stratified_sample(pool, len(pool))
-        else:
-            target = limit * 3
-            preferred_quota = int(target * _PREFERRED_CANDIDATE_RATIO) if preferred else 0
-            picked = _stratified_sample(preferred, preferred_quota)
-            picked += _stratified_sample(others, target - len(picked))
-        # 조건에 맞는 곳을 앞에 몰아둔 채로 두면, 아래에서 limit만큼 자를 때 앞쪽만
-        # 살아남아 후보가 그 카테고리 하나로 도배됩니다('맛집' 질의에 음식점 40곳).
-        # 섞어야 의도한 비율(7:3)이 최종 후보까지 유지됩니다.
-        random.shuffle(picked)
-
-        # 3) 편의시설 정보를 캐시에서 한 번에 채우고 사용자 유형으로 거릅니다.
-        #    목록 캐시에는 편의시설이 안 들어 있어서 이 단계가 반드시 필요합니다.
+        # 1) 반드시 지키는 조건 — 유형(접근성 기준). 지역과 명시한 장소 종류는 위에서
+        #    이미 걸렀고, 방문일 휴무는 라우터가 영업정보를 채운 뒤 거릅니다.
+        #    예전엔 표본(3배수)을 먼저 뽑고 그 안에서만 걸러서, 문장 조건에 딱 맞는 곳이
+        #    표본에 안 걸리면 후보에 오르지 못했습니다. 이제 지역 전체를 거른 뒤 순서를
+        #    정합니다 (편의시설은 DB 캐시 조회라 공공데이터 API를 부르지 않습니다).
         #    캐시 원본을 그대로 고치면 다음 요청까지 오염되므로 복사본에 채웁니다.
-        rows = await get_cached_place_accessibility([a.content_id for a in picked if a.content_id])
-        candidates: list[Attraction] = []
-        for a in picked:
+        rows = await get_cached_place_accessibility([a.content_id for a in pool if a.content_id])
+        eligible: list[Attraction] = []
+        for a in pool:
             copied = a.model_copy(deep=True)
             row = rows.get(a.content_id)
             if row is not None:
                 copied.accessibility = _accessibility_from_cache_row(row)
-            if not _matches_user_type(copied, user_type):
-                continue
-            candidates.append(copied)
-            if len(candidates) >= limit and not venue_constraint:
-                break
+            if _matches_user_type(copied, user_type):
+                eligible.append(copied)
+
+        # 2) 문장 조건 점수 → 3) 접근성 등급 순으로 세웁니다 (query_preferences 참고).
+        #    같은 점수·등급 안에서는 무작위라 '다시 추천'할 때마다 다른 곳이 섞입니다.
+        wanted_categories: set[str] = set()
+        for purpose in purposes or []:
+            wanted_categories.update(_PURPOSE_CATEGORIES.get(str(purpose), ()))
+        prefs = extract_preferences(query_text, keywords, wanted_categories)
+        if prefs.concepts:
+            # 이름에 특성이 드러나지 않는 곳도 소개문으로 찾습니다 (DB 캐시, 하루 메모리 보관).
+            await load_overview_tags([a.content_id for a in eligible])
+        scored = [
+            (text_matches(a, prefs)[0], grade_rank(a, user_type), random.random(), a)
+            for a in eligible
+        ]
+        preferred = sorted((s for s in scored if s[0] > 0), key=lambda s: (-s[0], -s[1], s[2]))
+        others = [s for s in scored if s[0] == 0]
+
+        def mixed_by_grade(items: list, count: int) -> list[Attraction]:
+            """카테고리를 번갈아 담되(관광지만 가득 차지 않게), 카테고리 안에서는 등급 높은 순."""
+            groups: dict[str, list[Attraction]] = {}
+            for s in sorted(items, key=lambda s: (-s[1], s[2])):
+                groups.setdefault(s[3].category or "기타", []).append(s[3])
+            picked: list[Attraction] = []
+            order = sorted(groups)
+            index = 0
+            while len(picked) < count and any(groups[key] for key in order):
+                group = groups[order[index % len(order)]]
+                if group:
+                    picked.append(group.pop(0))
+                index += 1
+            return picked
 
         if venue_constraint:
-            # 드문 필수 유형(음식점 등)을 일반 관광지 표본이 밀어내지 않도록 합니다.
-            candidates = prioritize_required(candidates)
+            # 필수 장소 종류는 prioritize_required가 앞쪽에 모읍니다. 드문 종류(음식점 등)가
+            # 잘려나가지 않도록 전체를 순서대로 넘깁니다.
+            ordered = [s[3] for s in preferred] + mixed_by_grade(others, len(others))
+            candidates = prioritize_required(ordered)
+        else:
+            # 문장 조건에 맞는 곳을 7할까지, 나머지는 곁들일 만한 다른 곳으로 채웁니다.
+            quota = int(limit * _PREFERRED_CANDIDATE_RATIO) if others else limit
+            candidates = [s[3] for s in preferred[:quota]]
+            candidates += mixed_by_grade(others, limit - len(candidates))
+            if len(candidates) < limit:
+                candidates += [s[3] for s in preferred[quota:]][: limit - len(candidates)]
+
 
         # 4) 유형에 맞는 곳이 워낙 드문 경우(예: 청각장애 편의시설은 경기도에 몇 곳
         #    뿐이라 표본에 하나도 안 걸릴 수 있음) 기존 방식으로 보완합니다.

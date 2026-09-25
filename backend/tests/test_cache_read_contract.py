@@ -35,6 +35,7 @@ CACHE_READS = [
     ("get_cached_congestion_rates", lambda m: m.get_cached_congestion_rates([41111])),
     ("get_cached_congestion_signgu_cds", lambda m: m.get_cached_congestion_signgu_cds()),
     ("get_cached_overviews", lambda m: m.get_cached_overviews(["1"])),
+    ("get_cached_overview_texts", lambda m: m.get_cached_overview_texts(["1"])),
     ("get_cached_attraction_basic", lambda m: m.get_cached_attraction_basic("1")),
     ("get_cached_intro_info", lambda m: m.get_cached_intro_info("1")),
     ("get_cached_intro_info_batch", lambda m: m.get_cached_intro_info_batch(["1"])),

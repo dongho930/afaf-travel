@@ -31,6 +31,7 @@ from app.models.schemas import (
 )
 from app.services import accessibility_criteria
 from app.services.memory_cache import TTLCache
+from app.services.query_preferences import extract_preferences, text_matches
 from app.services.place_intent import (
     MEAL, NOT_MEAL, meal_status, query_without_excluded_venues, venue_constraint_for_query,
 )
@@ -425,6 +426,9 @@ RECOMMEND_SYSTEM_PROMPT = """당신은 관광약자(지체 장애인, 영유아 
 - 질의에 "한적한", "붐비지 않는" 같은 표현이 있으면 congestion_rate가 낮은 곳을
   우선하세요. 그런 표현이 없으면 혼잡도는 참고만 하세요.
 - 순서는 중요하지 않습니다 (사용자가 나중에 직접 고릅니다).
+- candidates는 이미 사용자가 고른 유형·지역·방문일에 맞게 걸러져 있습니다. 그 안에서
+  matches_request가 있는 곳(문장에서 원한 특성·편의시설에 맞는 곳)을 우선 고르고,
+  부족하면 accessibility.grade가 높은 곳(많음 > 보통 > 적음)을 고르세요.
 - accessibility는 각 장소 "안"의 편의시설 정보입니다. 장소와 장소 사이 이동 경로
   (보도·횡단보도·경사)가 무장애라는 정보는 없으므로, "휠체어로 편하게 이동할 수 있어",
   "무장애 동선으로 이어져"처럼 이동 경로가 안전하다고 단정하지 마세요.
@@ -904,6 +908,7 @@ async def _groq_recommend(
     parsed: ParsedQuery | None = None,
 ) -> list[dict]:
     venue_constraint = venue_constraint_for_query(request.query_text)
+    prefs = extract_preferences(request.query_text, parsed.keywords if parsed else None)
     payload = {
         "query_text": request.query_text,
         "user_type": request.user_type,
@@ -919,6 +924,8 @@ async def _groq_recommend(
                 "name": a.name,
                 "category": a.category,
                 "accessibility": _relevant_accessibility_payload(a, request.user_type),
+                # 문장에서 원한 특성·편의시설 중 이 장소가 맞는 것 (없으면 싣지 않음).
+                **({"matches_request": m} if (m := text_matches(a, prefs)[1]) else {}),
                 # 1단계는 후보가 25곳까지 실려서 프롬프트가 큽니다. 날짜별 예보는
                 # 빼고 집중률 숫자 하나만 넣습니다(장소 고르기엔 이걸로 충분).
                 **_congestion_payload(a, include_forecast=False),
