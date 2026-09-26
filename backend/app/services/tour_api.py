@@ -1761,11 +1761,11 @@ class TourApiClient:
             # 이름에 특성이 드러나지 않는 곳도 소개문으로 찾습니다 (DB 캐시, 하루 메모리 보관).
             await load_overview_tags([a.content_id for a in eligible])
         popularity = await self._place_popularity_scores()
-        scored = [
-            Scored(a, text_matches(a, prefs)[0], grade_rank(a, user_type),
-                   popularity.get(a.content_id, 0.0), random.random())
-            for a in eligible
-        ]
+        scored = []
+        for a in eligible:
+            text, labels = text_matches(a, prefs)
+            scored.append(Scored(a, text, grade_rank(a, user_type),
+                                 popularity.get(a.content_id, 0.0), random.random(), hit=bool(labels)))
         # 지역을 고르지 않았으면(문장에도 지역이 없으면) 한 코스로 다닐 수 있게 가까운
         # 곳끼리 묶습니다. 짧은 동선 요청은 라우터가 따로 더 좁힙니다.
         # 방문일에 쉬는 곳은 묶기 전에 뺍니다 — 묶은 뒤에 빼면 월요일 박물관 요청처럼

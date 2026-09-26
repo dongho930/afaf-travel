@@ -21,6 +21,9 @@ class Scored:
     grade: int         # 접근성 등급 (많음 2 / 보통 1 / 적음 0)
     popularity: float  # 실사용 인기도 (리뷰·저장·게시물 집계)
     tiebreak: float    # 같은 점수 안에서 섞기 ('다시 추천'할 때마다 다른 곳이 섞이게)
+    # 문장의 특성·편의시설 조건(온천·휴양, 장애인 화장실 등)에 맞는지. text 점수에는
+    # '휴식 → 관광지 전체' 같은 목적 점수도 섞여 있어서, 지역을 고를 때는 이것만 셉니다.
+    hit: bool = False
 
     @property
     def key(self) -> tuple:
@@ -63,9 +66,11 @@ def cluster_nearby(items: list[Scored], limit: int) -> list[Scored]:
     # 문장 조건에 맞는 곳이 많이 모인 지역을 먼저, 그다음 등급 높은 곳이 모인 지역을
     # 고릅니다 (후보 순서와 같은 우선순위: 문장 > 등급). 예전엔 둘을 비슷한 무게로 더해서
     # '온천이나 휴양' 요청에 등급 좋은 도심이 뽑혀 맞는 곳이 2곳뿐이었습니다.
+    # 세는 건 목적 점수가 아니라 특성·편의시설 조건입니다 (AI가 붙인 '휴식' 목적은
+    # 관광지 전체에 점수를 줘서, 그걸 세면 어느 지역이나 똑같이 보였습니다).
     # 개수 비중이 크면 식당·공원이 많은 곳이 뽑혀 '많음' 등급 비율이 떨어졌습니다 (56%→45%).
     def value(members: list[Scored]) -> tuple[int, float]:
-        return (sum(m.text > 0 for m in members), sum(0.5 + 2 * m.text + 2 * m.grade for m in members))
+        return (sum(m.hit for m in members), sum(0.5 + 2 * m.text + 2 * m.grade for m in members))
 
     for radius in CLUSTER_RADII_KM:
         best: list[Scored] = []

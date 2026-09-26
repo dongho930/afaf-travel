@@ -14,8 +14,9 @@ def _place(cid, name, at, dlat=0.0):
                       longitude=at[1], category="관광지")
 
 
-def _scored(place, text=0, grade=0, popularity=0.0, tiebreak=0.0):
-    return Scored(place, text, grade, popularity, tiebreak)
+def _scored(place, text=0, grade=0, popularity=0.0, tiebreak=0.0, hit=None):
+    # hit(특성·편의시설 조건에 맞음)을 따로 주지 않으면 점수가 있으면 맞는 것으로 봅니다.
+    return Scored(place, text, grade, popularity, tiebreak, hit=text > 0 if hit is None else hit)
 
 
 def test_문장에_맞는_곳이_여럿_모인_지역으로_묶는다():
@@ -54,3 +55,14 @@ def test_점수와_등급이_같으면_인기도가_높은_곳이_앞이다():
     quiet = _scored(_place("q", "가", SUWON), text=3, grade=2, popularity=0.0, tiebreak=0.1)
     popular = _scored(_place("p", "나", SUWON), text=3, grade=2, popularity=5.0, tiebreak=0.9)
     assert sorted([quiet, popular], key=lambda s: s.key)[0].place.content_id == "p"
+
+
+def test_목적_점수만_있는_곳보다_특성_조건에_맞는_곳이_모인_지역으로_묶는다():
+    # '온천이나 휴양': AI가 붙인 '휴식' 목적은 수원 관광지 전부에 점수를 주지만(hit 아님),
+    # 실제 휴양림·스파는 가평에 모여 있습니다 → 가평 쪽으로 묶습니다.
+    suwon = [_scored(_place(f"s{i}", f"수원공원{i}", SUWON, i * 0.01), text=1, grade=2, hit=False)
+             for i in range(8)]
+    spa = [_scored(_place(f"g{i}", f"가평휴양림{i}", GAPYEONG, i * 0.01), text=3, hit=True) for i in range(6)]
+
+    ids = {s.place.content_id for s in cluster_nearby(suwon + spa, limit=12)}
+    assert ids == {f"g{i}" for i in range(6)}
