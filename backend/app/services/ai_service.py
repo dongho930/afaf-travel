@@ -35,7 +35,7 @@ from app.services.query_preferences import CONCEPT_LABELS, FACILITY_LABELS, extr
 from app.services.place_intent import (
     MEAL, NOT_MEAL, VenueConstraint, meal_status, query_without_excluded_venues, venue_constraint_for_query,
 )
-from app.services.schedule import arrange_for_meals, build_schedule, hours_payload, is_closed_on
+from app.services.schedule import arrange_for_meals, best_visit_order, build_schedule, hours_payload, is_closed_on
 from app.services.course_validator import (
     clean_reason, congestion_level, copula, describe_place, facility_reason, fits_congestion, prefers_short_route,
     validate_course,
@@ -834,7 +834,12 @@ def _stops_from_raw(
                 seen_ids.add(attraction.content_id)
     ordered.sort(key=lambda item: item[0])
 
-    arrangement = arrange_for_meals([attraction for _, attraction, _ in ordered])
+    # 순서는 코드가 정합니다 (best_visit_order — 영업시간·식사 시간·동선·혼잡도).
+    # 장소가 많아 전부 따져볼 수 없을 때만 AI 순서에 식당 위치만 바로잡습니다.
+    places = [attraction for _, attraction, _ in ordered]
+    arrangement = best_visit_order(
+        places, visit_date, crowd=[-_fallback_congestion_key(a) for a in places],
+    ) or arrange_for_meals(places)
     ordered = [ordered[i] for i in arrangement]
 
     attractions = [attraction for _, attraction, _ in ordered]
