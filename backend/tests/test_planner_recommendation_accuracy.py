@@ -357,7 +357,7 @@ def test_당일치기_ai가_열두_곳을_골라도_필수_식당과_관광지_�
     assert {"food", "park"} <= ids
 
 
-def test_선택한_코스에서_과학관과_미술관_중_하나가_빠지면_거절(monkeypatch):
+def test_선택한_코스에서_과학관과_미술관_중_하나가_빠져도_만들고_알림(monkeypatch):
     ai_service._PARSE_CACHE._entries.clear()
     ai_service._PARSE_CACHE._locks.clear()
     monkeypatch.setattr(ai_service.settings, "groq_api_key", "")
@@ -371,8 +371,8 @@ def test_선택한_코스에서_과학관과_미술관_중_하나가_빠지면_�
     response = client.post("/api/courses/generate-from-selection", json={
         "query_text": "과천 과학관과 미술관", "selected_content_ids": ["science"],
     })
-    assert response.status_code == 422
-    assert "미술관" in response.json()["detail"]
+    assert response.status_code == 200, response.text
+    assert "요청하신 미술관은 이 코스에 포함되지 않았어요." in response.json()["warnings"]
 
 
 def test_ai가_선택한_장소를_코스_응답에서_누락해도_복원(monkeypatch):
@@ -441,3 +441,35 @@ def test_ai에게는_순위_앞쪽_후보만_보냄(monkeypatch):
     ))
     assert sent == [ai_service._AI_CANDIDATE_LIMIT]
 
+
+
+def _select(monkeypatch, query, places):
+    ai_service._PARSE_CACHE._entries.clear()
+    ai_service._PARSE_CACHE._locks.clear()
+    monkeypatch.setattr(ai_service.settings, "groq_api_key", "")
+    by_id = {p.content_id: p for p in places}
+
+    async def detail(cid):
+        return by_id.get(cid)
+
+    monkeypatch.setattr(courses.tour_api_client, "get_attraction_detail", detail)
+    return TestClient(app).post("/api/courses/generate-from-selection", json={
+        "query_text": query, "selected_content_ids": list(by_id),
+    })
+
+
+def test_빼달라고_한_종류를_골라도_만들고_알림(monkeypatch):
+    response = _select(monkeypatch, "미술관 말고 카페", [
+        place("art", "국립현대미술관"), place("cafe", "과천 카페", "음식점"),
+    ])
+    assert response.status_code == 200, response.text
+    assert "빼달라고 하신 종류인 국립현대미술관도 고르신 대로 코스에 넣었어요." in response.json()["warnings"]
+
+
+def test_문장_속_지역_밖을_골라도_만들고_알림(monkeypatch):
+    response = _select(monkeypatch, "수원 박물관", [
+        place("suwon", "수원박물관", address="경기도 수원시 영통구"),
+        place("gwacheon", "과천과학관 박물관", address="경기도 과천시"),
+    ])
+    assert response.status_code == 200, response.text
+    assert any("밖의 과천과학관 박물관도" in w for w in response.json()["warnings"])
