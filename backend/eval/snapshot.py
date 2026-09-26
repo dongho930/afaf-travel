@@ -63,7 +63,7 @@ class Snapshot:
         import importlib
         for module_name in ("supabase_service", "place_popularity_service", "review_service",
                             "post_service", "report_service", "region_popularity_service",
-                            "profile_service"):
+                            "profile_service", "selection_log_service"):
             try:
                 module = importlib.import_module(f"app.services.{module_name}")
             except ImportError:

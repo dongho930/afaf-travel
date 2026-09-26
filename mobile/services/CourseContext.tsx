@@ -29,6 +29,10 @@ interface CourseContextValue {
   setRecommendations: (r: PlaceCandidate[]) => void;
   missingCategories: string[];
   setMissingCategories: (categories: string[]) => void;
+  // 이번 세션에서 받은 추천 기록 id들('다시 추천'마다 하나씩 늘어남). 코스를 만들 때
+  // 서버로 돌려보내서, 무엇을 추천했고 무엇을 골랐는지 품질 분석용으로 남깁니다.
+  recommendationIds: string[];
+  setRecommendationIds: (ids: string[]) => void;
   pendingQueryText: string;
   setPendingQueryText: (q: string) => void;
   // 홈 탭 검색창에서 AI 플래너 입력창으로 문구를 넘길 때 씁니다. 넘길 때마다
@@ -58,6 +62,7 @@ export function CourseProvider({ children }: { children: React.ReactNode }) {
   const [sigunguName, setSigunguName] = useState<string | null>(null);
   const [recommendations, setRecommendations] = useState<PlaceCandidate[]>([]);
   const [missingCategories, setMissingCategories] = useState<string[]>([]);
+  const [recommendationIds, setRecommendationIds] = useState<string[]>([]);
   const [pendingQueryText, setPendingQueryText] = useState("");
   const [queryHandoffSeq, setQueryHandoffSeq] = useState(0);
   const [parsedQuery, setParsedQuery] = useState<ParsedQuery | null>(null);
@@ -101,6 +106,8 @@ export function CourseProvider({ children }: { children: React.ReactNode }) {
         setRecommendations,
         missingCategories,
         setMissingCategories,
+        recommendationIds,
+        setRecommendationIds,
         pendingQueryText,
         setPendingQueryText,
         queryHandoffSeq,

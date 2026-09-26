@@ -44,6 +44,8 @@ export default function SelectPlacesScreen() {
     setRecommendations,
     missingCategories,
     setMissingCategories,
+    recommendationIds,
+    setRecommendationIds,
     pendingQueryText,
     parsedQuery,
     setParsedQuery,
@@ -123,7 +125,7 @@ export default function SelectPlacesScreen() {
     const keptCandidates = recommendations.filter((c) => selectedIds.has(c.attraction.content_id));
     setIsRefreshing(true);
     try {
-      const { candidates, parsed, missing_categories } = await api.recommendPlaces({
+      const { candidates, parsed, missing_categories, recommendation_id } = await api.recommendPlaces({
         queryText: pendingQueryText,
         userType,
         sigunguCd,
@@ -149,6 +151,7 @@ export default function SelectPlacesScreen() {
       setRecommendations(merged);
       setParsedQuery(parsed ?? null);
       setMissingCategories(missing_categories ?? []);
+      if (recommendation_id) setRecommendationIds([...recommendationIds, recommendation_id]);
       // 선택(selectedIds)은 그대로 둡니다 — 고른 카드가 목록에 남아 있으니 유효합니다.
       listRef.current?.scrollToOffset({ offset: 0, animated: true });
     } catch (err) {
@@ -171,6 +174,7 @@ export default function SelectPlacesScreen() {
         sigunguCd,
         visitDate,
         selectedContentIds: Array.from(selectedIds),
+        recommendationIds,
       });
       setCourse(course);
       await storage.saveCourse(course);
