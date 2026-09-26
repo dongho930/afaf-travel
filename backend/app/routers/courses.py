@@ -63,7 +63,7 @@ from app.services.supabase_service import (
 from app.services.query_preferences import extract_preferences, unmet_labels
 from app.services.request_conflicts import conflict_message, find_conflicts
 from app.services.schedule import is_closed_on, next_day_of
-from app.services.selection_log_service import log_recommendation, log_selection
+from app.services.selection_log_service import RETENTION_DAYS, log_recommendation, log_selection, purge_old_logs
 from app.services.tour_api import tour_api_client
 
 router = APIRouter(tags=["courses"])
@@ -254,6 +254,19 @@ async def recommend_course_places(
         query_text=request.query_text, candidates=selected, parsed=parsed,
         missing_categories=missing_categories, recommendation_id=recommendation_id,
     )
+
+
+@courses_router.get("/selection-logs/purge")
+async def purge_selection_logs():
+    """
+    보관 기간이 지난 추천·선택 기록을 지웁니다. GitHub Actions가 하루 한 번 부릅니다
+    (.github/workflows/selection-log-purge.yml). 기간이 지난 것만 지우므로 여러 번
+    불러도 결과가 같습니다.
+    """
+    deleted = await purge_old_logs()
+    if deleted is None:
+        raise HTTPException(status_code=503, detail="추천 기록을 정리하지 못했습니다.")
+    return {"deleted": deleted, "retention_days": RETENTION_DAYS}
 
 
 @courses_router.post("/generate-from-selection", response_model=CourseResponse)

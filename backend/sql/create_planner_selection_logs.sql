@@ -10,6 +10,9 @@
 --   selected_ids is null  → 코스를 만들지 않고 떠남
 --   selected_ids = '{}'   → 코스는 만들었지만 이 추천에서는 하나도 안 고름
 --
+-- 질문 문장이 그대로 담기므로 90일이 지난 기록은 매일 지웁니다
+-- (GET /api/courses/selection-logs/purge, .github/workflows/selection-log-purge.yml).
+--
 -- 로그인하지 않은 사용자도 기록합니다 (user_id null). 쓰기·읽기는 백엔드의
 -- 서비스 키로만 합니다 — RLS를 켜고 정책을 두지 않아 앱에서 직접 접근할 수 없습니다.
 create table if not exists public.planner_selection_logs (
