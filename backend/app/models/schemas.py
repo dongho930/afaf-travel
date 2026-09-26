@@ -252,6 +252,9 @@ class PlaceRecommendationResponse(BaseModel):
     # 보여줄 수 있게 함께 내려보냅니다 — 특히 지역은 질의에서 추출한 경우
     # 결과 범위가 달라지므로, 사용자가 확인할 수 있어야 합니다.
     parsed: Optional[ParsedQuery] = None
+    # 이번 추천의 기록 id. 앱은 코스를 만들 때 이 세션에서 받은 id들을 돌려보내서
+    # 무엇을 추천했고 무엇을 골랐는지 남깁니다 (기록할 수 없는 환경이면 null).
+    recommendation_id: Optional[str] = None
 
 
 class GenerateFromSelectionRequest(BaseModel):
@@ -265,6 +268,10 @@ class GenerateFromSelectionRequest(BaseModel):
         description="방문 예정일 (YYYY-MM-DD). 방문 시각 계산과 휴무일 확인에 씁니다.",
     )
     selected_content_ids: list[str] = Field(..., min_length=1, description="사용자가 선택한 관광지 content_id 목록")
+    recommendation_ids: list[str] = Field(
+        default_factory=list,
+        description="이 세션의 1단계 응답들에서 받은 recommendation_id ('다시 추천'마다 하나씩)",
+    )
 
 
 class CourseStop(BaseModel):

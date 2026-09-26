@@ -63,6 +63,7 @@ from app.services.supabase_service import (
 from app.services.query_preferences import extract_preferences, unmet_labels
 from app.services.request_conflicts import conflict_message, find_conflicts
 from app.services.schedule import is_closed_on, next_day_of
+from app.services.selection_log_service import log_recommendation, log_selection
 from app.services.tour_api import tour_api_client
 
 router = APIRouter(tags=["courses"])
@@ -138,7 +139,10 @@ async def _candidates_with_conditions(
 
 
 @courses_router.post("/recommend", response_model=PlaceRecommendationResponse)
-async def recommend_course_places(request: PlaceRecommendationRequest):
+async def recommend_course_places(
+    request: PlaceRecommendationRequest,
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
     """
     1단계: 사용자의 자연어 질의에 맞는 장소 후보를 넓게 추천합니다.
     아직 코스(순서/시간)를 확정하지 않고, 사용자가 이 중에서 직접 고를 수 있게 목록만 보여줍니다.
@@ -240,9 +244,15 @@ async def recommend_course_places(request: PlaceRecommendationRequest):
             item.reason = f"{item.reason} 다른 후보들과 직선 약 {km:g}km 떨어져 있어요."
     selected.sort(key=lambda item: item.attraction.content_id in nearby_km)
 
+    recommendation_id = log_recommendation(
+        query_text=request.query_text, user_type=request.user_type.value,
+        sigungu_cd=request.sigungu_cd, visit_date=request.visit_date,
+        recommended_ids=[item.attraction.content_id for item in selected],
+        user_id=user_id,
+    )
     return PlaceRecommendationResponse(
         query_text=request.query_text, candidates=selected, parsed=parsed,
-        missing_categories=missing_categories,
+        missing_categories=missing_categories, recommendation_id=recommendation_id,
     )
 
 
@@ -318,6 +328,7 @@ async def create_course_from_selection(
 
     _note_missing_meal(course, meal_gap)
     await save_course(course, query_text=request.query_text, region=request.region, user_id=user_id)
+    log_selection(request.recommendation_ids, [place.content_id for place in selected_attractions])
     return course
 
 

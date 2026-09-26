@@ -90,7 +90,7 @@ async def _run_one(q: EvalQuery, seed: int) -> QueryResult:
         query_text=q.text, user_type=UserType(q.user_type), sigungu_cd=q.sigungu_cd, visit_date=q.visit_date,
     )
     try:
-        response = await courses.recommend_course_places(request)
+        response = await courses.recommend_course_places(request, user_id=None)
     except HTTPException as e:
         return QueryResult(q.id, False, error=f"{e.status_code}: {e.detail}")
     places = [c.attraction for c in response.candidates]

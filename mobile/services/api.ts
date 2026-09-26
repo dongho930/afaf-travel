@@ -274,7 +274,13 @@ export const api = {
     sigunguCd?: number | null;
     visitDate?: string | null;
   }) =>
-    request<{ query_text: string; candidates: PlaceCandidate[]; parsed: ParsedQuery | null; missing_categories: string[] }>("/api/courses/recommend", {
+    request<{
+      query_text: string;
+      candidates: PlaceCandidate[];
+      parsed: ParsedQuery | null;
+      missing_categories: string[];
+      recommendation_id?: string | null;
+    }>("/api/courses/recommend", {
       method: "POST",
       body: JSON.stringify({
         query_text: params.queryText,
@@ -293,6 +299,7 @@ export const api = {
     sigunguCd?: number | null;
     visitDate?: string | null;
     selectedContentIds: string[];
+    recommendationIds?: string[];
   }) =>
     request<CourseResponse>("/api/courses/generate-from-selection", {
       method: "POST",
@@ -303,6 +310,7 @@ export const api = {
         sigungu_cd: params.sigunguCd ?? null,
         visit_date: params.visitDate ?? null,
         selected_content_ids: params.selectedContentIds,
+        recommendation_ids: params.recommendationIds ?? [],
       }),
     }),
 
