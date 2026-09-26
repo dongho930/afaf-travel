@@ -31,7 +31,6 @@ import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
 import { radius, spacing } from "../../constants/tokens";
 import { EXAMPLE_QUERY_BY_TYPE, USER_TYPE_OPTIONS } from "../../constants/userTypes";
-import { FirstVisitTip } from "../../components/FirstVisitTip";
 import { detectUserTypeFromText } from "../../constants/userTypeKeywords";
 import { api, errorMessage } from "../../services/api";
 import { useCourseContext } from "../../services/CourseContext";
@@ -315,11 +314,6 @@ export default function PlannerScreen() {
               </TouchableOpacity>
             )}
 
-            <FirstVisitTip
-              tipKey="planner"
-              text="원하는 여행을 문장으로 적거나 마이크 버튼을 눌러 말해보세요. 지역과 방문일은 골라도 되고 비워둬도 돼요."
-              style={styles.tip}
-            />
             <Text style={styles.fieldLabel}>어떤 여행을 원하세요?</Text>
             <FadeInView key={`hint-${userType}`} duration={200} translateY={4}>
               {/* 아래 입력창에 옮겨 적으려고 이 문장을 긁는 사람이 많은데, 웹에서는
@@ -473,7 +467,6 @@ export default function PlannerScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    tip: { marginBottom: spacing.md },
   container: { padding: spacing.xl, paddingBottom: spacing.xxl + spacing.xl + 4 },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.xl },
   title: { fontSize: 22, fontFamily: fontFamily.extraBold, color: colors.text },
