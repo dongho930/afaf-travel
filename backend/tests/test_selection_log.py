@@ -1,6 +1,7 @@
 """AI 플래너 추천·선택 기록 — 무엇을 추천했고 무엇을 골랐는지가 제대로 남는지."""
 
 import asyncio
+import datetime
 import uuid
 
 from app.services import selection_log_service as logs
@@ -18,6 +19,10 @@ class _Query:
         self.filters[column] = {value}
         return self
 
+    def lt(self, column, value):
+        self.before = (column, value)
+        return self
+
 
 class _Table:
     def __init__(self):
@@ -31,6 +36,9 @@ class _Table:
 
     def update(self, values):
         return _Query(self, "update", values)
+
+    def delete(self):
+        return _Query(self, "delete")
 
 
 class _Client:
@@ -51,6 +59,12 @@ async def _fake_execute(query: _Query):
     if query.op == "insert":
         rows[query.payload["id"]] = dict(query.payload)
         return _Result([query.payload])
+    if query.op == "delete":
+        column, cutoff = query.before
+        old = [r for r in rows.values() if r[column] < cutoff]
+        for r in old:
+            del rows[r["id"]]
+        return _Result(old)
     matched = [r for r in rows.values() if r["id"] in query.filters.get("id", set())]
     if query.op == "update":
         for r in matched:
@@ -136,3 +150,12 @@ def test_저장이_실패해도_요청은_계속됨(monkeypatch):
         return log_id
 
     assert asyncio.run(scenario()) is not None
+
+
+def test_보관_기간_90일이_지난_기록만_지움(monkeypatch):
+    client = _setup(monkeypatch)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    for log_id, age in [("old", 91), ("edge", 89), ("new", 1)]:
+        client.logs.rows[log_id] = {"id": log_id, "created_at": (now - datetime.timedelta(days=age)).isoformat()}
+    assert asyncio.run(logs.purge_old_logs()) == 1
+    assert set(client.logs.rows) == {"edge", "new"}

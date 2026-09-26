@@ -23,6 +23,8 @@ if settings.supabase_url and settings.supabase_service_key:
     _client = create_client(settings.supabase_url, settings.supabase_service_key)
 
 _TABLE = "planner_selection_logs"
+# 질문 문장을 그대로 담으므로(개인 정보가 섞일 수 있음) 이 기간이 지나면 지웁니다.
+RETENTION_DAYS = 90
 # 한 세션에서 '다시 추천'을 이보다 많이 누르는 일은 드뭅니다. 앱이 보낸 id를
 # 끝없이 받아 업데이트하지 않도록 앞쪽만 씁니다.
 _MAX_ROUNDS = 20
@@ -95,3 +97,18 @@ def log_selection(recommendation_ids: list[str], selected_ids: list[str]) -> Non
             logger.warning("선택 기록을 저장하지 못했습니다: %s", e)
 
     _in_background(save())
+
+
+async def purge_old_logs() -> int | None:
+    """보관 기간(RETENTION_DAYS)이 지난 기록을 지우고 지운 개수를 돌려줍니다. 못 지우면 None."""
+    if _client is None:
+        return None
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=RETENTION_DAYS)
+    try:
+        deleted = (await _execute(
+            _client.table(_TABLE).delete().lt("created_at", cutoff.isoformat())
+        )).data or []
+    except Exception as e:
+        logger.warning("오래된 추천 기록을 지우지 못했습니다: %s", e)
+        return None
+    return len(deleted)
