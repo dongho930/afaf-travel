@@ -17,6 +17,7 @@
 순서를 바꿀 때가 똑같은 규칙을 씁니다.
 """
 import datetime
+import itertools
 import math
 import re
 from dataclasses import dataclass, field
@@ -583,6 +584,83 @@ def build_schedule(
         )
 
     return schedules
+
+
+# 방문 순서를 전부 따져볼 최대 장소 수 (7곳이면 5,040가지 — 한 번에 수십 ms).
+_EXHAUSTIVE_ORDER_LIMIT = 7
+# 가장 짧은 동선보다 이만큼 안쪽이면 '거의 같은 동선'으로 보고 혼잡도로 고릅니다.
+_NEAR_SHORTEST_RATIO = 1.05
+
+
+def best_visit_order(
+    attractions: list[Attraction], visit_date: Optional[str] = None,
+    crowd: Optional[list[float]] = None,
+) -> Optional[list[int]]:
+    """
+    고른 장소들의 방문 순서를 코드가 정합니다. 돌려주는 값은 원래 목록의 인덱스 순서.
+
+    예전엔 AI가 순서를 정하고 식당 위치만 바로잡았는데, 평가해 보니 같은 장소를 가장
+    짧게 도는 순서보다 평균 1.45배 먼 길을 돌았습니다 (36개 중 29개가 1.2배 초과).
+    장소가 몇 곳 안 되니 가능한 순서를 전부 따져서 아래 순으로 고릅니다.
+      1. 그날 실제로 들를 수 있는 곳이 많은 순서 (문 닫은 뒤 도착·20시 초과 줄이기)
+      2. 식당이 식사 시간대에 도착하는 수가 많은 순서
+      3. 식당이 연달아 오지 않는 순서
+      4. 이동 거리가 짧은 순서
+    이동 거리가 가장 짧은 것보다 5% 안쪽인 순서들끼리는, 붐비는 곳(crowd 값이 큰 곳)을
+    사람이 몰리기 전인 앞쪽에 두는 순서를 고릅니다.
+
+    장소가 _EXHAUSTIVE_ORDER_LIMIT보다 많으면 None — 호출한 쪽이 기존 방식을 씁니다.
+    """
+    count = len(attractions)
+    if count > _EXHAUSTIVE_ORDER_LIMIT:
+        return None
+    if count <= 1:
+        return list(range(count))
+    # 순서마다 build_schedule을 통째로 돌리면 7곳(5,040가지)에 1초 가까이 걸려서,
+    # 같은 규칙(체류·이동·개장 대기·식사 시간 당기기·영업 종료·20시)을 숫자로만 따라갑니다.
+    hours = [place_hours(a) for a in attractions]
+    meal_slots = meal_slot_indices(attractions)
+    dwell = [dwell_minutes(a.category) for a in attractions]
+    moves = [[travel_minutes(a, b) for b in attractions] for a in attractions]
+    legs = [[route_distance_km(a, b) or 0.0 for b in attractions] for a in attractions]
+    is_food = [a.category == "음식점" for a in attractions]
+    crowd = crowd or [0.0] * count
+
+    def simulate(order: tuple[int, ...]) -> tuple[int, int]:
+        fits = meals = 0
+        current = _DAY_START_MIN
+        for position, i in enumerate(order):
+            if position:
+                previous = order[position - 1]
+                current += dwell[previous] + moves[previous][i]
+            h = hours[i]
+            if h.open_min is not None and current < h.open_min:
+                current = h.open_min
+            if i in meal_slots:
+                meal_time, _ = _meal_time_push(current)
+                if meal_time is not None and (h.close_min is None or meal_time <= h.close_min):
+                    current = meal_time
+                shown = min(current, _TOO_LATE_MIN)
+                meals += any(start <= shown <= end for _, start, end in _MEAL_WINDOWS)
+            closes_before = h.close_min is not None and current >= h.close_min
+            fits += not closes_before and current <= _TOO_LATE_MIN
+        return fits, meals
+
+    scored: list[tuple[tuple[int, int, int], float, float, tuple[int, ...]]] = []
+    for order in itertools.permutations(range(count)):
+        fits, meals = simulate(order)
+        food_in_a_row = sum(is_food[a] and is_food[b] for a, b in zip(order, order[1:]))
+        distance = sum(legs[a][b] for a, b in zip(order, order[1:]))
+        # 붐비는 곳이 뒤로 갈수록 커지는 값 (작을수록 붐비는 곳이 앞에 있음).
+        crowd_late = sum(position * crowd[i] for position, i in enumerate(order))
+        scored.append(((-fits, -meals, food_in_a_row), distance, crowd_late, order))
+
+    best_rules = min(item[0] for item in scored)
+    finalists = [item for item in scored if item[0] == best_rules]
+    shortest = min(item[1] for item in finalists)
+    near = [item for item in finalists if item[1] <= shortest * _NEAR_SHORTEST_RATIO + 1e-9]
+    # 혼잡도도 같으면 거리, 그래도 같으면 원래 순서에 가까운 쪽 (결과가 매번 같도록).
+    return list(min(near, key=lambda item: (item[2], item[1], item[3]))[3])
 
 
 def next_day_of(visit_date: Optional[str]) -> Optional[str]:
