@@ -21,7 +21,6 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Alert } from "../services/crossPlatformAlert";
 import DraggableFlatList, { ScaleDecorator } from "react-native-draggable-flatlist";
-import { FirstVisitTip } from "../components/FirstVisitTip";
 import { EXTRA_INFO_LABELS_BY_CATEGORY } from "../components/ExtraInfoList";
 import { DataCreditLine } from "../components/DataCredit";
 import { FadeInView } from "../components/FadeInView";
@@ -330,15 +329,6 @@ export default function ResultsScreen() {
             <Text style={styles.courseWarningText}>{warning}</Text>
           </View>
         ))}
-        <FirstVisitTip
-          tipKey="results"
-          text={
-            Platform.OS === "web"
-              ? "장소 카드의 위·아래 버튼으로 순서를 바꿀 수 있어요. 저장을 누르면 '내 여행'에 담겨요."
-              : "장소 카드를 길게 눌러 끌거나 위·아래 버튼으로 순서를 바꿀 수 있어요. 저장을 누르면 '내 여행'에 담겨요."
-          }
-          style={styles.tip}
-        />
       </View>
 
       {splitBannerFor(0)}
@@ -551,7 +541,6 @@ export default function ResultsScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    tip: { marginBottom: spacing.md },
   screen: { flex: 1, backgroundColor: colors.background },
   // 위쪽 여백만 목록 안(listContent)으로 옮겨서, 스크롤한 콘텐츠가 화면 맨 위까지
   // 올라갔다가 사라지게 합니다. 좌우/아래 여백은 그대로 둬야 하단 버튼 위치가 유지됩니다.

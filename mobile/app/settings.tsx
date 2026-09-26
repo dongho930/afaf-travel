@@ -5,7 +5,6 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-nati
 import { fontFamily } from "../constants/fonts";
 import { THEME_LABELS, ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
-import { Alert } from "../services/crossPlatformAlert";
 import { useOnboarding } from "../services/OnboardingContext";
 import { useTheme } from "../services/ThemeContext";
 import { ThemeMode } from "../constants/theme";
@@ -24,12 +23,7 @@ export default function SettingsScreen() {
   const router = useRouter();
   const { theme, colors, setTheme } = useTheme();
   const styles = makeStyles(colors);
-  const { openOnboarding, resetTips } = useOnboarding();
-
-  const handleResetTips = () => {
-    resetTips();
-    Alert.alert("도움말을 다시 켰어요", "AI 플래너·장소 선택·코스 결과·접근성 화면에 들어가면 도움말이 한 번씩 다시 보여요.");
-  };
+  const { openOnboarding } = useOnboarding();
 
   return (
     // 항목이 늘어 작은 화면·큰 글씨에서 아래가 잘리지 않도록 스크롤되게 둡니다.
@@ -66,18 +60,9 @@ export default function SettingsScreen() {
         style={[styles.creditCard, styles.linkRow]}
         onPress={openOnboarding}
         accessibilityRole="button"
-        accessibilityLabel="앱 소개 다시 보기"
+        accessibilityLabel="앱 사용법 다시 보기"
       >
-        <Text style={styles.creditValue}>앱 소개 다시 보기</Text>
-        <CaretRightIcon size={16} color={colors.textSecondary} weight="bold" />
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.creditCard, styles.linkRow, styles.policyRowSpacing]}
-        onPress={handleResetTips}
-        accessibilityRole="button"
-        accessibilityLabel="화면별 도움말 다시 보기"
-      >
-        <Text style={styles.creditValue}>도움말 다시 보기</Text>
+        <Text style={styles.creditValue}>앱 사용법 다시 보기</Text>
         <CaretRightIcon size={16} color={colors.textSecondary} weight="bold" />
       </TouchableOpacity>
 
