@@ -4,6 +4,7 @@ import { CaretDownIcon, CaretRightIcon, NotePencilIcon, type Icon } from "phosph
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Modal, Pressable, ScrollView, SectionList, StyleSheet, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { FirstVisitTip } from "../../components/FirstVisitTip";
 import { Alert } from "../../services/crossPlatformAlert";
 import { withRetry } from "../../services/retry";
 import { storage } from "../../services/storage";
@@ -723,6 +724,11 @@ export default function AccessibilityScreen() {
             <Text style={styles.reportButtonText}>제보하기</Text>
           </Pressable>
         </View>
+        <FirstVisitTip
+          tipKey="accessibility"
+          text="가본 곳의 편의시설을 제보해 주세요. 다른 사람이 여행지를 고를 때 큰 도움이 돼요."
+          style={styles.tip}
+        />
 
         {loadingReports ? (
           <FadeInView duration={200} translateY={0}>
@@ -920,6 +926,7 @@ export default function AccessibilityScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
+    tip: { marginBottom: spacing.md },
   // Pressable은 TouchableOpacity와 달리 기본 눌림 피드백이 없어서, 눌렀을 때
   // 살짝 옅어지도록 공통으로 얹어주는 스타일입니다.
   pressedFeedback: { opacity: 0.6 },

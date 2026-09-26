@@ -1,10 +1,12 @@
 import { useRouter } from "expo-router";
 import { CaretRightIcon, CheckIcon, MoonIcon, SunIcon, type Icon } from "phosphor-react-native";
 import React from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { fontFamily } from "../constants/fonts";
 import { THEME_LABELS, ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
+import { Alert } from "../services/crossPlatformAlert";
+import { useOnboarding } from "../services/OnboardingContext";
 import { useTheme } from "../services/ThemeContext";
 import { ThemeMode } from "../constants/theme";
 
@@ -22,9 +24,16 @@ export default function SettingsScreen() {
   const router = useRouter();
   const { theme, colors, setTheme } = useTheme();
   const styles = makeStyles(colors);
+  const { openOnboarding, resetTips } = useOnboarding();
+
+  const handleResetTips = () => {
+    resetTips();
+    Alert.alert("도움말을 다시 켰어요", "AI 플래너·장소 선택·코스 결과·접근성 화면에 들어가면 도움말이 한 번씩 다시 보여요.");
+  };
 
   return (
-    <View style={styles.container}>
+    // 항목이 늘어 작은 화면·큰 글씨에서 아래가 잘리지 않도록 스크롤되게 둡니다.
+    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
       <Text style={styles.sectionTitle}>화면 테마</Text>
       <Text style={styles.sectionDesc}>앱 전체에 적용됩니다</Text>
 
@@ -52,6 +61,26 @@ export default function SettingsScreen() {
         })}
       </View>
 
+      <Text style={[styles.sectionTitle, styles.sectionSpacing]}>사용 안내</Text>
+      <TouchableOpacity
+        style={[styles.creditCard, styles.linkRow]}
+        onPress={openOnboarding}
+        accessibilityRole="button"
+        accessibilityLabel="앱 소개 다시 보기"
+      >
+        <Text style={styles.creditValue}>앱 소개 다시 보기</Text>
+        <CaretRightIcon size={16} color={colors.textSecondary} weight="bold" />
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.creditCard, styles.linkRow, styles.policyRowSpacing]}
+        onPress={handleResetTips}
+        accessibilityRole="button"
+        accessibilityLabel="화면별 도움말 다시 보기"
+      >
+        <Text style={styles.creditValue}>도움말 다시 보기</Text>
+        <CaretRightIcon size={16} color={colors.textSecondary} weight="bold" />
+      </TouchableOpacity>
+
       <Text style={[styles.sectionTitle, styles.sectionSpacing]}>데이터 출처</Text>
       <View style={styles.creditCard}>
         <Text style={styles.creditLabel}>관광지 정보 · 사진</Text>
@@ -77,13 +106,14 @@ export default function SettingsScreen() {
         <Text style={styles.creditValue}>앱 접근권한 안내</Text>
         <CaretRightIcon size={16} color={colors.textSecondary} weight="bold" />
       </TouchableOpacity>
-    </View>
+    </ScrollView>
   );
 }
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background, padding: spacing.xl },
+    screen: { flex: 1, backgroundColor: colors.background },
+    container: { padding: spacing.xl },
     sectionTitle: { fontSize: 16, fontFamily: fontFamily.extraBold, color: colors.text, marginBottom: spacing.xs },
     sectionDesc: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textTertiary, marginBottom: spacing.lg },
     optionRow: { flexDirection: "row", gap: spacing.md },

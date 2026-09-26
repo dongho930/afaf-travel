@@ -64,7 +64,7 @@ export function AppPermissionList() {
  * 웹에는 앱 접근권한이라는 개념이 없어서 띄우지 않습니다. 저장에 실패하면(기기
  * 저장소 문제 등) 다음 실행 때 한 번 더 보이는데, 아예 안 보이는 것보다 낫습니다.
  */
-export function AppPermissionNotice() {
+export function AppPermissionNotice({ blocked = false }: { blocked?: boolean }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const insets = useSafeAreaInsets();
@@ -93,7 +93,7 @@ export function AppPermissionNotice() {
     });
   };
 
-  if (!visible) return null;
+  if (!visible || blocked) return null;
 
   return (
     <View style={[styles.overlay, { paddingBottom: spacing.xl + insets.bottom, paddingTop: spacing.xl + insets.top }]}>
