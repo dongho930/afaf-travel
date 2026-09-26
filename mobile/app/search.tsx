@@ -31,6 +31,10 @@ const CATEGORY_CHIPS = ["전체", "관광지", "문화시설", "레포츠", "숙
 // 손이 멈춘 뒤 한 번만 보냅니다.
 const DEBOUNCE_MS = 300;
 const MIN_QUERY_LENGTH = 2;
+// 한 번에 받는 결과 수. 목록 끝 근처까지 내리면 다음 묶음을 이어 붙입니다
+// (홈 인기 여행지와 같은 방식). 예전엔 30곳에서 잘려 '수원'처럼 결과가 많은
+// 검색은 나머지를 볼 방법이 없었습니다.
+const PAGE_SIZE = 20;
 
 /**
  * 여행지 직접 검색 화면.
@@ -51,6 +55,8 @@ export default function SearchScreen() {
   const [category, setCategory] = useState("전체");
   const [results, setResults] = useState<Attraction[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   // 한 글자만 쳤을 때 "결과 없음"을 띄우지 않도록, 실제로 조회한 적이 있는지 기억합니다.
   const [searched, setSearched] = useState(false);
   // 늦게 도착한 옛 응답이 최신 결과를 덮어쓰지 않도록 요청마다 번호를 붙입니다.
@@ -59,9 +65,12 @@ export default function SearchScreen() {
   useEffect(() => {
     const trimmed = query.trim();
     if (trimmed.length < MIN_QUERY_LENGTH) {
+      ++requestId.current; // 진행 중인 '더 불러오기' 응답도 버립니다
       setResults([]);
       setSearched(false);
       setLoading(false);
+      setLoadingMore(false);
+      setHasMore(false);
       return;
     }
 
@@ -69,15 +78,17 @@ export default function SearchScreen() {
     const id = ++requestId.current;
     const timer = setTimeout(() => {
       api
-        .searchAttractions(trimmed, category === "전체" ? null : category)
+        .searchAttractions(trimmed, category === "전체" ? null : category, PAGE_SIZE, 0)
         .then((found) => {
           if (id !== requestId.current) return;
           setResults(found);
+          setHasMore(found.length === PAGE_SIZE);
           setSearched(true);
         })
         .catch(() => {
           if (id !== requestId.current) return;
           setResults([]);
+          setHasMore(false);
           setSearched(true);
         })
         .finally(() => {
@@ -87,6 +98,31 @@ export default function SearchScreen() {
 
     return () => clearTimeout(timer);
   }, [query, category]);
+
+  // 목록 끝 근처까지 내리면 같은 검색의 다음 묶음을 이어 붙입니다. 그사이 검색어나
+  // 카테고리가 바뀌면(requestId가 달라지면) 늦게 온 응답은 버립니다.
+  const loadMore = () => {
+    const trimmed = query.trim();
+    if (loading || loadingMore || !hasMore || trimmed.length < MIN_QUERY_LENGTH) return;
+    const id = requestId.current;
+    setLoadingMore(true);
+    api
+      .searchAttractions(trimmed, category === "전체" ? null : category, PAGE_SIZE, results.length)
+      .then((found) => {
+        if (id !== requestId.current) return;
+        setResults((prev) => {
+          const seen = new Set(prev.map((a) => a.content_id));
+          return [...prev, ...found.filter((a) => !seen.has(a.content_id))];
+        });
+        setHasMore(found.length === PAGE_SIZE);
+      })
+      .catch(() => {
+        // 더 불러오기에 실패해도 보고 있던 결과는 그대로 둡니다. 다시 내리면 재시도합니다.
+      })
+      .finally(() => {
+        if (id === requestId.current) setLoadingMore(false);
+      });
+  };
 
   const openDetail = (place: Attraction) => {
     router.push({
@@ -198,7 +234,16 @@ export default function SearchScreen() {
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        ListFooterComponent={results.length > 0 ? <DataCreditLine /> : null}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={
+          results.length > 0 ? (
+            <>
+              {loadingMore && <ActivityIndicator style={styles.loading} color={colors.primary} />}
+              {!hasMore && <DataCreditLine />}
+            </>
+          ) : null
+        }
         ListEmptyComponent={
           emptyMessage() ? <Text style={styles.empty}>{emptyMessage()}</Text> : null
         }
