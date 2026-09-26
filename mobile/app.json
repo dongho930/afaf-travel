@@ -13,8 +13,8 @@
       "infoPlist": {
         "NSMicrophoneUsageDescription": "음성으로 여행 코스를 요청하기 위해 마이크 접근 권한이 필요합니다.",
         "NSSpeechRecognitionUsageDescription": "음성 질의를 텍스트로 변환하기 위해 음성 인식 권한이 필요합니다.",
-        "NSLocationWhenInUseUsageDescription": "근처 무장애 관광지를 추천하기 위해 위치 권한이 필요합니다.",
-        "NSPhotoLibraryUsageDescription": "프로필 사진을 설정하기 위해 사진 접근 권한이 필요합니다.",
+        "NSLocationWhenInUseUsageDescription": "현재 위치에서 여행지까지 길찾기를 할 때 출발지로 쓰기 위해 위치 권한이 필요합니다.",
+        "NSPhotoLibraryUsageDescription": "프로필 사진과 리뷰·게시물에 첨부할 사진을 고르기 위해 사진 접근 권한이 필요합니다.",
         "LSApplicationQueriesSchemes": [
           "kakaomap"
         ]
@@ -38,7 +38,12 @@
     },
     "plugins": [
       "expo-router",
-      "expo-location",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "현재 위치에서 여행지까지 길찾기를 할 때 출발지로 쓰기 위해 위치 권한이 필요합니다."
+        }
+      ],
       [
         "expo-font",
         {
@@ -54,7 +59,7 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "프로필 사진을 설정하기 위해 사진 접근 권한이 필요합니다."
+          "photosPermission": "프로필 사진과 리뷰·게시물에 첨부할 사진을 고르기 위해 사진 접근 권한이 필요합니다."
         }
       ],
       [

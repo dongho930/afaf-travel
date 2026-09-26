@@ -25,15 +25,17 @@ export const REQUIRED_PERMISSIONS: AppPermission[] = [];
 export const OPTIONAL_PERMISSIONS: AppPermission[] = [
   {
     name: "마이크 · 음성 인식",
-    purpose: "AI 플래너에서 원하는 여행을 말로 입력할 때 사용합니다. 직접 입력해도 됩니다.",
+    purpose:
+      "AI 플래너에서 원하는 여행을 말로 입력할 때 사용합니다. 말한 내용은 기기의 음성인식 기능(Android는 Google, iOS는 Apple)이 글자로 바꾸며, 음성은 앱 서버에 저장하지 않습니다. 직접 입력해도 됩니다.",
   },
   {
     name: "위치",
-    purpose: "현재 위치에서 여행지까지 가는 길과 예상 소요시간을 안내할 때 사용합니다.",
+    purpose:
+      "현재 위치에서 여행지까지 길찾기를 할 때 출발지로 사용합니다. 위치는 카카오맵 길안내로만 넘기며 앱 서버에는 보내지 않습니다.",
   },
   {
     name: "사진",
-    purpose: "프로필 사진, 리뷰·게시물에 첨부할 사진을 고를 때 사용합니다.",
+    purpose: "프로필 사진과 리뷰·게시물에 첨부할 사진을 고를 때 사용합니다. 고른 사진만 올라갑니다.",
   },
 ];
 
