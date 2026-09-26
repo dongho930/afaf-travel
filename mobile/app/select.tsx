@@ -24,6 +24,7 @@ import { ThemeColors } from "../constants/theme";
 import { radius, spacing } from "../constants/tokens";
 import { api, errorMessage } from "../services/api";
 import { useCourseContext } from "../services/CourseContext";
+import { FirstVisitTip } from "../components/FirstVisitTip";
 import { storage } from "../services/storage";
 import { useTheme } from "../services/ThemeContext";
 import { Attraction, PlaceCandidate, UserType } from "../types";
@@ -236,6 +237,11 @@ export default function SelectPlacesScreen() {
               : " 지역이나 조건을 바꿔 다시 요청해주세요."}
         </Text>
       )}
+      <FirstVisitTip
+        tipKey="select"
+        text="가고 싶은 곳을 눌러 체크한 뒤 아래 버튼으로 코스를 만들어요. 마음에 드는 곳이 없으면 새로고침을 누르세요. 고른 곳은 남기고 새 장소를 보여줘요."
+        style={styles.tip}
+      />
       {recommendationNotices.map((notice) => (
         <Text key={notice} style={styles.subtitle}>
           {notice}
@@ -424,6 +430,7 @@ function PlaceOptionCard({
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
+    tip: { marginBottom: spacing.md },
   screen: { flex: 1, backgroundColor: colors.background },
   // 위쪽 여백만 목록 안(listContent)으로 옮겨서, 스크롤한 콘텐츠가 화면 맨 위까지
   // 올라갔다가 사라지게 합니다. 좌우/아래 여백은 그대로 둬야 하단 버튼 위치가 유지됩니다.

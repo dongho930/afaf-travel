@@ -10,12 +10,14 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AppAlertHost } from "../components/AppAlert";
 import { AppPermissionNotice } from "../components/AppPermissionNotice";
 import { BottomTabBar } from "../components/BottomTabBar";
+import { Onboarding } from "../components/Onboarding";
 import { WebFrame } from "../components/WebFrame";
 import { WebTabArrows } from "../components/WebTabArrows";
 import "../constants/calendarLocale"; // 달력(react-native-calendars) 표기를 한국어로 등록 — 부수효과만 있는 import입니다
 import { fontFamily, fontsToLoad } from "../constants/fonts";
 import { AuthProvider } from "../services/AuthContext";
 import { CourseProvider } from "../services/CourseContext";
+import { OnboardingProvider, useOnboarding } from "../services/OnboardingContext";
 import { ProfileProvider } from "../services/ProfileContext";
 import { ThemeProvider, useTheme } from "../services/ThemeContext";
 
@@ -41,6 +43,7 @@ SplashScreen.preventAutoHideAsync();
  */
 function ThemedApp() {
   const { theme, colors } = useTheme();
+  const { onboardingVisible } = useOnboarding();
   // 이메일 인증 기능은 꺼둔 상태라 딥링크 처리 훅도 잠시 꺼둡니다.
   // 나중에 이메일 인증을 다시 켜면 아래 줄의 주석을 해제하면 됩니다.
   // useEmailVerificationDeepLink();
@@ -87,9 +90,12 @@ function ThemedApp() {
             <WebTabArrows />
           </View>
           <BottomTabBar />
+          {/* 처음 실행할 때 한 번 뜨는 4장짜리 안내입니다(웹은 홈으로 처음 들어올 때). */}
+          <Onboarding />
           {/* 설치 후 처음 실행할 때 한 번 뜨는 접근권한 안내입니다. 하단바까지
-              덮도록 가장 마지막에 둡니다(웹에서는 뜨지 않습니다). */}
-          <AppPermissionNotice />
+              덮도록 가장 마지막에 둡니다(웹에서는 뜨지 않습니다). 온보딩이 떠 있으면
+              끝날 때까지 기다렸다가 이어서 뜹니다(두 안내가 겹치지 않게). */}
+          <AppPermissionNotice blocked={onboardingVisible} />
           {/* 앱의 모든 안내 창(Alert.alert)이 여기서 그려집니다. 어느 화면에서
               불러도 같은 창이 뜨도록 앱 전체에 하나만 둡니다. */}
           <AppAlertHost />
@@ -126,7 +132,9 @@ export default function RootLayout() {
             <AuthProvider>
               <ProfileProvider>
                 <CourseProvider>
-                  <ThemedApp />
+                  <OnboardingProvider>
+                    <ThemedApp />
+                  </OnboardingProvider>
                 </CourseProvider>
               </ProfileProvider>
             </AuthProvider>

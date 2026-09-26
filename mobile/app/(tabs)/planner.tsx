@@ -6,7 +6,6 @@ import {
   MicrophoneIcon,
   SparkleIcon,
   XCircleIcon,
-  type Icon,
 } from "phosphor-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -31,34 +30,14 @@ import { ProfileButton } from "../../components/ProfileButton";
 import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
 import { radius, spacing } from "../../constants/tokens";
-import { userTypeIcon } from "../../constants/userTypeIcons";
+import { EXAMPLE_QUERY_BY_TYPE, USER_TYPE_OPTIONS } from "../../constants/userTypes";
+import { FirstVisitTip } from "../../components/FirstVisitTip";
 import { detectUserTypeFromText } from "../../constants/userTypeKeywords";
 import { api, errorMessage } from "../../services/api";
 import { useCourseContext } from "../../services/CourseContext";
 import { storage } from "../../services/storage";
 import { useTheme } from "../../services/ThemeContext";
 import { RegionOption, UserType, USER_TYPE_LABELS } from "../../types";
-
-const OPTIONS: { type: UserType; icon: Icon; desc: string }[] = [
-  { type: "wheelchair", icon: userTypeIcon.wheelchair, desc: "턱 없는 출입구와 장애인 화장실이 있는 곳 우선" },
-  { type: "stroller", icon: userTypeIcon.stroller, desc: "유모차 대여·수유실·기저귀 교환대가 있는 곳 우선" },
-  { type: "senior", icon: userTypeIcon.senior, desc: "휠체어 접근로·엘리베이터·장애인 화장실이 있는 곳 우선" },
-  { type: "pregnant", icon: userTypeIcon.pregnant, desc: "수유실·임산부 주차구역이 있는 곳 우선" },
-  { type: "visual", icon: userTypeIcon.visual, desc: "점자블록·오디오가이드 등 시각 안내시설 우선" },
-  { type: "hearing", icon: userTypeIcon.hearing, desc: "수어 안내·자막 안내 등 청각 안내시설 우선" },
-  { type: "general", icon: userTypeIcon.general, desc: "접근성 조건 없이 일반적인 코스 추천" },
-];
-
-// 이용자 유형마다 실제로 마주하는 이동 제약이 다르므로, 입력 예시도 유형에 맞게 다르게 보여줍니다.
-const EXAMPLE_QUERY_BY_TYPE: Record<UserType, string> = {
-  wheelchair: "지체 장애인도 갈 수 있는 경사 없는 산책로와 맛집 추천해줘",
-  stroller: "유모차 밀고 다니기 편한 평지 산책로와 아이랑 갈 만한 맛집 추천해줘",
-  senior: "계단 없이 다닐 수 있고 많이 걷지 않아도 되는 코스와 맛집 추천해줘",
-  pregnant: "화장실 가깝고 오래 걷지 않아도 되는 편안한 코스와 맛집 추천해줘",
-  visual: "점자블록이나 음성 안내가 있는 곳 위주로 코스와 맛집 추천해줘",
-  hearing: "수화 안내나 자막 가이드가 있는 곳 위주로 코스와 맛집 추천해줘",
-  general: "가족과 함께 가기 좋은 산책로와 맛집 추천해줘",
-};
 
 let VoiceInputButton: typeof import("../../components/VoiceInputButton").VoiceInputButton | null = null;
 try {
@@ -78,7 +57,7 @@ function TypeTabButton({
   styles,
   colors,
 }: {
-  option: (typeof OPTIONS)[number];
+  option: (typeof USER_TYPE_OPTIONS)[number];
   isSelected: boolean;
   onPress: () => void;
   styles: ReturnType<typeof makeStyles>;
@@ -143,7 +122,7 @@ export default function PlannerScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const exampleQuery = EXAMPLE_QUERY_BY_TYPE[userType];
 
-  const selectedOption = OPTIONS.find((o) => o.type === userType);
+  const selectedOption = USER_TYPE_OPTIONS.find((o) => o.type === userType);
 
   const [regionModalVisible, setRegionModalVisible] = useState(false);
   const [dateModalVisible, setDateModalVisible] = useState(false);
@@ -291,7 +270,7 @@ export default function PlannerScreen() {
             </View>
             <Text style={[styles.fieldLabel, styles.typeFieldLabel]}>접근성 유형</Text>
             <View style={styles.typeGrid}>
-              {OPTIONS.map((opt) => (
+              {USER_TYPE_OPTIONS.map((opt) => (
                 <TypeTabButton
                   key={opt.type}
                   option={opt}
@@ -336,6 +315,11 @@ export default function PlannerScreen() {
               </TouchableOpacity>
             )}
 
+            <FirstVisitTip
+              tipKey="planner"
+              text="원하는 여행을 문장으로 적거나 마이크 버튼을 눌러 말해보세요. 지역과 방문일은 골라도 되고 비워둬도 돼요."
+              style={styles.tip}
+            />
             <Text style={styles.fieldLabel}>어떤 여행을 원하세요?</Text>
             <FadeInView key={`hint-${userType}`} duration={200} translateY={4}>
               {/* 아래 입력창에 옮겨 적으려고 이 문장을 긁는 사람이 많은데, 웹에서는
@@ -489,6 +473,7 @@ export default function PlannerScreen() {
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
+    tip: { marginBottom: spacing.md },
   container: { padding: spacing.xl, paddingBottom: spacing.xxl + spacing.xl + 4 },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.xl },
   title: { fontSize: 22, fontFamily: fontFamily.extraBold, color: colors.text },
