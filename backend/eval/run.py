@@ -21,7 +21,7 @@ from fastapi import HTTPException
 
 from app.models.schemas import PlaceRecommendationRequest, UserType
 from app.routers import courses
-from app.services import accessibility_criteria, ai_service
+from app.services import accessibility_criteria, ai_service, tour_api
 from app.services.place_intent import venue_constraint_for_query
 from app.services.query_preferences import extract_preferences, grade_rank, text_matches
 from app.services.schedule import is_closed_on
@@ -56,12 +56,14 @@ class QueryResult:
     categories: int = 0
     spread_km: float = 0.0
     unmet: list[str] = field(default_factory=list)
+    notices: list[str] = field(default_factory=list)
 
 
-def _evaluate(q: EvalQuery, places, unmet) -> QueryResult:
+def _evaluate(q: EvalQuery, places, unmet, constraint=None) -> QueryResult:
     r = QueryResult(q.id, True, places=places, unmet=unmet)
     region_codes = [q.sigungu_cd] if q.sigungu_cd else resolve_sigungu_codes(q.text)
-    constraint = venue_constraint_for_query(q.text)
+    # 지역에 없어 비슷한 종류로 넓힌 제약(서비스와 같은 판단)으로 봅니다.
+    constraint = constraint or venue_constraint_for_query(q.text)
     for a in places:
         if not accessibility_criteria.qualifies(a, q.user_type):
             r.violations.append(f"유형 기준 미달: {a.name}")
@@ -95,7 +97,13 @@ async def _run_one(q: EvalQuery, seed: int) -> QueryResult:
         return QueryResult(q.id, False, error=f"{e.status_code}: {e.detail}")
     places = [c.attraction for c in response.candidates]
     unmet = [m for m in response.missing_categories]
-    return _evaluate(q, places, unmet)
+    constraint = await tour_api.tour_api_client.widen_unavailable_venues(
+        venue_constraint_for_query(q.text), q.user_type,
+        response.parsed.sigungu_cds if response.parsed and response.parsed.sigungu_cds else None,
+    )
+    result = _evaluate(q, places, unmet, constraint)
+    result.notices = list(response.notices)
+    return result
 
 
 def _mean(values):
@@ -127,6 +135,7 @@ async def main(args) -> dict:
             "spread_km": _mean([r.spread_km for r in ok_runs]),
             "consistency": _mean([_jaccard(a, b) for a, b in itertools.combinations(sets, 2)]),
             "unmet": sorted({u for r in ok_runs for u in r.unmet}),
+            "notices": sorted({n for r in ok_runs for n in r.notices}),
             "sample": [f"{a.name}({a.category})" for a in (ok_runs[0].places if ok_runs else [])][:6],
         })
     return {"mode": "ai" if args.ai else "rule", "rows": rows}

@@ -33,7 +33,7 @@ from app.services import accessibility_criteria
 from app.services.memory_cache import TTLCache
 from app.services.query_preferences import CONCEPT_LABELS, FACILITY_LABELS, extract_preferences, text_matches
 from app.services.place_intent import (
-    MEAL, NOT_MEAL, meal_status, query_without_excluded_venues, venue_constraint_for_query,
+    MEAL, NOT_MEAL, VenueConstraint, meal_status, query_without_excluded_venues, venue_constraint_for_query,
 )
 from app.services.schedule import arrange_for_meals, build_schedule, hours_payload, is_closed_on
 from app.services.course_validator import (
@@ -932,8 +932,8 @@ async def _groq_recommend(
     request: PlaceRecommendationRequest,
     candidates: list[Attraction],
     parsed: ParsedQuery | None = None,
+    venue_constraint: VenueConstraint | None = None,
 ) -> list[dict]:
-    venue_constraint = venue_constraint_for_query(request.query_text)
     prefs = extract_preferences(
         request.query_text, parsed.keywords if parsed else None,
         ai_labels=[*parsed.concepts, *parsed.facilities] if parsed else None,
@@ -1006,6 +1006,7 @@ async def recommend_places(
     request: PlaceRecommendationRequest,
     candidates: list[Attraction],
     parsed: ParsedQuery | None = None,
+    constraint: VenueConstraint | None = None,
 ) -> list[PlaceCandidate]:
     """
     1단계: 질의에 맞는 장소 후보를 넓게 추천 (코스 순서/시간은 아직 정하지 않음).
@@ -1020,7 +1021,9 @@ async def recommend_places(
 
     # 명시한 장소 유형은 후보와 최종 결과 모두에 강제합니다. 접근성 조건을
     # 만족하는 유형별 장소가 없으면 무관한 유형으로 채우지 않습니다.
-    constraint = venue_constraint_for_query(request.query_text)
+    # 라우터는 지역에 없어 넓힌 제약(widen_unavailable_venues)을 넘겨줍니다.
+    if constraint is None:
+        constraint = venue_constraint_for_query(request.query_text)
     broad_added: list[PlaceCandidate] = []
     if constraint:
         candidates = [a for a in candidates if constraint.matches(a) and constraint.accepts_food_place(a)]
@@ -1032,7 +1035,7 @@ async def recommend_places(
         # 몇 개 겹치는지로만 고른 목록은 요청·유형과 어긋나기 쉬워서, 그럴듯한
         # 엉뚱한 추천을 주느니 "잠시 후 다시"라고 말하는 편이 낫습니다.
         # GroqUnavailableError는 라우터가 받아 안내 문구로 바꿉니다.
-        selected = await _groq_recommend(request, candidates[:_AI_CANDIDATE_LIMIT], parsed)
+        selected = await _groq_recommend(request, candidates[:_AI_CANDIDATE_LIMIT], parsed, constraint)
     else:
         # 키가 없는 개발·테스트 환경에서만 규칙 기반으로 동작합니다.
         selected = _mock_recommend(request, candidates, parsed)
