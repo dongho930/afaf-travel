@@ -60,7 +60,7 @@ from app.services.supabase_service import (
     update_trip,
     update_visited_place_date,
 )
-from app.services.query_preferences import extract_preferences, unmet_labels
+from app.services.query_preferences import extract_preferences, text_matches, unmet_labels
 from app.services.request_conflicts import conflict_message, find_conflicts
 from app.services.schedule import is_closed_on, next_day_of
 from app.services.selection_log_service import RETENTION_DAYS, log_recommendation, log_selection, purge_old_logs
@@ -120,9 +120,31 @@ def _few_results_notice(count: int, closed_count: int, request: PlaceRecommendat
     return " ".join(parts)
 
 
+# 문장 조건(특성·편의시설)에 맞는 곳이 이보다 적으면 나머지가 무엇인지 알려줍니다.
+_FEW_TEXT_MATCHES = 3
+
+
+def _few_text_matches_notices(selected, prefs, missing_categories: list[str]) -> list[str]:
+    """
+    '동물 보러 가고 싶어'에 맞는 곳이 1곳뿐인데 최소 개수를 채우려 다른 곳이 섞이면,
+    사용자는 나머지도 동물 관련인 줄 압니다. 맞는 곳이 적으면 그렇다고 알려줍니다.
+    (하나도 없으면 missing_categories가 이미 '찾지 못했어요'로 알립니다.)
+    """
+    notices = []
+    labels = [c.label for c in prefs.concepts] + [f.label for f in prefs.facilities]
+    for label in labels:
+        if label in missing_categories:
+            continue
+        hits = sum(label in text_matches(item.attraction, prefs)[1] for item in selected)
+        if 0 < hits < _FEW_TEXT_MATCHES and hits * 2 < len(selected):
+            notices.append(f"요청하신 {label} 조건에 맞는 곳은 {hits}곳뿐이라, "
+                           "나머지는 고른 지역·유형에 맞는 다른 장소예요.")
+    return notices
+
+
 async def _candidates_with_conditions(
     query_text: str, user_type: str, region: str, sigungu_cd: Optional[int],
-    visit_date: Optional[str] = None,
+    visit_date: Optional[str] = None, exclude_ids: Optional[set[str]] = None,
 ) -> tuple[list[Attraction], ParsedQuery, Optional[VenueConstraint]]:
     """
     질의에서 조건을 뽑아낸 뒤, 그 조건(지역·목적·키워드)에 맞는 무장애 관광지
@@ -154,6 +176,7 @@ async def _candidates_with_conditions(
         query_text=query_text,
         ai_labels=[*parsed.concepts, *parsed.facilities],
         visit_date=visit_date,
+        exclude_ids=exclude_ids,
     )
 
     return candidates, parsed, venue_constraint
@@ -186,7 +209,7 @@ async def recommend_course_places(
     try:
         candidates, parsed, constraint = await _candidates_with_conditions(
             request.query_text, request.user_type.value, request.region, request.sigungu_cd,
-            request.visit_date,
+            request.visit_date, set(request.exclude_content_ids),
         )
     except CacheUnavailable as e:
         # 후보를 고르려면 편의시설 캐시를 반드시 읽어야 합니다. 못 읽었다는 건
@@ -275,7 +298,11 @@ async def recommend_course_places(
         user_id=user_id,
     )
     notices = constraint.substitute_notices() if constraint else []
-    if len(selected) < _MIN_RESULTS_BEFORE_NOTICE:
+    notices += _few_text_matches_notices(selected, prefs, missing_categories)
+    if request.exclude_content_ids and len(selected) < _MIN_RESULTS_BEFORE_NOTICE:
+        # '다시 추천'인데 새로운 곳이 적으면, 조건 탓보다 이미 다 보여줬다는 게 이유입니다.
+        notices.append(f"이미 보여드린 곳을 빼면 새로 추천할 곳이 {len(selected)}곳뿐이에요.")
+    elif len(selected) < _MIN_RESULTS_BEFORE_NOTICE:
         notices.append(_few_results_notice(len(selected), closed_count, request))
     return PlaceRecommendationResponse(
         query_text=request.query_text, candidates=selected, parsed=parsed,

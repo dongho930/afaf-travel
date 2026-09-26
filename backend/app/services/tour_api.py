@@ -1671,6 +1671,7 @@ class TourApiClient:
         query_text: str = "",
         ai_labels: list[str] | None = None,
         visit_date: str | None = None,
+        exclude_ids: set[str] | None = None,
     ) -> list[Attraction]:
         """
         AI 장소 추천(1단계)에 넘길 후보를 지역 전체에서 표본으로 뽑습니다.
@@ -1693,6 +1694,7 @@ class TourApiClient:
                 limit=1000 if venue_constraint else limit,
                 sigungu_cd=sigungu_cd,
             )
+            candidates = [a for a in candidates if a.content_id not in (exclude_ids or set())]
             if not venue_constraint:
                 return candidates
             matched = [a for a in candidates if venue_constraint.matches(a)]
@@ -1707,6 +1709,10 @@ class TourApiClient:
         ldong_regn_map = {"경기도": "41", "서울": "11"}
         pool = await self._region_attractions(ldong_regn_map.get(region, "41"))
         pool = _filter_and_mix_by_regions(pool, _region_token_sets(sigungu_cd))
+        # '다시 추천'이면 이미 보여준 곳을 순서를 정하기 전에 뺍니다 (그래야 새로운 곳이 올라옵니다).
+        exclude_ids = exclude_ids or set()
+        if exclude_ids:
+            pool = [a for a in pool if a.content_id not in exclude_ids]
         if venue_constraint:
             pool = [a for a in pool if venue_constraint.matches(a)]
         if not pool:
@@ -1755,11 +1761,11 @@ class TourApiClient:
             # 이름에 특성이 드러나지 않는 곳도 소개문으로 찾습니다 (DB 캐시, 하루 메모리 보관).
             await load_overview_tags([a.content_id for a in eligible])
         popularity = await self._place_popularity_scores()
-        scored = [
-            Scored(a, text_matches(a, prefs)[0], grade_rank(a, user_type),
-                   popularity.get(a.content_id, 0.0), random.random())
-            for a in eligible
-        ]
+        scored = []
+        for a in eligible:
+            text, labels = text_matches(a, prefs)
+            scored.append(Scored(a, text, grade_rank(a, user_type),
+                                 popularity.get(a.content_id, 0.0), random.random(), hit=bool(labels)))
         # 지역을 고르지 않았으면(문장에도 지역이 없으면) 한 코스로 다닐 수 있게 가까운
         # 곳끼리 묶습니다. 짧은 동선 요청은 라우터가 따로 더 좁힙니다.
         # 방문일에 쉬는 곳은 묶기 전에 뺍니다 — 묶은 뒤에 빼면 월요일 박물관 요청처럼
@@ -1813,7 +1819,7 @@ class TourApiClient:
                 user_type,
                 len(candidates),
             )
-            known = {a.content_id for a in candidates}
+            known = {a.content_id for a in candidates} | exclude_ids
             for a in await self.search_accessible_attractions(
                 region=region, user_type=user_type, limit=limit, sigungu_cd=sigungu_cd
             ):

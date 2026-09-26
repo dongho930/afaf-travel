@@ -236,6 +236,10 @@ class PlaceRecommendationRequest(BaseModel):
         default=None,
         description="방문 예정일 (YYYY-MM-DD). 그날의 혼잡도 예보와 휴무일을 확인하는 데 씁니다.",
     )
+    exclude_content_ids: list[str] = Field(
+        default_factory=list, max_length=300,
+        description="'다시 추천'할 때 이번 세션에서 이미 보여줬지만 고르지 않은 장소 — 후보에서 뺍니다",
+    )
 
 
 class PlaceCandidate(BaseModel):

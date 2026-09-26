@@ -273,6 +273,7 @@ export const api = {
     region?: string;
     sigunguCd?: number | null;
     visitDate?: string | null;
+    excludeContentIds?: string[];
   }) =>
     request<{
       query_text: string;
@@ -289,6 +290,7 @@ export const api = {
         region: params.region ?? "경기도",
         sigungu_cd: params.sigunguCd ?? null,
         visit_date: params.visitDate ?? null,
+        exclude_content_ids: params.excludeContentIds ?? [],
       }),
     }),
 
