@@ -1,8 +1,10 @@
 name: Selection log purge
 
-# AI 플래너 추천·선택 기록(planner_selection_logs)은 질문 문장을 그대로 담아서
-# 90일이 지나면 지웁니다. 다른 매일 작업과 같은 방식 — GitHub Actions 무료 스케줄로
-# 백엔드의 정리 엔드포인트만 curl로 부릅니다.
+# 개인정보처리방침의 보관 기간이 지난 기록을 매일 지웁니다 — 추천·선택 기록
+# (planner_selection_logs, 90일)과 로그인하지 않고 만든 코스(courses, 1년).
+# 다른 매일 작업과 같은 방식 — GitHub Actions 무료 스케줄로 백엔드의 정리
+# 엔드포인트만 curl로 부릅니다.
+
 on:
   schedule:
     # UTC 20:43 = KST 05:43. place-popularity-refresh(KST 05:33)와 10분 갈라뒀습니다.
