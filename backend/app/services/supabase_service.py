@@ -96,6 +96,30 @@ async def save_course(
         print(f"[supabase] 코스 저장 실패: {e}")
 
 
+# 로그인하지 않고 만든 코스(user_id 없음)의 보관 기간 — 개인정보처리방침 3항("1년 보관 후 파기").
+ANONYMOUS_COURSE_RETENTION_DAYS = 365
+
+
+async def purge_old_anonymous_courses() -> int | None:
+    """
+    보관 기간이 지난 비로그인 코스를 지우고 지운 개수를 돌려줍니다. 못 지우면 None.
+
+    로그인한 사람의 코스는 건드리지 않습니다(탈퇴 시까지 보관). 비로그인 코스는 여행에
+    담을 수 없어 trip_id도 없으므로, 다른 기록(여행·인기도 집계)이 이 행에 기대지 않습니다.
+    """
+    if _client is None:
+        return None
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=ANONYMOUS_COURSE_RETENTION_DAYS)
+    try:
+        deleted = (await _execute(
+            _client.table("courses").delete().is_("user_id", "null").lt("created_at", cutoff.isoformat())
+        )).data or []
+    except Exception as e:
+        print(f"[supabase] 오래된 비로그인 코스를 지우지 못했습니다: {e}")
+        return None
+    return len(deleted)
+
+
 async def list_saved_courses(user_id: str, limit: int = 50) -> list[dict]:
     """
     '내 여행' 탭의 '저장한 경로' 통계 카드를 눌렀을 때 보여줄, 실제로 여행에

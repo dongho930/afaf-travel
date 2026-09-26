@@ -39,6 +39,7 @@ from app.services.place_intent import VenueConstraint, venue_constraint_for_quer
 from app.services.route_cluster import narrow_for_short_route, prefer_confirmed_meals
 from app.services.auth import get_optional_user_id
 from app.services.supabase_service import (
+    ANONYMOUS_COURSE_RETENTION_DAYS,
     CacheUnavailable,
     attach_course_to_trip,
     count_visited_places,
@@ -52,6 +53,7 @@ from app.services.supabase_service import (
     list_trips,
     list_visited_places,
     mark_trip_as_visited,
+    purge_old_anonymous_courses,
     row_to_course_response,
     save_course,
     split_course,
@@ -314,14 +316,23 @@ async def recommend_course_places(
 @courses_router.get("/selection-logs/purge")
 async def purge_selection_logs():
     """
-    보관 기간이 지난 추천·선택 기록을 지웁니다. GitHub Actions가 하루 한 번 부릅니다
-    (.github/workflows/selection-log-purge.yml). 기간이 지난 것만 지우므로 여러 번
-    불러도 결과가 같습니다.
+    개인정보처리방침의 보관 기간이 지난 기록을 지웁니다. GitHub Actions가 하루 한 번
+    부릅니다(.github/workflows/selection-log-purge.yml). 기간이 지난 것만 지우므로
+    여러 번 불러도 결과가 같습니다.
+      - 추천·선택 기록: 90일
+      - 로그인하지 않고 만든 코스: 1년
+    (주소는 처음 만든 이름을 그대로 둡니다 — 워크플로가 이 주소를 부릅니다.)
     """
-    deleted = await purge_old_logs()
-    if deleted is None:
-        raise HTTPException(status_code=503, detail="추천 기록을 정리하지 못했습니다.")
-    return {"deleted": deleted, "retention_days": RETENTION_DAYS}
+    deleted_logs = await purge_old_logs()
+    deleted_courses = await purge_old_anonymous_courses()
+    if deleted_logs is None or deleted_courses is None:
+        raise HTTPException(status_code=503, detail="보관 기간이 지난 기록을 정리하지 못했습니다.")
+    return {
+        "deleted": deleted_logs,
+        "retention_days": RETENTION_DAYS,
+        "deleted_anonymous_courses": deleted_courses,
+        "anonymous_course_retention_days": ANONYMOUS_COURSE_RETENTION_DAYS,
+    }
 
 
 @courses_router.post("/generate-from-selection", response_model=CourseResponse)
