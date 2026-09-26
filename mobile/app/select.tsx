@@ -48,6 +48,8 @@ export default function SelectPlacesScreen() {
     setRecommendationIds,
     recommendationNotices,
     setRecommendationNotices,
+    shownContentIds,
+    setShownContentIds,
     pendingQueryText,
     parsedQuery,
     setParsedQuery,
@@ -132,9 +134,12 @@ export default function SelectPlacesScreen() {
         userType,
         sigunguCd,
         visitDate,
+        // 이미 보여준 곳은 모두 빼달라고 합니다. 고른 곳은 화면 위쪽에 그대로 남기고,
+        // 나머지 자리는 전부 새로운 곳으로 채웁니다 (고른 곳까지 돌려받으면 새 자리가 줄어듭니다).
+        excludeContentIds: shownContentIds,
       });
       if (candidates.length === 0) {
-        Alert.alert("추천 결과 없음", "조건에 맞는 장소를 더 찾지 못했어요. 다른 표현으로 다시 시도해주세요.");
+        Alert.alert("새로운 장소가 없어요", "이미 보여드린 곳 말고는 조건에 맞는 장소를 더 찾지 못했어요. 지역이나 조건을 바꿔 다시 시도해주세요.");
         return;
       }
       // 고른 장소가 새 후보에도 들어 있으면 카드가 둘로 늘어나므로 걸러냅니다.
@@ -155,6 +160,7 @@ export default function SelectPlacesScreen() {
       setMissingCategories(missing_categories ?? []);
       if (recommendation_id) setRecommendationIds([...recommendationIds, recommendation_id]);
       setRecommendationNotices(notices ?? []);
+      setShownContentIds([...shownContentIds, ...freshCandidates.map((c) => c.attraction.content_id)]);
       // 선택(selectedIds)은 그대로 둡니다 — 고른 카드가 목록에 남아 있으니 유효합니다.
       listRef.current?.scrollToOffset({ offset: 0, animated: true });
     } catch (err) {

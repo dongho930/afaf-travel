@@ -130,6 +130,7 @@ export default function PlannerScreen() {
     setMissingCategories,
     setRecommendationIds,
     setRecommendationNotices,
+    setShownContentIds,
     setPendingQueryText,
     pendingQueryText,
     queryHandoffSeq,
@@ -259,6 +260,7 @@ export default function PlannerScreen() {
       // 새 질문이라 이전 세션의 추천 기록은 버리고 새로 시작합니다.
       setRecommendationIds(recommendation_id ? [recommendation_id] : []);
       setRecommendationNotices(notices ?? []);
+      setShownContentIds(candidates.map((c) => c.attraction.content_id));
       // 서버가 문장에서 읽어낸 조건(지역/동행자/목적)을 다음 화면에서 보여줍니다.
       setParsedQuery(parsed ?? null);
       setPendingQueryText(queryText);

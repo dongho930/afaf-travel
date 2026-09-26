@@ -1671,6 +1671,7 @@ class TourApiClient:
         query_text: str = "",
         ai_labels: list[str] | None = None,
         visit_date: str | None = None,
+        exclude_ids: set[str] | None = None,
     ) -> list[Attraction]:
         """
         AI 장소 추천(1단계)에 넘길 후보를 지역 전체에서 표본으로 뽑습니다.
@@ -1693,6 +1694,7 @@ class TourApiClient:
                 limit=1000 if venue_constraint else limit,
                 sigungu_cd=sigungu_cd,
             )
+            candidates = [a for a in candidates if a.content_id not in (exclude_ids or set())]
             if not venue_constraint:
                 return candidates
             matched = [a for a in candidates if venue_constraint.matches(a)]
@@ -1707,6 +1709,10 @@ class TourApiClient:
         ldong_regn_map = {"경기도": "41", "서울": "11"}
         pool = await self._region_attractions(ldong_regn_map.get(region, "41"))
         pool = _filter_and_mix_by_regions(pool, _region_token_sets(sigungu_cd))
+        # '다시 추천'이면 이미 보여준 곳을 순서를 정하기 전에 뺍니다 (그래야 새로운 곳이 올라옵니다).
+        exclude_ids = exclude_ids or set()
+        if exclude_ids:
+            pool = [a for a in pool if a.content_id not in exclude_ids]
         if venue_constraint:
             pool = [a for a in pool if venue_constraint.matches(a)]
         if not pool:
@@ -1813,7 +1819,7 @@ class TourApiClient:
                 user_type,
                 len(candidates),
             )
-            known = {a.content_id for a in candidates}
+            known = {a.content_id for a in candidates} | exclude_ids
             for a in await self.search_accessible_attractions(
                 region=region, user_type=user_type, limit=limit, sigungu_cd=sigungu_cd
             ):

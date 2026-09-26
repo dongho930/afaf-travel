@@ -36,6 +36,10 @@ interface CourseContextValue {
   // 서버가 보낸 안내 문장(비슷한 종류로 대신 추천했거나, 추천이 적은 이유). 그대로 보여줍니다.
   recommendationNotices: string[];
   setRecommendationNotices: (notices: string[]) => void;
+  // 이번 세션에서 화면에 보여준 장소들. '다시 추천'할 때 모두 빼달라고
+  // 서버에 보내서, 고른 곳(화면에 그대로 남음) 말고는 모두 새로운 장소가 나오게 합니다.
+  shownContentIds: string[];
+  setShownContentIds: (ids: string[]) => void;
   pendingQueryText: string;
   setPendingQueryText: (q: string) => void;
   // 홈 탭 검색창에서 AI 플래너 입력창으로 문구를 넘길 때 씁니다. 넘길 때마다
@@ -67,6 +71,7 @@ export function CourseProvider({ children }: { children: React.ReactNode }) {
   const [missingCategories, setMissingCategories] = useState<string[]>([]);
   const [recommendationIds, setRecommendationIds] = useState<string[]>([]);
   const [recommendationNotices, setRecommendationNotices] = useState<string[]>([]);
+  const [shownContentIds, setShownContentIds] = useState<string[]>([]);
   const [pendingQueryText, setPendingQueryText] = useState("");
   const [queryHandoffSeq, setQueryHandoffSeq] = useState(0);
   const [parsedQuery, setParsedQuery] = useState<ParsedQuery | null>(null);
@@ -114,6 +119,8 @@ export function CourseProvider({ children }: { children: React.ReactNode }) {
         setRecommendationIds,
         recommendationNotices,
         setRecommendationNotices,
+        shownContentIds,
+        setShownContentIds,
         pendingQueryText,
         setPendingQueryText,
         queryHandoffSeq,
