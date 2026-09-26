@@ -60,17 +60,20 @@ def cluster_nearby(items: list[Scored], limit: int) -> list[Scored]:
     anchors = sorted(located, key=lambda s: s.key)[:_ANCHOR_POOL]
     enough = min(max(limit // 2, 6), len(located))
 
-    # 장소 수보다 '문장에 맞고 등급 높은 곳'이 모인 지역을 고릅니다. 개수 비중이 크면
-    # 식당·공원이 많은 곳이 뽑혀 '많음' 등급 비율이 떨어졌습니다 (평가 56%→45%).
-    def value(members: list[Scored]) -> float:
-        return sum(0.5 + 2 * m.text + 2 * m.grade for m in members)
+    # 문장 조건에 맞는 곳이 많이 모인 지역을 먼저, 그다음 등급 높은 곳이 모인 지역을
+    # 고릅니다 (후보 순서와 같은 우선순위: 문장 > 등급). 예전엔 둘을 비슷한 무게로 더해서
+    # '온천이나 휴양' 요청에 등급 좋은 도심이 뽑혀 맞는 곳이 2곳뿐이었습니다.
+    # 개수 비중이 크면 식당·공원이 많은 곳이 뽑혀 '많음' 등급 비율이 떨어졌습니다 (56%→45%).
+    def value(members: list[Scored]) -> tuple[int, float]:
+        return (sum(m.text > 0 for m in members), sum(0.5 + 2 * m.text + 2 * m.grade for m in members))
 
     for radius in CLUSTER_RADII_KM:
         best: list[Scored] = []
+        best_value = (0, 0.0)
         for anchor in anchors:
             members = [s for s in located if _km(anchor.place, s.place) <= radius]
-            if value(members) > value(best):
-                best = members
+            if value(members) > best_value:
+                best, best_value = members, value(members)
         if len(best) >= enough:
             return best
     return items

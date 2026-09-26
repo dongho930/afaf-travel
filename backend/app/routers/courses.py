@@ -60,7 +60,7 @@ from app.services.supabase_service import (
     update_trip,
     update_visited_place_date,
 )
-from app.services.query_preferences import extract_preferences, unmet_labels
+from app.services.query_preferences import extract_preferences, text_matches, unmet_labels
 from app.services.request_conflicts import conflict_message, find_conflicts
 from app.services.schedule import is_closed_on, next_day_of
 from app.services.selection_log_service import RETENTION_DAYS, log_recommendation, log_selection, purge_old_logs
@@ -118,6 +118,28 @@ def _few_results_notice(count: int, closed_count: int, request: PlaceRecommendat
                                  ("방문일을 바꾸거나", bool(closed_count))) if on]
     parts.append(f"{' '.join(tips)} 다른 표현으로 다시 요청해 보세요." if tips else "다른 표현으로 다시 요청해 보세요.")
     return " ".join(parts)
+
+
+# 문장 조건(특성·편의시설)에 맞는 곳이 이보다 적으면 나머지가 무엇인지 알려줍니다.
+_FEW_TEXT_MATCHES = 3
+
+
+def _few_text_matches_notices(selected, prefs, missing_categories: list[str]) -> list[str]:
+    """
+    '동물 보러 가고 싶어'에 맞는 곳이 1곳뿐인데 최소 개수를 채우려 다른 곳이 섞이면,
+    사용자는 나머지도 동물 관련인 줄 압니다. 맞는 곳이 적으면 그렇다고 알려줍니다.
+    (하나도 없으면 missing_categories가 이미 '찾지 못했어요'로 알립니다.)
+    """
+    notices = []
+    labels = [c.label for c in prefs.concepts] + [f.label for f in prefs.facilities]
+    for label in labels:
+        if label in missing_categories:
+            continue
+        hits = sum(label in text_matches(item.attraction, prefs)[1] for item in selected)
+        if 0 < hits < _FEW_TEXT_MATCHES and hits * 2 < len(selected):
+            notices.append(f"요청하신 {label} 조건에 맞는 곳은 {hits}곳뿐이라, "
+                           "나머지는 고른 지역·유형에 맞는 다른 장소예요.")
+    return notices
 
 
 async def _candidates_with_conditions(
@@ -275,6 +297,7 @@ async def recommend_course_places(
         user_id=user_id,
     )
     notices = constraint.substitute_notices() if constraint else []
+    notices += _few_text_matches_notices(selected, prefs, missing_categories)
     if len(selected) < _MIN_RESULTS_BEFORE_NOTICE:
         notices.append(_few_results_notice(len(selected), closed_count, request))
     return PlaceRecommendationResponse(
