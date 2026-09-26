@@ -162,3 +162,12 @@ def test_정상적으로_읽은_목록은_캐시한다(monkeypatch):
     search("팔달")
 
     assert first > 0 and calls["count"] == first  # 두 번째 검색은 DB를 다시 읽지 않습니다
+
+
+def test_검색_결과를_이어서_나눠_받을_수_있다():
+    """검색 화면이 내릴수록 다음 묶음을 받습니다 — 묶음끼리 겹치거나 빠지면 안 됩니다."""
+    client = tour_api.tour_api_client
+    everything = asyncio.run(client.search_attractions("수원", limit=10))
+    pages = [asyncio.run(client.search_attractions("수원", limit=2, offset=o)) for o in (0, 2, 4)]
+    assert [a.content_id for page in pages for a in page] == [a.content_id for a in everything]
+    assert len(everything) == 4 and pages[2] == []

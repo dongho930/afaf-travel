@@ -496,8 +496,8 @@ export const api = {
 
   // 여행지 직접 검색 — 검색 화면에서 사용. 위 자동완성과 같은 자료를 쓰지만
   // 사진·평점까지 실린 Attraction을 그대로 받아 카드로 보여줍니다.
-  searchAttractions: (q: string, category?: string | null, limit: number = 30) => {
-    const params = new URLSearchParams({ q, limit: String(limit) });
+  searchAttractions: (q: string, category?: string | null, limit: number = 30, offset: number = 0) => {
+    const params = new URLSearchParams({ q, limit: String(limit), offset: String(offset) });
     if (category) params.set("category", category);
     return request<Attraction[]>(`/api/tourism/attractions/search?${params.toString()}`);
   },

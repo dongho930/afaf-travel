@@ -180,7 +180,12 @@ export function PostCard({
     <View style={styles.card}>
       <View>
         {item.photo_urls.length > 0 && (
-          <View onLayout={handlePhotoAreaLayout}>
+          // 폭을 재기 전부터 정사각형 자리를 잡아둡니다. 예전엔 폭을 잰 뒤에야 사진 칸이
+          // 생겨서, 글이 먼저 보였다가 사진 칸이 끼어들며 아래로 밀렸습니다.
+          <View
+            onLayout={handlePhotoAreaLayout}
+            style={{ width: "100%", aspectRatio: 1, backgroundColor: colors.surfaceAlt }}
+          >
             {photoWidth > 0 && (
               <PhotoCarousel pageWidth={photoWidth} pageCount={item.photo_urls.length}>
                 {item.photo_urls.map((url) => (

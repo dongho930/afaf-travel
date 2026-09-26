@@ -1,3 +1,4 @@
+import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
 import { ListBulletsIcon, PlusIcon } from "phosphor-react-native";
 import React, { useCallback, useRef, useState } from "react";
@@ -14,8 +15,27 @@ import { api } from "../../services/api";
 import { useAuth } from "../../services/AuthContext";
 import { useTheme } from "../../services/ThemeContext";
 import { PostItem } from "../../types";
+import { httpsImageUrl } from "../../utils/imageUrl";
 
 const PAGE_SIZE = 20;
+// 처음 들어올 때 화면에 바로 보이는 게시물 수. 이 게시물들의 첫 사진과 프로필 사진을
+// 미리 받아두고 글과 함께 보여줍니다 (글이 먼저 뜨고 사진이 뒤늦게 차오르지 않게).
+const FIRST_SCREEN_POSTS = 3;
+// 네트워크가 느려도 이 이상은 기다리지 않습니다 — 그때는 글부터 보여주고 사진은 받는 대로.
+const PREFETCH_TIMEOUT_MS = 2500;
+
+async function prefetchFirstScreen(rows: PostItem[]): Promise<void> {
+  const urls = rows
+    .slice(0, FIRST_SCREEN_POSTS)
+    .flatMap((post) => [post.photo_urls[0], post.avatar_url])
+    .filter((url): url is string => !!url)
+    .map((url) => httpsImageUrl(url));
+  if (urls.length === 0) return;
+  await Promise.race([
+    Image.prefetch(urls, "memory-disk").catch(() => false),
+    new Promise((resolve) => setTimeout(resolve, PREFETCH_TIMEOUT_MS)),
+  ]);
+}
 
 /**
  * '게시물' 탭. 다른 사용자들이 올린 방문 여행지 게시물(사진+글)을 최신순으로
@@ -69,7 +89,10 @@ export default function PostsScreen() {
     if (isFirstLoad) setLoading(true);
     api
       .getPostFeed(PAGE_SIZE)
-      .then((rows) => {
+      .then(async (rows) => {
+        // 처음에만 첫 화면 사진을 받아둔 뒤 보여줍니다. 이미 목록이 떠 있는 갱신에서는
+        // 기다리지 않습니다 (보고 있던 화면이 그대로라 어색할 일이 없습니다).
+        if (isFirstLoad) await prefetchFirstScreen(rows);
         setPosts(rows);
         setHasMore(rows.length === PAGE_SIZE);
         hasLoadedRef.current = true;

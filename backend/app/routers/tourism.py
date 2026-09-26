@@ -307,6 +307,7 @@ async def search_attractions(
         default=None, description="카테고리로 좁히기 (관광지/음식점/숙박/문화시설/레포츠 등)"
     ),
     limit: int = Query(default=30, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, description="이만큼 건너뛴 뒤부터 (내릴수록 더 불러오기)"),
 ):
     """
     여행지 직접 검색. 이름을 먼저, 그다음 주소를 부분일치로 찾습니다.
@@ -319,7 +320,7 @@ async def search_attractions(
     모아 채웁니다. 혼잡도와 무장애 정보는 이 캐시에 없어서 비어 있습니다 —
     상세 화면에서 채워집니다.
     """
-    return await tour_api_client.search_attractions(q, limit, category)
+    return await tour_api_client.search_attractions(q, limit, category, offset)
 
 
 @router.get("/attractions/{content_id}/related", response_model=list[Attraction])

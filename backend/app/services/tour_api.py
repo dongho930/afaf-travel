@@ -2333,7 +2333,7 @@ class TourApiClient:
         return merged
 
     async def search_attractions(
-        self, keyword: str, limit: int = 30, category: str | None = None
+        self, keyword: str, limit: int = 30, category: str | None = None, offset: int = 0,
     ) -> list[Attraction]:
         """
         이름/주소로 여행지를 찾습니다 (검색 화면과 제보 자동완성이 함께 씁니다).
@@ -2370,7 +2370,9 @@ class TourApiClient:
 
         # 캐시에 들어있는 객체를 그대로 돌려주고 아래에서 평점을 채우면, 그 값이
         # 캐시에 눌러앉아 다음 요청까지 오염됩니다. 복사본에만 채웁니다.
-        results = [a.model_copy(deep=True) for a in (by_name + by_address)[:limit]]
+        # offset은 검색 화면이 내릴수록 다음 묶음을 받을 때 씁니다. 순서는 매번 같아야
+        # 묶음끼리 겹치거나 빠지지 않습니다 — 목록 캐시 순서 + 안정 정렬이라 같습니다.
+        results = [a.model_copy(deep=True) for a in (by_name + by_address)[offset:offset + limit]]
 
         # 평점은 목록 캐시에 없어서 한 번에 모아 옵니다(DB 한 번). 느리거나
         # 실패하면 평점 없이 보여주는 편이 낫습니다 — 검색 자체는 살아야 합니다.
