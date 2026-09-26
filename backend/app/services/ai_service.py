@@ -136,6 +136,12 @@ _PARSE_CACHE = TTLCache[ParsedQuery](ttl_seconds=600.0)
 # 한두 곳만 보여주지 않습니다 (후보 자체가 적으면 있는 만큼만).
 _MIN_RECOMMENDATIONS = 6
 
+# AI에게는 순위 앞쪽 후보만 보냅니다. 후보는 문장 점수·등급·거리 순으로 서 있어서
+# 뒤쪽은 대개 조건에 덜 맞는 곳입니다. 40곳 → 20곳으로 줄여도 평가 결과(문장 일치·
+# 등급·거리·반복 일관성)는 그대로였고, 프롬프트가 절반이 되어 응답이 빠르고 Groq
+# 사용량이 줄어듭니다. 필수 유형·최소 개수 채우기는 여전히 전체 후보에서 합니다.
+_AI_CANDIDATE_LIMIT = 20
+
 
 def _region_label(codes: list[int]) -> str | None:
     """시군구 코드 목록을 사람이 읽는 지역 이름으로 (예: [41111, 41113] -> '수원시')."""
@@ -1026,7 +1032,7 @@ async def recommend_places(
         # 몇 개 겹치는지로만 고른 목록은 요청·유형과 어긋나기 쉬워서, 그럴듯한
         # 엉뚱한 추천을 주느니 "잠시 후 다시"라고 말하는 편이 낫습니다.
         # GroqUnavailableError는 라우터가 받아 안내 문구로 바꿉니다.
-        selected = await _groq_recommend(request, candidates, parsed)
+        selected = await _groq_recommend(request, candidates[:_AI_CANDIDATE_LIMIT], parsed)
     else:
         # 키가 없는 개발·테스트 환경에서만 규칙 기반으로 동작합니다.
         selected = _mock_recommend(request, candidates, parsed)

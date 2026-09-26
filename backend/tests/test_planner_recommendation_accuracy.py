@@ -424,3 +424,20 @@ def test_장소_유형을_지정하지_않은_질의는_ai에_전체_유형을_�
     assert received["required_venue_types"] == []
     assert received["allow_other_categories"] is True
     assert [item.attraction.content_id for item in selected] == ["park"]
+
+
+def test_ai에게는_순위_앞쪽_후보만_보냄(monkeypatch):
+    monkeypatch.setattr(ai_service.settings, "groq_api_key", "test")
+    sent: list[int] = []
+
+    async def fake_ai(_request, candidates, _parsed):
+        sent.append(len(candidates))
+        return [{"content_id": a.content_id, "reason": "좋아요"} for a in candidates[:6]]
+
+    monkeypatch.setattr(ai_service, "_groq_recommend", fake_ai)
+    candidates = [place(f"p{i}", f"공원 {i}", "관광지") for i in range(40)]
+    asyncio.run(ai_service.recommend_places(
+        PlaceRecommendationRequest(query_text="조용한 산책"), candidates,
+    ))
+    assert sent == [ai_service._AI_CANDIDATE_LIMIT]
+
