@@ -250,9 +250,13 @@ class VenueConstraint:
         return any(req.label in ("카페", "빵집") and not req.meal_only and req.matches(place)
                    for req in self.requirements)
 
+    def is_excluded(self, place: Attraction) -> bool:
+        """'미술관 말고'처럼 빼달라고 한 종류인지."""
+        return any(VenueRequirement("제외", ((category, terms),)).matches(place)
+                   for category, terms in self.exclusions)
+
     def matches(self, place: Attraction) -> bool:
-        if any(VenueRequirement("제외", ((category, terms),)).matches(place)
-               for category, terms in self.exclusions):
+        if self.is_excluded(place):
             return False
         if self.allow_other_categories:
             return True
@@ -326,11 +330,15 @@ class VenueConstraint:
                 for r in self.requirements if r.substituted]
 
 
-def _with_object(word: str) -> str:
-    """받침에 따라 을/를을 붙입니다 (계곡을, 자연 관광지를)."""
+def with_josa(word: str, after_final: str, after_vowel: str) -> str:
+    """받침에 따라 조사를 붙입니다 (계곡을/자연 관광지를, 미술관은/카페는)."""
     last = word[-1]
     has_final = "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 != 0
-    return f"{word}{'을' if has_final else '를'}"
+    return f"{word}{after_final if has_final else after_vowel}"
+
+
+def _with_object(word: str) -> str:
+    return with_josa(word, "을", "를")
 
 
 def _categories_for(requirements: tuple[VenueRequirement, ...]) -> dict[str, tuple[str, ...] | None]:

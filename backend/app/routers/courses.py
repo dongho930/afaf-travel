@@ -35,7 +35,7 @@ from app.services.ai_service import (
     recommend_places,
 )
 from app.services.course_validator import prefers_short_route, strip_meal_from_title
-from app.services.place_intent import VenueConstraint, venue_constraint_for_query
+from app.services.place_intent import VenueConstraint, venue_constraint_for_query, with_josa
 from app.services.route_cluster import narrow_for_short_route, prefer_confirmed_meals
 from app.services.auth import get_optional_user_id
 from app.services.supabase_service import (
@@ -338,7 +338,12 @@ async def create_course_from_selection(
     if not selected_attractions:
         raise HTTPException(status_code=422, detail="선택하신 관광지 정보를 다시 불러오지 못했습니다. 다시 시도해주세요.")
 
-    # 1단계와 같은 판단으로, 지역에 없어 비슷한 종류로 대신 추천한 곳도 받아들입니다.
+    # 사용자가 고른 장소는 요청과 달라도 그대로 코스로 만듭니다. 예전엔 요청과 다른
+    # 종류·빠진 종류·문장 속 지역 밖을 고르면 422로 막았는데, 추천 목록에서 직접 고른
+    # 곳을 거절하는 셈이었고 목록에 그 종류가 아예 없으면 코스를 만들 방법이 없었습니다.
+    # 이제는 무엇이 요청과 다른지 코스 경고(warnings)로만 알립니다.
+    # 넓힌 제약(비슷한 종류로 대신 추천)을 쓰는 건, 대신 추천한 곳을 고른 사람에게
+    # '요청과 다른 종류'라고 알리지 않기 위해서입니다.
     constraint = await tour_api_client.widen_unavailable_venues(
         venue_constraint_for_query(request.query_text), request.user_type.value,
         parsed.sigungu_cds or None, request.region,
@@ -346,19 +351,26 @@ async def create_course_from_selection(
     if constraint and constraint.meal_required:
         await tour_api_client.fill_extra_info(selected_attractions)
     meal_gap = False
+    selection_notes: list[str] = []
     if constraint:
-        if any(not constraint.matches(place) for place in selected_attractions):
-            raise HTTPException(status_code=422, detail="요청에서 제외하거나 요청과 다른 유형의 장소가 선택됐어요. 장소를 다시 골라주세요.")
+        excluded = [place.name for place in selected_attractions if constraint.is_excluded(place)]
+        different = [place.name for place in selected_attractions
+                     if not constraint.is_excluded(place) and not constraint.matches(place)]
+        if excluded:
+            selection_notes.append(f"빼달라고 하신 종류인 {', '.join(excluded)}도 고르신 대로 코스에 넣었어요.")
+        if different:
+            selection_notes.append(f"요청과 다른 종류인 {', '.join(different)}도 고르신 대로 코스에 넣었어요.")
         missing, meal_gap = _required_place_gaps(constraint, selected_attractions)
         if missing:
-            raise HTTPException(
-                status_code=422,
-                detail=f"요청하신 {'·'.join(sorted(missing))} 장소를 선택해야 코스를 만들 수 있어요.",
-            )
+            selection_notes.append(f"요청하신 {with_josa('·'.join(sorted(missing)), '은', '는')} 이 코스에 포함되지 않았어요.")
     if parsed.region_text and "외" not in parsed.region_text:
         region_tokens = parsed.region_text.split()
-        if any(not all(token in place.address for token in region_tokens) for place in selected_attractions):
-            raise HTTPException(status_code=422, detail="선택한 장소 중 요청하신 지역 밖에 있는 곳이 있어요. 장소를 다시 골라주세요.")
+        outside = [place.name for place in selected_attractions
+                   if not all(token in place.address for token in region_tokens)]
+        if outside:
+            selection_notes.append(
+                f"요청하신 {parsed.region_text} 밖의 {', '.join(outside)}도 고르신 대로 코스에 넣었어요."
+            )
 
     # 방문 시각을 영업시간·휴무일에 맞춰 계산하려면 부가정보가, 붐비는 곳을 앞으로
     # 당기려면 혼잡도 예보가 필요합니다. 둘 다 캐시만 읽어서 채웁니다.
@@ -372,6 +384,7 @@ async def create_course_from_selection(
         raise HTTPException(status_code=422, detail=str(e))
 
     _note_missing_meal(course, meal_gap)
+    course.warnings = [*selection_notes, *course.warnings]
     await save_course(course, query_text=request.query_text, region=request.region, user_id=user_id)
     log_selection(request.recommendation_ids, [place.content_id for place in selected_attractions])
     return course
