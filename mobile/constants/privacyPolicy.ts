@@ -16,7 +16,9 @@ export interface PolicySection {
 }
 
 export const PRIVACY_POLICY_OPERATOR = "동행";
-export const PRIVACY_POLICY_EFFECTIVE_DATE = "2026년 9월 17일";
+export const PRIVACY_POLICY_EFFECTIVE_DATE = "2026년 10월 3일";
+/** 바로 전 방침의 시행일 — 방침 화면에 "이전 방침"으로 함께 적습니다. */
+export const PRIVACY_POLICY_PREVIOUS_DATE = "2026년 9월 17일";
 
 export const PRIVACY_POLICY_INTRO =
   `${PRIVACY_POLICY_OPERATOR}(이하 "운영자")은 경기포올 앱·웹 서비스(이하 "서비스")를 이용하는 분의 개인정보를 소중히 다루며, 「개인정보 보호법」 등 관련 법령을 지킵니다. 이 방침은 서비스가 어떤 정보를 왜 수집하고, 어떻게 보관·파기하는지 알려드립니다.`;
@@ -33,6 +35,11 @@ export const PRIVACY_POLICY_SECTIONS: PolicySection[] = [
           ["프로필 (선택)", "프로필 사진", "프로필 표시"],
           ["서비스 이용", "AI 여행 코스 요청 문장, 선택한 이동 유형·지역·방문 예정일", "맞춤 여행 코스 생성"],
           [
+            "추천 품질 개선",
+            "AI 추천 요청 문장, 선택한 이동 유형·지역·방문 예정일, 추천받은 장소와 그중 선택한 장소, 로그인한 경우 회원 식별번호",
+            "추천이 실제로 도움이 되었는지 분석하고 추천 품질 개선",
+          ],
+          [
             "서비스 이용 (회원)",
             "저장한 여행·코스, 방문 기록, 리뷰(별점·글·사진), 접근성 제보, 게시물·댓글",
             "여행 기록 관리, 이용자 간 정보 공유",
@@ -44,6 +51,7 @@ export const PRIVACY_POLICY_SECTIONS: PolicySection[] = [
         items: [
           "로그인 없이 이용하는 기능(여행지 탐색, 코스 만들기)에서는 이메일 같은 회원 정보를 받지 않습니다.",
           "리뷰·게시물·댓글과 작성자 아이디는 다른 이용자에게 공개됩니다.",
+          "추천 품질 개선 기록은 로그인하지 않은 이용자도 남으며, 이때는 누구인지 알 수 있는 정보(이메일·아이디 등)를 함께 남기지 않습니다.",
         ],
       },
     ],
@@ -61,9 +69,9 @@ export const PRIVACY_POLICY_SECTIONS: PolicySection[] = [
             "기기에서 위치를 읽어 카카오맵 길안내로 넘기며, 운영자 서버에는 전송·저장하지 않습니다.",
           ],
           [
-            "마이크 (선택)",
+            "마이크·음성 인식 (선택)",
             "음성으로 여행 요청 입력",
-            "기기의 음성인식 기능이 글자로 바꾸며, 음성 파일은 운영자 서버로 전송·저장하지 않습니다.",
+            "기기 또는 브라우저의 음성인식 기능(Android는 Google, iOS는 Apple, 웹은 이용 중인 브라우저가 제공)이 글자로 바꿉니다. 이 과정에서 음성이 해당 회사의 음성인식 서비스로 전송될 수 있으며, 운영자 서버로는 바뀐 글자만 전송되고 음성은 전송·저장하지 않습니다.",
           ],
           ["사진 (선택)", "프로필·리뷰·게시물 사진 첨부", "이용자가 고른 사진만 업로드합니다."],
         ],
@@ -79,6 +87,7 @@ export const PRIVACY_POLICY_SECTIONS: PolicySection[] = [
         items: [
           "회원 정보와 작성한 기록은 **회원 탈퇴 시까지** 보관하고, 탈퇴하면 지체 없이 파기합니다.",
           "로그인하지 않고 요청한 AI 코스 요청 문장과 생성 결과는 서비스 품질 확인을 위해 1년 동안 보관한 뒤 파기합니다.",
+          "추천 품질 개선 기록은 **수집일로부터 90일** 동안 보관한 뒤 자동으로 파기합니다.",
           "법령에 따라 보관해야 하는 정보는 해당 기간 동안 보관합니다.",
         ],
       },
@@ -94,7 +103,21 @@ export const PRIVACY_POLICY_SECTIONS: PolicySection[] = [
     ],
   },
   {
-    title: "5. 개인정보 처리 위탁 및 국외 이전",
+    title: "5. 자동 수집 장치(쿠키 등)의 설치·운영 및 거부",
+    blocks: [
+      {
+        type: "bullets",
+        items: [
+          "서비스는 쿠키를 사용하지 않습니다.",
+          "대신 이용 편의를 위해 앱의 기기 저장소(웹은 브라우저의 로컬 저장소)에 로그인 상태 유지 정보, 선택한 이동 유형, 화면 테마, 사용법 안내 확인 여부, 최근에 만든 코스를 저장합니다.",
+          "이 정보는 이용 중인 기기에만 저장되며, 로그인 상태 유지 정보는 로그인한 이용자를 확인할 때만 운영자 서버로 전송합니다.",
+          "앱을 삭제하거나 브라우저의 사이트 데이터를 삭제하면 지워집니다. 이 경우 다시 로그인해야 하고 선택했던 설정이 초기화됩니다.",
+        ],
+      },
+    ],
+  },
+  {
+    title: "6. 개인정보 처리 위탁 및 국외 이전",
     blocks: [
       { type: "paragraph", text: "서비스 운영을 위해 아래 업체에 처리를 맡깁니다." },
       {
@@ -108,7 +131,7 @@ export const PRIVACY_POLICY_SECTIONS: PolicySection[] = [
             "대한민국 (서울, ap-northeast-2)",
           ],
           ["Render Services, Inc.", "서버 운영", "서비스 이용 중 전송되는 정보", "싱가포르"],
-          ["Groq, Inc.", "AI 여행 코스 생성", "AI 코스 요청 문장, 이동 유형·지역", "미국"],
+          ["Groq, Inc.", "AI 여행 코스 생성", "AI 코스 요청 문장, 이동 유형·지역·방문 예정일", "미국"],
           ["Kakao Corp.", "지도 표시, 길안내 연결", "길찾기 출발지·도착지 좌표", "대한민국"],
         ],
       },
@@ -127,7 +150,7 @@ export const PRIVACY_POLICY_SECTIONS: PolicySection[] = [
     ],
   },
   {
-    title: "6. 이용자의 권리와 행사 방법",
+    title: "7. 이용자의 권리와 행사 방법",
     blocks: [
       {
         type: "bullets",
@@ -140,7 +163,7 @@ export const PRIVACY_POLICY_SECTIONS: PolicySection[] = [
     ],
   },
   {
-    title: "7. 안전성 확보 조치",
+    title: "8. 안전성 확보 조치",
     blocks: [
       {
         type: "bullets",
@@ -153,7 +176,7 @@ export const PRIVACY_POLICY_SECTIONS: PolicySection[] = [
     ],
   },
   {
-    title: "8. 개인정보 보호책임자",
+    title: "9. 개인정보 보호책임자",
     blocks: [
       {
         type: "table",
@@ -174,7 +197,7 @@ export const PRIVACY_POLICY_SECTIONS: PolicySection[] = [
     ],
   },
   {
-    title: "9. 방침의 변경",
+    title: "10. 방침의 변경",
     blocks: [{ type: "paragraph", text: "이 방침이 바뀌면 시행 7일 전부터 서비스 공지로 알립니다." }],
   },
 ];

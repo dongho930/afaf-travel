@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fontFamily } from "../constants/fonts";
 import {
   PRIVACY_POLICY_EFFECTIVE_DATE,
+  PRIVACY_POLICY_PREVIOUS_DATE,
   PRIVACY_POLICY_INTRO,
   PRIVACY_POLICY_SECTIONS,
   PolicyBlock,
@@ -31,7 +32,9 @@ export default function PrivacyPolicyScreen() {
       <Text style={styles.title} accessibilityRole="header">
         경기포올 개인정보처리방침
       </Text>
-      <Text style={styles.meta}>시행일 {PRIVACY_POLICY_EFFECTIVE_DATE}</Text>
+      <Text style={styles.meta}>
+        시행일 {PRIVACY_POLICY_EFFECTIVE_DATE} (이전 방침: {PRIVACY_POLICY_PREVIOUS_DATE} 시행)
+      </Text>
       <Text style={styles.paragraph}>{PRIVACY_POLICY_INTRO}</Text>
 
       {PRIVACY_POLICY_SECTIONS.map((section) => (
