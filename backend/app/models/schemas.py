@@ -255,6 +255,8 @@ class PlaceRecommendationResponse(BaseModel):
     # 이번 추천의 기록 id. 앱은 코스를 만들 때 이 세션에서 받은 id들을 돌려보내서
     # 무엇을 추천했고 무엇을 골랐는지 남깁니다 (기록할 수 없는 환경이면 null).
     recommendation_id: Optional[str] = None
+    # 화면에 그대로 보여줄 안내 문장들 (비슷한 종류로 대신 추천했거나, 추천이 적은 이유).
+    notices: list[str] = Field(default_factory=list)
 
 
 class GenerateFromSelectionRequest(BaseModel):

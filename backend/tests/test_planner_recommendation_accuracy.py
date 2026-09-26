@@ -430,7 +430,7 @@ def test_ai에게는_순위_앞쪽_후보만_보냄(monkeypatch):
     monkeypatch.setattr(ai_service.settings, "groq_api_key", "test")
     sent: list[int] = []
 
-    async def fake_ai(_request, candidates, _parsed):
+    async def fake_ai(_request, candidates, _parsed, _constraint=None):
         sent.append(len(candidates))
         return [{"content_id": a.content_id, "reason": "좋아요"} for a in candidates[:6]]
 

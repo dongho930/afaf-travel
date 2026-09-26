@@ -149,7 +149,7 @@ def test_AI_추천에서도_식사만_요청하면_음식점만_넘긴다(monkey
     restaurant.category = "음식점"
     seen_candidates = []
 
-    async def fake_recommend(request, candidates, parsed):
+    async def fake_recommend(request, candidates, parsed, _constraint=None):
         seen_candidates.extend(candidates)
         return [{"content_id": "museum"}, {"content_id": "food"}]
 
@@ -172,7 +172,7 @@ def test_AI_추천에서도_과학관_요청에_미술관을_섞지_않는다(mo
     science.category = "문화시설"
     seen_candidates = []
 
-    async def fake_recommend(request, candidates, parsed):
+    async def fake_recommend(request, candidates, parsed, _constraint=None):
         seen_candidates.extend(candidates)
         return [{"content_id": "art"}, {"content_id": "science"}]
 
@@ -341,7 +341,7 @@ def _candidate(cid: str) -> Attraction:
 def test_AI가_적게_고르면_후보_순서대로_채운다(monkeypatch, ai_picks, expected):
     monkeypatch.setattr(ai_service.settings, "groq_api_key", "test-key")
 
-    async def fake_groq(_request, _candidates, _parsed=None):
+    async def fake_groq(_request, _candidates, _parsed=None, _constraint=None):
         return ai_picks
 
     monkeypatch.setattr(ai_service, "_groq_recommend", fake_groq)
@@ -357,7 +357,7 @@ def test_AI가_적게_고르면_후보_순서대로_채운다(monkeypatch, ai_pi
 def test_후보가_적으면_있는_만큼만_보여준다(monkeypatch):
     monkeypatch.setattr(ai_service.settings, "groq_api_key", "test-key")
 
-    async def fake_groq(_request, _candidates, _parsed=None):
+    async def fake_groq(_request, _candidates, _parsed=None, _constraint=None):
         return []
 
     monkeypatch.setattr(ai_service, "_groq_recommend", fake_groq)

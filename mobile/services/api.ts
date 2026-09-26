@@ -280,6 +280,7 @@ export const api = {
       parsed: ParsedQuery | null;
       missing_categories: string[];
       recommendation_id?: string | null;
+      notices?: string[];
     }>("/api/courses/recommend", {
       method: "POST",
       body: JSON.stringify({

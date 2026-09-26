@@ -63,6 +63,24 @@ _TERM_LCLS_PREFIXES: dict[str, tuple[str, ...]] = {
     "문화회관": ("VE0601",),
     "캠핑": ("AC05",), "야영장": ("AC05",), "오토캠핑": ("AC05",),
     "산": ("NA0101",), "등산로": ("NA0101",),
+    # 아래 둘은 요청한 종류가 지역에 없을 때 대신 추천하는 넓은 묶음입니다 (_SUBSTITUTES).
+    "자연": ("NA",), "역사": ("HS",),
+}
+
+# 요청한 종류가 고른 지역·유형 안에 한 곳도 없을 때 대신 추천할 비슷한 종류.
+# (대신 찾을 이름·분류 용어, 안내에 쓸 이름). 가평 '계곡이랑 맛집'이 자료에 계곡이
+# 없어 음식점 3곳만 나오고, 2단계에서는 계곡을 고르라며 코스를 못 만들던 문제 때문입니다.
+# 음식점·숙박·쇼핑처럼 대신할 수 없는 종류는 넣지 않습니다.
+_NATURE = (("자연", "공원"), "자연 관광지")
+_EXHIBIT = (("전시", "박물관", "미술관", "과학관"), "전시 시설")
+_HISTORY = (("역사",), "역사 유적")
+_SUBSTITUTES: dict[str, tuple[tuple[str, ...], str]] = {
+    **{label: _NATURE for label in ("계곡", "호수", "해변", "수목원", "산책로", "등산로", "전망대")},
+    **{label: _EXHIBIT for label in ("박물관", "미술관", "과학관", "전시관")},
+    **{label: _HISTORY for label in ("사찰", "성곽", "행궁", "유적")},
+    "공연장": (("공연장", "전시"), "공연·전시 시설"),
+    "테마파크": (("테마파크", "동물원"), "테마파크·동물원"),
+    "동물원": (("동물원", "테마파크"), "테마파크·동물원"),
 }
 
 
@@ -188,6 +206,8 @@ class VenueRequirement:
     # 등산처럼 한 요청이 두 TourAPI 카테고리에 걸칠 수 있습니다.
     options: tuple[tuple[str, tuple[str, ...] | None], ...]
     meal_only: bool = False
+    # 지역에 이 종류가 없어 비슷한 종류로 넓힌 요구 (VenueConstraint.with_substitutes).
+    substituted: bool = False
 
     def matches(self, place: Attraction) -> bool:
         if (self.label == "음식점" or self.meal_only) and not may_serve_meal(place):
@@ -283,6 +303,45 @@ class VenueConstraint:
 
     def matches_requirement(self, place: Attraction) -> bool:
         return any(requirement.matches(place) for requirement in self.requirements)
+
+    def substitutable_labels(self) -> list[str]:
+        return [r.label for r in self.requirements if r.label in _SUBSTITUTES and not r.substituted]
+
+    def with_substitutes(self, labels: list[str]) -> "VenueConstraint":
+        """labels 요구를 비슷한 종류까지 넓힌 제약 (이름은 그대로 둬서 2단계 검사도 통과)."""
+        requirements = tuple(
+            VenueRequirement(
+                r.label,
+                tuple((category, _SUBSTITUTES[r.label][0]) for category, _ in r.options),
+                r.meal_only, substituted=True,
+            ) if r.label in labels and r.label in _SUBSTITUTES else r
+            for r in self.requirements
+        )
+        return VenueConstraint(
+            _categories_for(requirements), self.allow_other_categories, requirements, self.exclusions,
+        )
+
+    def substitute_notices(self) -> list[str]:
+        return [f"{_with_object(r.label)} 찾지 못해 비슷한 {_with_object(_SUBSTITUTES[r.label][1])} 대신 추천했어요."
+                for r in self.requirements if r.substituted]
+
+
+def _with_object(word: str) -> str:
+    """받침에 따라 을/를을 붙입니다 (계곡을, 자연 관광지를)."""
+    last = word[-1]
+    has_final = "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 != 0
+    return f"{word}{'을' if has_final else '를'}"
+
+
+def _categories_for(requirements: tuple[VenueRequirement, ...]) -> dict[str, tuple[str, ...] | None]:
+    by_category: dict[str, tuple[str, ...] | None] = {}
+    for requirement in requirements:
+        for category, terms in requirement.options:
+            if category not in by_category or terms is None:
+                by_category[category] = terms
+            elif by_category[category] is not None:
+                by_category[category] = tuple(sorted(set(by_category[category]) | set(terms)))
+    return by_category
 
 
 # (질의 표현, TourAPI 카테고리, 이름에서 확인할 표현). 범주가 넓은 경우에만
@@ -438,13 +497,7 @@ def venue_constraint_for_query(query_text: str) -> VenueConstraint | None:
                 for req in requirements_list
             ]
     requirements = tuple(requirements_list)
-    by_category: dict[str, tuple[str, ...] | None] = {}
-    for requirement in requirements:
-        for category, terms in requirement.options:
-            if category not in by_category or terms is None:
-                by_category[category] = terms
-            elif by_category[category] is not None:
-                by_category[category] = tuple(sorted(set(by_category[category]) | set(terms)))
+    by_category = _categories_for(requirements)
     # 하루 코스처럼 전체 일정을 요청했다면 언급한 식당은 필수지만, 관광지와
     # 문화시설도 함께 추천할 수 있어야 합니다.
     broad_trip = any(term in text for term in (

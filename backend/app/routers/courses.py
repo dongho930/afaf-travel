@@ -102,10 +102,28 @@ def _note_missing_meal(course: CourseResponse, meal_gap: bool) -> None:
         )
 
 
+# 추천이 이보다 적으면 왜 적은지 알려줍니다 (ai_service의 최소 추천 개수와 같음).
+_MIN_RESULTS_BEFORE_NOTICE = 6
+
+
+def _few_results_notice(count: int, closed_count: int, request: PlaceRecommendationRequest) -> str:
+    """추천이 적을 때 이유와 할 수 있는 일을 한 문장으로 (분당 박물관 월요일 → 1곳 같은 경우)."""
+    parts = [f"조건에 맞는 곳이 {count}곳뿐이에요."]
+    if closed_count:
+        parts.append(f"방문일에 쉬는 {closed_count}곳은 뺐어요.")
+    if request.user_type.value == "hearing":
+        # 청각 유형은 수어·자막·영상 안내가 등록된 곳만 추천합니다 (경기도에 몇 곳뿐).
+        parts.append("청각 편의시설이 등록된 장소가 아직 많지 않아요.")
+    tips = [tip for tip, on in (("지역을 넓히거나", request.sigungu_cd is not None),
+                                 ("방문일을 바꾸거나", bool(closed_count))) if on]
+    parts.append(f"{' '.join(tips)} 다른 표현으로 다시 요청해 보세요." if tips else "다른 표현으로 다시 요청해 보세요.")
+    return " ".join(parts)
+
+
 async def _candidates_with_conditions(
     query_text: str, user_type: str, region: str, sigungu_cd: Optional[int],
     visit_date: Optional[str] = None,
-) -> tuple[list[Attraction], ParsedQuery]:
+) -> tuple[list[Attraction], ParsedQuery, Optional[VenueConstraint]]:
     """
     질의에서 조건을 뽑아낸 뒤, 그 조건(지역·목적·키워드)에 맞는 무장애 관광지
     후보를 지역 전체에서 표본으로 뽑아 돌려줍니다.
@@ -119,7 +137,10 @@ async def _candidates_with_conditions(
     장소가 없다면 다른 도시의 장소를 같은 지역인 듯 추천하지 않습니다.
     """
     parsed = await parse_query(query_text, sigungu_cd, region)
-    venue_constraint = venue_constraint_for_query(query_text)
+    # 요청한 종류가 지역에 없으면 비슷한 종류로 넓힌 제약을 끝까지 같이 씁니다.
+    venue_constraint = await tour_api_client.widen_unavailable_venues(
+        venue_constraint_for_query(query_text), user_type, parsed.sigungu_cds or None, region,
+    )
     short_route = parsed.prefers_short_route or prefers_short_route(query_text)
 
     candidates = await tour_api_client.sample_accessible_candidates(
@@ -135,7 +156,7 @@ async def _candidates_with_conditions(
         visit_date=visit_date,
     )
 
-    return candidates, parsed
+    return candidates, parsed, venue_constraint
 
 
 @courses_router.post("/recommend", response_model=PlaceRecommendationResponse)
@@ -163,7 +184,7 @@ async def recommend_course_places(
         raise HTTPException(status_code=422, detail=conflict_message(conflicts))
 
     try:
-        candidates, parsed = await _candidates_with_conditions(
+        candidates, parsed, constraint = await _candidates_with_conditions(
             request.query_text, request.user_type.value, request.region, request.sigungu_cd,
             request.visit_date,
         )
@@ -182,7 +203,6 @@ async def recommend_course_places(
     #
     # 식사·짧은 동선 요청은 여기서 먼저 맞춥니다. 코스를 만든 뒤 경고만 붙이면
     # 사용자가 무엇을 고르든 요청을 만족하는 코스가 나올 수 없기 때문입니다.
-    constraint = venue_constraint_for_query(request.query_text)
     meal_unconfirmed = False
     if constraint and constraint.meal_required:
         await tour_api_client.fill_extra_info([place for place in candidates if place.category == "음식점"])
@@ -218,14 +238,18 @@ async def recommend_course_places(
         # 방문일에 쉬는 게 확인된 곳은 후보에서 뺍니다. 영업 정보가 없는 곳은 남깁니다
         # (is_closed_on은 휴무가 확실할 때만 True). 예전엔 AI에게 "고르지 마세요"라고
         # 부탁만 해서, AI가 고르면 휴무인 곳이 그대로 추천에 남았습니다.
+        before = len(candidates)
         candidates = [place for place in candidates if not is_closed_on(place, request.visit_date)]
+        closed_count = before - len(candidates)
         if not candidates:
             return PlaceRecommendationResponse(
                 query_text=request.query_text, candidates=[], parsed=parsed,
                 missing_categories=missing_categories,
             )
+    else:
+        closed_count = 0
     try:
-        selected = await recommend_places(request, candidates, parsed) if candidates else []
+        selected = await recommend_places(request, candidates, parsed, constraint) if candidates else []
     except GroqUnavailableError as e:
         # 한도 초과·지연·형식 오류 등 AI에게 답을 못 받은 모든 경우. 규칙 기반
         # 목록으로 대충 채우지 않고, 다시 시도하면 된다고 알려줍니다.
@@ -250,9 +274,13 @@ async def recommend_course_places(
         recommended_ids=[item.attraction.content_id for item in selected],
         user_id=user_id,
     )
+    notices = constraint.substitute_notices() if constraint else []
+    if len(selected) < _MIN_RESULTS_BEFORE_NOTICE:
+        notices.append(_few_results_notice(len(selected), closed_count, request))
     return PlaceRecommendationResponse(
         query_text=request.query_text, candidates=selected, parsed=parsed,
         missing_categories=missing_categories, recommendation_id=recommendation_id,
+        notices=notices,
     )
 
 
@@ -310,7 +338,11 @@ async def create_course_from_selection(
     if not selected_attractions:
         raise HTTPException(status_code=422, detail="선택하신 관광지 정보를 다시 불러오지 못했습니다. 다시 시도해주세요.")
 
-    constraint = venue_constraint_for_query(request.query_text)
+    # 1단계와 같은 판단으로, 지역에 없어 비슷한 종류로 대신 추천한 곳도 받아들입니다.
+    constraint = await tour_api_client.widen_unavailable_venues(
+        venue_constraint_for_query(request.query_text), request.user_type.value,
+        parsed.sigungu_cds or None, request.region,
+    )
     if constraint and constraint.meal_required:
         await tour_api_client.fill_extra_info(selected_attractions)
     meal_gap = False
@@ -361,7 +393,7 @@ async def create_course(
     한 달쯤 뒤 이 로그가 한 번도 안 찍혔으면 그때 안심하고 지우면 됩니다.
     """
     print(f"[legacy] POST /api/courses/generate 호출됨 (user_id={user_id})")
-    candidates, parsed = await _candidates_with_conditions(
+    candidates, parsed, _ = await _candidates_with_conditions(
         request.query_text, request.user_type.value, request.region, None
     )
     await tour_api_client.fill_extra_info(candidates[: request.max_stops])

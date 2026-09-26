@@ -129,6 +129,7 @@ export default function PlannerScreen() {
     setRecommendations,
     setMissingCategories,
     setRecommendationIds,
+    setRecommendationNotices,
     setPendingQueryText,
     pendingQueryText,
     queryHandoffSeq,
@@ -238,7 +239,7 @@ export default function PlannerScreen() {
   const runRecommend = async (effectiveUserType: UserType) => {
     setIsSubmitting(true);
     try {
-      const { candidates, parsed, missing_categories, recommendation_id } = await api.recommendPlaces({
+      const { candidates, parsed, missing_categories, recommendation_id, notices } = await api.recommendPlaces({
         queryText,
         userType: effectiveUserType,
         sigunguCd,
@@ -257,6 +258,7 @@ export default function PlannerScreen() {
       setMissingCategories(missing_categories ?? []);
       // 새 질문이라 이전 세션의 추천 기록은 버리고 새로 시작합니다.
       setRecommendationIds(recommendation_id ? [recommendation_id] : []);
+      setRecommendationNotices(notices ?? []);
       // 서버가 문장에서 읽어낸 조건(지역/동행자/목적)을 다음 화면에서 보여줍니다.
       setParsedQuery(parsed ?? null);
       setPendingQueryText(queryText);

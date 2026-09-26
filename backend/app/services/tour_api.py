@@ -1626,6 +1626,39 @@ class TourApiClient:
             for content_id in sorted(cached_ids - exclude_ids)
         ]
 
+    async def widen_unavailable_venues(
+        self, constraint: VenueConstraint | None, user_type: str,
+        sigungu_cd: int | list[int] | None, region: str = "경기도",
+    ) -> VenueConstraint | None:
+        """
+        요청한 장소 종류가 고른 지역에 유형 기준을 지키는 곳으로 한 곳도 없으면, 그
+        요구를 비슷한 종류로 넓힌 제약을 돌려줍니다 (예: 가평 계곡 → 자연 관광지·공원).
+        비슷한 종류도 없으면 넓히지 않습니다 — 그때는 '찾지 못했어요' 안내가 맞습니다.
+        1단계 추천과 2단계 코스 생성이 같은 판단을 하도록 둘 다 이 함수를 씁니다.
+        """
+        labels = constraint.substitutable_labels() if constraint else []
+        if not labels:
+            return constraint
+        pool = await self._region_attractions({"경기도": "41", "서울": "11"}.get(region, "41"))
+        pool = _filter_and_mix_by_regions(pool, _region_token_sets(sigungu_cd))
+        rows = await get_cached_place_accessibility([a.content_id for a in pool if a.content_id])
+        eligible: list[Attraction] = []
+        for a in pool:
+            copied = a.model_copy(deep=True)
+            row = rows.get(a.content_id)
+            if row is not None:
+                copied.accessibility = _accessibility_from_cache_row(row)
+            if _matches_user_type(copied, user_type):
+                eligible.append(copied)
+        by_label = {r.label: r for r in constraint.requirements}
+        absent = [label for label in labels if not any(by_label[label].matches(a) for a in eligible)]
+        if not absent:
+            return constraint
+        widened = constraint.with_substitutes(absent)
+        usable = [r.label for r in widened.requirements
+                  if r.substituted and any(r.matches(a) for a in eligible)]
+        return constraint.with_substitutes(usable) if usable else constraint
+
     async def sample_accessible_candidates(
         self,
         region: str,
