@@ -16,9 +16,7 @@ export interface PolicySection {
 }
 
 export const PRIVACY_POLICY_OPERATOR = "동행";
-export const PRIVACY_POLICY_EFFECTIVE_DATE = "2026년 10월 3일";
-/** 바로 전 방침의 시행일 — 방침 화면에 "이전 방침"으로 함께 적습니다. */
-export const PRIVACY_POLICY_PREVIOUS_DATE = "2026년 9월 17일";
+export const PRIVACY_POLICY_EFFECTIVE_DATE = "2026년 9월 17일";
 
 export const PRIVACY_POLICY_INTRO =
   `${PRIVACY_POLICY_OPERATOR}(이하 "운영자")은 경기포올 앱·웹 서비스(이하 "서비스")를 이용하는 분의 개인정보를 소중히 다루며, 「개인정보 보호법」 등 관련 법령을 지킵니다. 이 방침은 서비스가 어떤 정보를 왜 수집하고, 어떻게 보관·파기하는지 알려드립니다.`;
