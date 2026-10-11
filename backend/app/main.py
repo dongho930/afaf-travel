@@ -1,3 +1,5 @@
+import re
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -25,6 +27,53 @@ app.add_middleware(
 # 만으로도 눈에 띄게 빨라집니다. 작은 응답은 압축해봐야 이득이 없어서
 # minimum_size(1KB) 미만은 그대로 보냅니다.
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# 브라우저와 앱의 네트워크 계층이 같은 응답을 잠깐 재사용하도록 Cache-Control을
+# 붙입니다. 관광 데이터는 GitHub Actions가 하루 한 번 갱신하는 캐시에서 읽는 것이라,
+# 화면을 다시 열 때마다 서버까지 왕복할 필요가 없습니다.
+#
+# 시간은 그 데이터가 실제로 바뀌는 주기에 맞췄습니다.
+#   - 시/군/구 목록: 코드에 박힌 고정 표라 하루.
+#   - 소개문·부가정보·혼잡도·무장애 통계·연관 관광지·지역 인기도: 하루 한 번
+#     갱신되는 캐시 테이블이라 1시간.
+#   - 관광지 목록·검색·상세·주변: 우리 DB의 평점/리뷰 수가 섞여 있어서 5분. 목록은
+#     서버도 이미 5분간 재사용하므로(_ATTRACTIONS_CACHE) 이보다 더 낡아지지 않습니다.
+# stale-while-revalidate는 기한이 지난 응답을 일단 바로 보여주고 뒤에서 새로 받아오게
+# 합니다(지원하는 브라우저에서만 — 나머지는 max-age만 따릅니다).
+#
+# 성공(200)한 GET에만 붙입니다 — 503(잠시 불가) 같은 실패를 붙잡아두면 회복된 뒤에도
+# 한동안 실패 화면이 보입니다. */refresh는 GitHub Actions가 매번 실제로 갱신하라고
+# 부르는 것이라 목록에 넣지 않습니다. 로그인한 사용자별 응답(내 여행·리뷰 등)도
+# 넣지 않습니다.
+_DAY = "max-age=86400"
+_HOURLY = "max-age=3600, stale-while-revalidate=86400"
+_SHORT = "max-age=300, stale-while-revalidate=600"
+_CACHE_RULES: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"^/api/tourism/regions$"), _DAY),
+    (re.compile(r"^/api/tourism/attractions/(overviews|extra-info)$"), _HOURLY),
+    (re.compile(r"^/api/tourism/attractions/search$"), _SHORT),
+    (re.compile(r"^/api/tourism/attractions/[^/]+/(congestion|related)$"), _HOURLY),
+    (re.compile(r"^/api/tourism/attractions/[^/]+/nearby$"), _SHORT),
+    (re.compile(r"^/api/tourism/attractions(/[^/]+)?$"), _SHORT),
+    (re.compile(r"^/api/tourism/(accessibility-summary|accessibility-places|region-popularity)$"), _HOURLY),
+]
+
+
+def _cache_control_for(path: str) -> str | None:
+    for pattern, value in _CACHE_RULES:
+        if pattern.match(path):
+            return value
+    return None
+
+
+@app.middleware("http")
+async def add_cache_control(request: Request, call_next):
+    response = await call_next(request)
+    if request.method == "GET" and response.status_code == 200 and "cache-control" not in response.headers:
+        value = _cache_control_for(request.url.path)
+        if value:
+            response.headers["Cache-Control"] = value
+    return response
 
 app.include_router(tourism.router)
 app.include_router(courses.router)
