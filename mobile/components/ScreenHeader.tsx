@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { CaretLeftIcon } from "phosphor-react-native";
+import { CaretLeftIcon } from "./icons";
 import React from "react";
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { fontFamily } from "../constants/fonts";

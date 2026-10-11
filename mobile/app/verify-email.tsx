@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { EnvelopeSimpleIcon } from "phosphor-react-native";
+import { EnvelopeSimpleIcon } from "../components/icons";
 import React, { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { Alert } from "../services/crossPlatformAlert";

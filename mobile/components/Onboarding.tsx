@@ -1,6 +1,6 @@
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import { CheckCircleIcon } from "phosphor-react-native";
+import { CheckCircleIcon } from "./icons";
 import React, { useEffect, useRef, useState } from "react";
 import {
   AccessibilityInfo,

@@ -1,5 +1,5 @@
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { SuitcaseIcon } from "phosphor-react-native";
+import { SuitcaseIcon } from "../components/icons";
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,

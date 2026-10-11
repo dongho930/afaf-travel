@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { CaretRightIcon, CheckIcon, MoonIcon, SunIcon, type Icon } from "phosphor-react-native";
+import { CaretRightIcon, CheckIcon, MoonIcon, SunIcon, type Icon } from "../components/icons";
 import React from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { fontFamily } from "../constants/fonts";

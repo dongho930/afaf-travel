@@ -1,5 +1,5 @@
 import { useNavigation } from "expo-router";
-import { CaretLeftIcon, CaretRightIcon } from "phosphor-react-native";
+import { CaretLeftIcon, CaretRightIcon } from "./icons";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   NativeScrollEvent,

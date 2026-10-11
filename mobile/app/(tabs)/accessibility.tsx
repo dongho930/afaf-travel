@@ -1,6 +1,6 @@
 import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
-import { CaretDownIcon, CaretRightIcon, NotePencilIcon, type Icon } from "phosphor-react-native";
+import { CaretDownIcon, CaretRightIcon, NotePencilIcon, type Icon } from "../../components/icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Modal, Pressable, ScrollView, SectionList, StyleSheet, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";

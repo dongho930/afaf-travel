@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { CaretDownIcon, CaretUpIcon, ChatCircleTextIcon, XIcon } from "phosphor-react-native";
+import { CaretDownIcon, CaretUpIcon, ChatCircleTextIcon, XIcon } from "./icons";
 import React, { useState } from "react";
 import {
   ActivityIndicator,

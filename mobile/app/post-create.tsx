@@ -1,6 +1,6 @@
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import { CameraIcon, CaretDownIcon, CaretRightIcon, XIcon } from "phosphor-react-native";
+import { CameraIcon, CaretDownIcon, CaretRightIcon, XIcon } from "../components/icons";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,

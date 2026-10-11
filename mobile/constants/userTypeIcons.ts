@@ -7,7 +7,7 @@ import {
   PersonSimpleWalkIcon,
   SmileyIcon,
   WheelchairIcon,
-} from "phosphor-react-native";
+} from "../components/icons";
 
 /**
  * 이동유형(휠체어/유모차/고령자/임산부/시각/청각/일반)을 나타내는 아이콘을

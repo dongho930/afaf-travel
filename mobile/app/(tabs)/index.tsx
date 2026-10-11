@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
-import { MagnifyingGlassIcon, MapPinIcon, SparkleIcon, WheelchairIcon, type Icon } from "phosphor-react-native";
+import { MagnifyingGlassIcon, MapPinIcon, SparkleIcon, WheelchairIcon, type Icon } from "../../components/icons";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,

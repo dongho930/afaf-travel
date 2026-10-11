@@ -1,4 +1,4 @@
-import { PencilSimpleIcon, TrashIcon } from "phosphor-react-native";
+import { PencilSimpleIcon, TrashIcon } from "./icons";
 import React from "react";
 import { StyleSheet } from "react-native";
 import { spacing } from "../constants/tokens";

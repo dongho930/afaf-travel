@@ -1,4 +1,4 @@
-import { MicrophoneIcon, StopCircleIcon } from "phosphor-react-native";
+import { MicrophoneIcon, StopCircleIcon } from "./icons";
 import React from "react";
 import { Keyboard, Pressable, StyleSheet, Text } from "react-native";
 import { Alert } from "../services/crossPlatformAlert";

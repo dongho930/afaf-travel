@@ -1,4 +1,4 @@
-import { CaretDownIcon, type Icon } from "phosphor-react-native";
+import { CaretDownIcon, type Icon } from "./icons";
 import React, { useRef, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { fontFamily } from "../constants/fonts";

@@ -6,7 +6,7 @@ import {
   TrashIcon,
   WarningIcon,
   type Icon,
-} from "phosphor-react-native";
+} from "./icons";
 import React, { useEffect, useRef, useState } from "react";
 import { Animated, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { fontFamily } from "../constants/fonts";

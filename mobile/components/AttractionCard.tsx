@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { ClockIcon, FirstAidKitIcon, WarningCircleIcon } from "phosphor-react-native";
+import { ClockIcon, FirstAidKitIcon, WarningCircleIcon } from "./icons";
 import React from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { getCongestionDisplay } from "../constants/congestion";

@@ -1,6 +1,6 @@
 import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
-import { ChatCircleTextIcon, TrashIcon, XIcon } from "phosphor-react-native";
+import { ChatCircleTextIcon, TrashIcon, XIcon } from "../components/icons";
 import React, { useCallback, useState } from "react";
 import { ActivityIndicator, FlatList, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { PostCard } from "../components/PostCard";

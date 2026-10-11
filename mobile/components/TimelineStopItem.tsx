@@ -7,7 +7,7 @@ import {
   ImageSquareIcon,
   StarIcon,
   WarningCircleIcon,
-} from "phosphor-react-native";
+} from "./icons";
 import React, { useEffect, useRef, useState } from "react";
 import { Animated, Platform, Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
 import Svg, { Line } from "react-native-svg";

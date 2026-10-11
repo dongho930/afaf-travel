@@ -1,4 +1,4 @@
-import { StarHalfIcon, StarIcon } from "phosphor-react-native";
+import { StarHalfIcon, StarIcon } from "./icons";
 import React, { useEffect, useRef } from "react";
 import { Animated, Easing, StyleSheet, Text, View } from "react-native";
 import { fontFamily } from "../constants/fonts";
