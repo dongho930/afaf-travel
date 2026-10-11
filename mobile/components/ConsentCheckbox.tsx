@@ -1,4 +1,4 @@
-import { CheckIcon } from "phosphor-react-native";
+import { CheckIcon } from "./icons";
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { fontFamily } from "../constants/fonts";

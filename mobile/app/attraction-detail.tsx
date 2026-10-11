@@ -16,7 +16,7 @@ import {
   StarIcon,
   TrainIcon,
   XIcon,
-} from "phosphor-react-native";
+} from "../components/icons";
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,

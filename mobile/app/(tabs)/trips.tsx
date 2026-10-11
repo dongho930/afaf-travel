@@ -11,7 +11,7 @@ import {
   SuitcaseIcon,
   UsersIcon,
   UsersThreeIcon,
-} from "phosphor-react-native";
+} from "../../components/icons";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,

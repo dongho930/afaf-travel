@@ -1,4 +1,4 @@
-import { CaretRightIcon, type Icon } from "phosphor-react-native";
+import { CaretRightIcon, type Icon } from "./icons";
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { fontFamily } from "../constants/fonts";

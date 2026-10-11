@@ -1,4 +1,4 @@
-import { type Icon } from "phosphor-react-native";
+import { type Icon } from "../components/icons";
 import { UserType } from "../types";
 import { userTypeIcon } from "./userTypeIcons";
 

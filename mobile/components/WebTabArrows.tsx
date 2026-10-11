@@ -1,5 +1,5 @@
 import { usePathname, useRouter } from "expo-router";
-import { CaretLeftIcon, CaretRightIcon } from "phosphor-react-native";
+import { CaretLeftIcon, CaretRightIcon } from "./icons";
 import React, { useEffect, useRef, useState } from "react";
 import { Animated, Platform, Pressable, StyleSheet, View } from "react-native";
 import { TAB_ROUTES, tabIndexOfPath } from "../constants/tabs";

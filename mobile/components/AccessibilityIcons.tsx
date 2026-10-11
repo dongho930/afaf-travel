@@ -26,7 +26,7 @@ import {
   TextAaIcon,
   ToiletIcon,
   WheelchairIcon,
-} from "phosphor-react-native";
+} from "./icons";
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { fontFamily } from "../constants/fonts";

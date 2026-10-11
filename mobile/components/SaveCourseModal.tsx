@@ -1,4 +1,4 @@
-import { CalendarBlankIcon, CheckIcon } from "phosphor-react-native";
+import { CalendarBlankIcon, CheckIcon } from "./icons";
 import React, { useState } from "react";
 import {
   ActivityIndicator,

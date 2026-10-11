@@ -1,4 +1,4 @@
-import { CaretLeftIcon, CaretRightIcon } from "phosphor-react-native";
+import { CaretLeftIcon, CaretRightIcon } from "./icons";
 import React, { useRef, useState } from "react";
 import {
   NativeScrollEvent,

@@ -1,6 +1,6 @@
 import Constants from "expo-constants";
 import { Stack, useLocalSearchParams } from "expo-router";
-import { BusIcon, CarIcon, type Icon, NavigationArrowIcon, PersonSimpleWalkIcon } from "phosphor-react-native";
+import { BusIcon, CarIcon, type Icon, NavigationArrowIcon, PersonSimpleWalkIcon } from "../components/icons";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,

@@ -1,5 +1,5 @@
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
-import { CheckIcon, XIcon } from "phosphor-react-native";
+import { CheckIcon, XIcon } from "./icons";
 import { errorMessage } from "../services/api";
 import React, { useEffect, useRef, useState } from "react";
 import {

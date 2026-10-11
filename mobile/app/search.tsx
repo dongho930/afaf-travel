@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { ImageSquareIcon, MagnifyingGlassIcon, XCircleIcon } from "phosphor-react-native";
+import { ImageSquareIcon, MagnifyingGlassIcon, XCircleIcon } from "../components/icons";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,

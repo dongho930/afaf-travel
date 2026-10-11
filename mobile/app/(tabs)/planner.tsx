@@ -6,7 +6,7 @@ import {
   MicrophoneIcon,
   SparkleIcon,
   XCircleIcon,
-} from "phosphor-react-native";
+} from "../../components/icons";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,

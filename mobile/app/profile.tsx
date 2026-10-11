@@ -10,7 +10,7 @@ import {
   LockIcon,
   SignOutIcon,
   UserIcon,
-} from "phosphor-react-native";
+} from "../components/icons";
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";

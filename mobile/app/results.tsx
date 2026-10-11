@@ -5,7 +5,7 @@ import {
   MapTrifoldIcon,
   WarningCircleIcon,
   WifiSlashIcon,
-} from "phosphor-react-native";
+} from "../components/icons";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,

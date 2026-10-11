@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { ArrowsClockwiseIcon, CheckIcon, SparkleIcon } from "phosphor-react-native";
+import { ArrowsClockwiseIcon, CheckIcon, SparkleIcon } from "../components/icons";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,

@@ -1,5 +1,5 @@
 import { LinearGradient } from "expo-linear-gradient";
-import { ImageSquareIcon, StarIcon } from "phosphor-react-native";
+import { ImageSquareIcon, StarIcon } from "./icons";
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { CongestionDisplay } from "../constants/congestion";

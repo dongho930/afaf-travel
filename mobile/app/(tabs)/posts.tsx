@@ -1,6 +1,6 @@
 import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
-import { ListBulletsIcon, PlusIcon } from "phosphor-react-native";
+import { ListBulletsIcon, PlusIcon } from "../../components/icons";
 import React, { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";

@@ -1,4 +1,4 @@
-import type { Icon } from "phosphor-react-native";
+import type { Icon } from "./icons";
 import React, { useState } from "react";
 import { Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
 import { fontFamily } from "../constants/fonts";
