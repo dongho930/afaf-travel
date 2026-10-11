@@ -15,7 +15,6 @@ import {
   Text,
   TextInput,
   TextStyle,
-  TouchableOpacity,
   View,
 } from "react-native";
 import { KeyboardAwareScrollView, useKeyboardState } from "react-native-keyboard-controller";
@@ -30,6 +29,7 @@ import { DATA_CREDIT_TEXT } from "../../components/DataCredit";
 import { FadeInView } from "../../components/FadeInView";
 import { HorizontalScrollWeb } from "../../components/HorizontalScrollWeb";
 import { PhotoCardHeader } from "../../components/PhotoCardHeader";
+import { PressableCard } from "../../components/PressableCard";
 import { ProfileButton } from "../../components/ProfileButton";
 import { getCongestionDisplay } from "../../constants/congestion";
 import { fontFamily } from "../../constants/fonts";
@@ -736,7 +736,7 @@ export default function HomeScreen() {
           <>
             {filteredPlaces.slice(0, visiblePlacesCount).map((place) => (
               <FadeInView key={place.content_id} duration={350}>
-                <TouchableOpacity
+                <PressableCard
                   style={styles.placeCard}
                   onPress={() =>
                     router.push({
@@ -783,7 +783,7 @@ export default function HomeScreen() {
                       );
                     })()}
                   </View>
-                </TouchableOpacity>
+                </PressableCard>
               </FadeInView>
             ))}
             {loadingMore && <ActivityIndicator style={{ marginTop: spacing.sm }} color={colors.primary} />}
