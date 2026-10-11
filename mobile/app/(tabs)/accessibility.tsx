@@ -12,6 +12,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { AccessibilityIcons, accessibilityFeatureLabels } from "../../components/AccessibilityIcons";
 import { FadeInView } from "../../components/FadeInView";
 import { PhotoCardHeader } from "../../components/PhotoCardHeader";
+import { PressableCard } from "../../components/PressableCard";
 import { ProfileButton } from "../../components/ProfileButton";
 import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
@@ -605,8 +606,8 @@ export default function AccessibilityScreen() {
             const count = featureCount(place, selectedCategory);
             return (
               <FadeInView key={place.content_id || place.name} duration={250}>
-                <Pressable
-                  style={({ pressed }) => [styles.placeCard, pressed && styles.pressedFeedback]}
+                <PressableCard
+                  style={styles.placeCard}
                   onPress={() => {
                     if (!place.content_id) {
                       Alert.alert(
@@ -661,7 +662,7 @@ export default function AccessibilityScreen() {
                       <AccessibilityIcons features={featuresOf(place)} />
                     </View>
                   )}
-                </Pressable>
+                </PressableCard>
               </FadeInView>
             );
           })

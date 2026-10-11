@@ -31,6 +31,7 @@ import { AnimatedChip } from "../../components/AnimatedChip";
 import { DateRangePickerModal } from "../../components/DateRangePickerModal";
 import { EditDeleteButtons } from "../../components/EditDeleteButtons";
 import { FadeInView } from "../../components/FadeInView";
+import { PressableCard } from "../../components/PressableCard";
 import { ProfileButton } from "../../components/ProfileButton";
 import { fontFamily } from "../../constants/fonts";
 import { ThemeColors } from "../../constants/theme";
@@ -523,7 +524,7 @@ export default function TripsScreen() {
     const dateLabel = formatDateRange(item.start_date, item.end_date);
     const CatIcon = CATEGORY_ICON[item.category] ?? MapPinIcon;
     return (
-      <TouchableOpacity
+      <PressableCard
         style={styles.row}
         onPress={() => router.push({ pathname: "/trip-detail", params: { tripId: item.trip_id, tripName: item.name } })}
       >
@@ -577,7 +578,7 @@ export default function TripsScreen() {
             )}
           </TouchableOpacity>
         </View>
-      </TouchableOpacity>
+      </PressableCard>
     );
   };
 
@@ -587,7 +588,7 @@ export default function TripsScreen() {
     emptyText = "아직 작성한 리뷰가 없어요.";
     emptyHint = null;
     renderItem = ({ item }: { item: MyReviewItem }) => (
-      <TouchableOpacity
+      <PressableCard
         style={styles.row}
         onPress={() =>
           router.push({ pathname: "/attraction-detail", params: { contentId: item.content_id, name: item.place_name } })
@@ -609,7 +610,7 @@ export default function TripsScreen() {
           </View>
           <Text style={styles.meta}>{item.body}</Text>
         </View>
-      </TouchableOpacity>
+      </PressableCard>
     );
   } else if (activeSection === "reports") {
     listData = reports;
@@ -620,7 +621,7 @@ export default function TripsScreen() {
       const meta = REPORT_CATEGORY_META[item.category];
       const ReportIcon = meta?.icon ?? MapPinIcon;
       return (
-        <TouchableOpacity
+        <PressableCard
           style={styles.row}
           onPress={() =>
             router.push({ pathname: "/attraction-detail", params: { contentId: item.content_id, name: item.place_name } })
@@ -640,7 +641,7 @@ export default function TripsScreen() {
             </View>
             <Text style={styles.meta}>{item.body}</Text>
           </View>
-        </TouchableOpacity>
+        </PressableCard>
       );
     };
   } else if (activeSection === "visited") {
@@ -649,7 +650,7 @@ export default function TripsScreen() {
     emptyText = "아직 방문 완료로 표시한 여행지가 없어요.";
     emptyHint = "'내가 만든 여행' 카드의 '방문 완료' 버튼을 눌러보세요.";
     renderItem = ({ item }: { item: VisitedPlace }) => (
-      <TouchableOpacity
+      <PressableCard
         style={styles.row}
         onPress={() =>
           router.push({ pathname: "/attraction-detail", params: { contentId: item.content_id, name: item.place_name } })
@@ -671,7 +672,7 @@ export default function TripsScreen() {
           </View>
           <Text style={styles.meta}>{item.visited_at?.slice(0, 10)} 방문</Text>
         </View>
-      </TouchableOpacity>
+      </PressableCard>
     );
   }
 

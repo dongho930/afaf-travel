@@ -39,6 +39,7 @@ import { DataCreditLine } from "../components/DataCredit";
 import { FadeInView } from "../components/FadeInView";
 import { HorizontalScrollWeb } from "../components/HorizontalScrollWeb";
 import { PostCard } from "../components/PostCard";
+import { PressableCard } from "../components/PressableCard";
 import { RatingSummary, ReviewRatingSummary, summarizeRatings } from "../components/ReviewRatingSummary";
 import { SaveCourseModal, SaveCourseParams } from "../components/SaveCourseModal";
 import { SegmentedButtonGroup } from "../components/SegmentedButtonGroup";
@@ -549,9 +550,9 @@ export default function AttractionDetailScreen() {
             <Text style={styles.nearbySectionDesc}>이곳을 찾은 분들이 같이 둘러본 곳</Text>
             <HorizontalScrollWeb contentContainerStyle={styles.nearbyRow}>
               {related.map((r) => (
-                <Pressable
+                <PressableCard
                   key={r.content_id}
-                  style={({ pressed }) => [styles.nearbyCard, pressed && styles.pressedFeedback]}
+                  style={styles.nearbyCard}
                   onPress={() =>
                     router.push({
                       pathname: "/attraction-detail",
@@ -582,7 +583,7 @@ export default function AttractionDetailScreen() {
                       <Text style={styles.relatedBadgeText}>연관</Text>
                     </View>
                   </View>
-                </Pressable>
+                </PressableCard>
               ))}
             </HorizontalScrollWeb>
             <DataCreditLine style={styles.nearbyCredit} />
@@ -602,9 +603,9 @@ export default function AttractionDetailScreen() {
             <Text style={styles.nearbySectionDesc}>걸어서 갈 만한 2km 이내</Text>
             <HorizontalScrollWeb contentContainerStyle={styles.nearbyRow}>
               {nearby.map((n) => (
-                <Pressable
+                <PressableCard
                   key={n.content_id}
-                  style={({ pressed }) => [styles.nearbyCard, pressed && styles.pressedFeedback]}
+                  style={styles.nearbyCard}
                   onPress={() =>
                     router.push({
                       pathname: "/attraction-detail",
@@ -629,7 +630,7 @@ export default function AttractionDetailScreen() {
                   <Text style={styles.nearbyMeta}>
                     {n.category} · {n.distance_km}km
                   </Text>
-                </Pressable>
+                </PressableCard>
               ))}
             </HorizontalScrollWeb>
             <DataCreditLine style={styles.nearbyCredit} />
